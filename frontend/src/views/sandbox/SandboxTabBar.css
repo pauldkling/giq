@@ -1,0 +1,24 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.sbx-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-6); }
+.sbx-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; padding: 6px 12px; border-radius: var(--radius-md);
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--color-divider);
+}
+.sbx-tab:hover:not(:disabled) { background: var(--hover-tint); color: var(--color-text); }
+.sbx-tab:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.sbx-tab-active, .sbx-tab-active:hover:not(:disabled) {
+  color: var(--accent-ink); border-color: var(--color-accent); background: var(--accent-tint);
+}
+.sbx-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 520px) {
+  /* Eight tabs do not fit a phone's width twice over; one scrolling strip beats four rows. */
+  .sbx-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 3px; scrollbar-width: thin; }
+  .sbx-tab { flex: none; }
+}

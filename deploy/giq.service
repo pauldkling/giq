@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# giq as a system service on a dedicated GPU host. deploy/install-debian.sh
+# installs this as /etc/systemd/system/giq.service, rewriting /projects/giq
+# (GIQ_HOME) and /opt/giq (the checkout) when you chose other locations.
+# Local changes belong in a drop-in (`systemctl edit giq`), not in this file,
+# so an update can replace it. See docs/deployment.md.
+
+[Unit]
+Description=giq - GPU Inference Queue
+Documentation=https://github.com/vik-works/giq/blob/main/docs/deployment.md
+Wants=network-online.target
+# The persistence daemon keeps the driver initialised and creates the device
+# nodes at boot; ordering after it (when installed) means the first CUDA
+# context giq opens does not race the driver coming up.
+After=network-online.target nvidia-persistenced.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=giq
+Group=giq
+# /dev/dri render nodes belong to these groups; /dev/nvidia* is world
+# read-write under the NVIDIA driver's default device-file mode.
+SupplementaryGroups=video render
+
+# One data root; every directory giq uses resolves under it (docs/deployment.md
+# has the table). Models are local files: nothing may reach for the Hub while
+# serving, and the OCR/depth/multiview children refuse it on their own too.
+Environment=GIQ_HOME=/projects/giq
+Environment=GIQ_HOST=127.0.0.1 GIQ_PORT=8084
+Environment=PYTHONUNBUFFERED=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+# The token and any overrides (GIQ_HOST, GIQ_PORT, GIQ_GPU_DEVICE, …). Mode
+# 0640 root:giq: the service reads it, nobody else can. Values here override
+# the Environment= lines above; the leading "-" makes the file optional.
+EnvironmentFile=-/etc/giq/giq.env
+
+WorkingDirectory=/opt/giq
+# Host and port come from GIQ_HOST / GIQ_PORT, so the environment file can
+# change them without a drop-in.
+ExecStart=/opt/giq/.venv/bin/python -m giq.main
+Restart=on-failure
+RestartSec=5
+
+# Stopping: giq gives open streams 30 s to finish, then unloads every model —
+# each engine gets SIGTERM and up to 10 s (another 10 s after SIGKILL) to
+# release its VRAM. `mixed` sends SIGTERM to giq alone so it can take its own
+# engines down in order, and SIGKILL to anything still in the cgroup at the
+# end, so a wedged llama-server can never outlive the unit and hold VRAM.
+KillMode=mixed
+TimeoutStopSec=90
+# Host RAM. sd.cpp stages weights through RAM (--offload-to-cpu), OCR keeps
+# documents in memory, and a model load briefly holds a copy of its weights:
+# a runaway load or a kernel JIT gone wrong must hit giq, not sshd and the
+# rest of the host. MemoryHigh throttles and reclaims first; MemoryMax is the
+# OOM line, inside this unit only. Percentages are of physical RAM; tune to
+# the machine (docs/deployment.md, Troubleshooting).
+MemoryHigh=80%
+MemoryMax=90%
+LimitNOFILE=65536
+
+# --- hardening ----------------------------------------------------------------
+NoNewPrivileges=yes
+# The whole filesystem is read-only except what giq writes: its state (stats
+# DB, in-flight log), caches (HF, torch, Triton, CUDA JIT) and the instance
+# files the dashboard edits. Models and engines stay read-only to the service;
+# `giq init`, model downloads and engine builds run outside the unit as the
+# operator. Deleting weights from the dashboard is refused for that reason.
+ProtectSystem=strict
+ReadWritePaths=/projects/giq/state /projects/giq/cache /projects/giq/instances
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+# AF_NETLINK: interface and address enumeration (psutil, getifaddrs).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Deliberately absent:
+# - PrivateDevices=yes would hide /dev/nvidia*, /dev/nvidia-uvm and
+#   /dev/dri: no GPU at all.
+# - MemoryDenyWriteExecute=yes breaks CUDA, torch and Triton, which all
+#   generate and execute code at runtime (PTX JIT, compiled kernels).
+# - ProtectKernelModules=yes (above) together with NoNewPrivileges means
+#   the setuid nvidia-modprobe cannot load nvidia-uvm on first use: load it
+#   at boot instead (docs/deployment.md, Prerequisites).
+
+# Egress lockdown. giq serves from local files and needs no outbound
+# connection; clients reach it on localhost (a reverse proxy) or the LAN.
+# Uncomment to make "no model or library phones home" a property of the unit
+# rather than of every library's settings. The filter applies to packets in
+# both directions, so IPAddressAllow must list every network clients connect
+# from (localhost alone suffices behind a local reverse proxy).
+#IPAddressDeny=any
+#IPAddressAllow=localhost 192.168.1.0/24
+
+[Install]
+WantedBy=multi-user.target

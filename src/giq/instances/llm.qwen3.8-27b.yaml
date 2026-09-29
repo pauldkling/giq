@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Qwen3.8-27B. Its GGUF declares arch `qwen35` — the same as 3.6 — so it
+# needs no newer engine than 3.6 does.
+#
+# It ships a multi-token-prediction head (the `blk.64.nextn.*` tensors) that
+# `--spec-type draft-mtp` can draft with, but this instance runs no
+# speculative decoding: it carries the vision projector, and this build has
+# not been measured under draft-mtp. A text-only `-fast` instance over the
+# same GGUF is how that speedup would be served (see the speculative-decoding
+# notes in workers/llm.py); it goes in with its own measurement.
+name: qwen3.8-27b
+worker: llm
+engine: llama.cpp
+detail: "chat + vision · 128k ctx"
+weights:
+  path: unsloth-Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K.gguf
+  format: gguf
+capabilities: [chat, vision]
+params:
+  # 128k, not the native 256k. qwen35 is an SSM hybrid, not a dense
+  # transformer: 65 layers with full_attention_interval=4, so only 16 of them
+  # hold a KV cache; the other 49 are recurrent and cost a fixed ~150 MiB
+  # whatever the context. KV is therefore 16 x 4 KV heads x 256 head-dim x 2
+  # = 34 KiB/token at q8_0. llama-fit-params, q8_0 K and V (MiB):
+  #
+  #   ctx       KV   compute
+  #   131072   4501     720
+  #   196608   6677    1040
+  #   262144   8853    1360
+  #
+  # 4.25 GiB of KV at 128k and 8.5 at 256k; the latter does not fit alongside
+  # 20.5 GiB of weights on a 31.8 GiB card.
+  ctx_size: 131072
+  # The K/V benchmark in workers/llm.py is this model's: symmetric q8_0 keeps
+  # the fused attention kernel.
+  cache_type_k: q8_0
+  cache_type_v: q8_0
+  reasoning: "on"
+  mmproj: unsloth-Qwen3.8-27B-GGUF/mmproj-F16.gguf
+# Qwen's sampling guidance for thinking mode, plus DRY against verbatim loops
+# (why DRY rather than a token penalty is in the request-defaults notes in
+# workers/llm.py). Defaults, not overrides: the caller's body wins.
+# `temperature` is absent on purpose — openai_compat always sends it (0.7),
+# so an entry here would never apply.
+request_defaults:
+  dry_multiplier: 0.8
+  dry_base: 1.75
+  # 2 (the llama.cpp default) penalises any repeated pair, which is common in
+  # correct prose. 4 is past where ordinary phrases land.
+  dry_allowed_length: 4
+  # llama.cpp's default of 64 is shorter than one looping fragment, and -1
+  # silently disables DRY; it has to be an explicit number.
+  dry_penalty_last_n: 4096
+  # Qwen's published guidance is top_k 20, min_p 0, top_p 0.95, with an
+  # explicit warning that low-diversity sampling produces endless repetition.
+  # giq sends top_p already; these two replace llama.cpp's 40 and 0.05.
+  top_k: 20
+  min_p: 0.0
+  # The backstop, and the only one of these that reaches the non-streaming
+  # paths — `complete` and `chat_completion` await a finished response, so no
+  # in-flight detector can help them. A deadline rather than a truncation:
+  # when it expires llama.cpp injects the end-of-thinking tag and the model
+  # writes its answer from the thinking it has already done. Generous on
+  # purpose, because the streaming path has the loop guard and this only has
+  # to catch what the guard cannot see. Measured reference: a runaway without
+  # a budget spent all 32,768 tokens on thought and returned an empty answer;
+  # 24,576 leaves room to write one.
+  #
+  # Armed only when the chat template declares thinking tags
+  # (`server-common.cpp:1360`), so it is inert on non-thinking models rather
+  # than wrong. Never 0 — that means "skip thinking entirely".
+  reasoning_budget_tokens: 24576
+vram:
+  #   UD-Q6_K  20.47 GiB weights
+  # + q8_0 KV  4.25 GiB at 128k (65 blocks, full_attention_interval 4 -> 16
+  #            full-attention layers, 4 kv heads x 256 head dim = 34 KiB/tok)
+  # + mmproj   0.86 GiB
+  # + buffers  ~1 GiB
+  # Predicted 26.6, measured 26.01 GiB live (one small image, short prompt).
+  # Declared half a gig above that: a gate figure is an upper bound, and a
+  # large image grows the compute buffer.
+  gb: 26.5
+  measured: true
+max_batch: 32

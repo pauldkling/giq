@@ -1,0 +1,82 @@
+{
+  "title": "Usage",
+  "period": {
+    "label": "Period",
+    "day": "Today",
+    "week": "7 days",
+    "month": "30 days",
+    "all": "All time"
+  },
+  "gpuFilter": {
+    "label": "GPU",
+    "all": "All cards",
+    "current": "{{name}} · current",
+    "past": "{{name}} · {{from}} – {{to}}"
+  },
+  "kpi": {
+    "calls": "Calls",
+    "tokensIn": "Tokens · prompt",
+    "tokensOut": "Tokens · generated",
+    "failed": "Failed",
+    "failedShare": "{{pct}} of calls",
+    "tokensExact_one": "{{n}} token",
+    "tokensExact_other": "{{n}} tokens"
+  },
+  "chart": {
+    "kicker": "Tokens over time",
+    "aria": "Tokens per bucket, stacked by model",
+    "empty": "No token usage in this window",
+    "hint": "Some calls in this window predate token accounting — they count as calls but contribute no tokens.",
+    "bucketNote": {
+      "day": "per hour",
+      "week": "per day",
+      "month": "per day",
+      "all": "per month"
+    },
+    "segment": "{{total}} ({{in}} in · {{out}} out · {{calls}})"
+  },
+  "calls_one": "{{n}} call",
+  "calls_other": "{{n}} calls",
+  "eras": {
+    "kicker": "Cards this machine has had",
+    "meta_one": "{{count}} card",
+    "meta_other": "{{count}} cards",
+    "card": "Card",
+    "vram": "VRAM",
+    "from": "From",
+    "to": "To",
+    "jobs": "Jobs",
+    "failed": "Failed",
+    "tokens": "Tokens",
+    "avgRun": "Avg. run",
+    "current": "current",
+    "now": "now",
+    "empty": "No cards recorded yet"
+  },
+  "models": {
+    "kicker": "Per model",
+    "meta_one": "{{count}} model",
+    "meta_other": "{{count}} models",
+    "model": "Model",
+    "calls": "Calls",
+    "failed": "Failed",
+    "tasks": "Tasks",
+    "tokensIn": "Tokens in",
+    "tokensOut": "Tokens out",
+    "total": "Total",
+    "lastUsed": "Last used",
+    "empty": "No calls in this window"
+  },
+  "wall": {
+    "kicker": "Recent calls",
+    "meta": "last {{count}}",
+    "when": "When",
+    "model": "Model",
+    "status": "Status",
+    "queue": "Queue",
+    "run": "Run",
+    "tokIn": "Tok. in",
+    "tokOut": "Tok. out",
+    "empty": "No calls recorded yet"
+  }
+}

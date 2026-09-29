@@ -1,0 +1,17 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.view-skeleton { display: flex; flex-direction: column; gap: var(--space-4); }
+.view-skeleton-title,
+.view-skeleton-row > div,
+.view-skeleton-block {
+  border-radius: var(--radius-md); background: var(--color-surface);
+  animation: giq-pulse 1.6s ease-in-out infinite;
+}
+.view-skeleton-title { width: 200px; height: 24px; margin-bottom: var(--space-2); }
+.view-skeleton-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: var(--space-4); }
+.view-skeleton-row > div { height: 88px; }
+.view-skeleton-block { height: 240px; }

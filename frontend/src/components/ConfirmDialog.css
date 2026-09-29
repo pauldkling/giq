@@ -1,0 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.giq-dialog-backdrop { z-index: 900; }
+.giq-dialog { max-height: calc(100vh - 32px); overflow: auto; }
+.giq-dialog .dialog-body { white-space: pre-line; overflow-wrap: anywhere; }
+.giq-dialog .dialog-body ul { margin: var(--space-2) 0 0; padding-left: 1.2em; }
+.giq-btn-danger { color: var(--critical); border-color: var(--critical); }
+.giq-btn-danger:hover { background: color-mix(in srgb, var(--critical) 12%, transparent); }

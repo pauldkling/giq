@@ -1,0 +1,385 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Pydantic models for giq (GPU Inference Queue)."""
+
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class WorkerType(StrEnum):
+    """Types of GPU workers."""
+
+    llm = "llm"
+    text2image = "text2image"
+    image_edit = "image_edit"
+    tts = "tts"
+    stt = "stt"
+    # Resident audio stack: faster-whisper ASR +
+    # pyannote diarization, and ECAPA speaker embeddings, each in its own
+    # child process under giq's own venv.
+    audio = "audio"
+    embed = "embed"
+    # Document parsing (baidu/Unlimited-OCR in a child process): PDF or page
+    # images in, layout-tagged text and HTML out. See giq.ocrdoc.
+    ocr = "ocr"
+    # Monocular depth (Depth Anything V2 in a child process): one RGB image
+    # in, a 16-bit depth map at the input resolution out.
+    depth = "depth"
+    # Multi-view geometry (Depth Anything 3 in a child process on its own
+    # interpreter): N images of one scene in, per-view depth with camera
+    # poses and intrinsics out, optionally fused into a point cloud.
+    multiview = "multiview"
+
+
+class JobStatus(StrEnum):
+    """Job execution status."""
+
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
+# --- LLM Tasks ---
+
+
+class LLMTask(BaseModel):
+    """LLM completion task."""
+
+    id: str
+    system: str | None = None
+    user: str
+    params: dict[str, Any] | None = None
+
+
+# Backward compatibility alias
+Task = LLMTask
+
+
+# --- Image Tasks ---
+
+
+class Text2ImageTask(BaseModel):
+    """Text-to-image generation task."""
+
+    id: str
+    prompt: str
+    negative_prompt: str | None = None
+    seed: int | None = None  # Optional seed for reproducibility
+
+
+class ImageEditTask(BaseModel):
+    """Image edit/style transfer task."""
+
+    id: str
+    reference_image_b64: str  # Base64 encoded reference image
+    instruction: str
+    negative_prompt: str | None = None
+
+
+# --- Job Request (unified) ---
+
+
+class JobRequest(BaseModel):
+    """Request to submit a new job.
+
+    Task format depends on worker type:
+    - llm: tasks are LLMTask dicts
+    - text2image: tasks are Text2ImageTask dicts
+    - image_edit: tasks are ImageEditTask dicts
+    - ocr: {id, pdf_b64 | images_b64[], dpi?, pages?, raw?, strip?, merge?}
+    - depth: {id, image_b64, visualize?}
+    - multiview: {id, images_b64[], extrinsics?, intrinsics?, process_res?, use_ray_pose?,
+      ref_view_strategy?, glb?, conf_percentile?, max_points?}
+    """
+
+    worker: WorkerType
+    model: str
+    model_path: str | None = None  # Override default model path
+    params: dict[str, Any] | None = None  # Worker-level params
+    tasks: list[dict[str, Any]] = Field(
+        default_factory=list
+    )  # Task dicts (validated per worker type)
+    chat_request: dict[str, Any] | None = (
+        None  # Raw OpenAI chat completion body (bypasses run_batch)
+    )
+
+
+class JobResponse(BaseModel):
+    """Response after submitting a job."""
+
+    job_id: str
+    position: int
+
+
+# --- Job Results ---
+
+
+class LLMResult(BaseModel):
+    """Result of LLM task."""
+
+    id: str
+    output: str
+    tokens: int | None = None  # total (kept for old clients; = in + out)
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    error: str | None = None
+
+
+class ImageResult(BaseModel):
+    """Result of image generation task."""
+
+    id: str
+    image_b64: str | None = None  # Base64 encoded PNG
+    seed: int | None = None
+    error: str | None = None
+
+
+class OCRResult(BaseModel):
+    """Result of an OCR task: the document, not the page images."""
+
+    id: str
+    html: str = ""  # fragment: furniture stripped, page breaks merged
+    pages: int = 0
+    blocks: list[dict[str, Any]] = Field(default_factory=list)  # label, bbox, page, content
+    raw: str | None = None  # the model's tagged text, only when the task asked
+    tokens_in: int | None = None  # prompt tokens: ~257 per page plus the prompt
+    tokens_out: int | None = None
+    truncated: bool = False  # a pass hit the context ceiling; output may be short
+    error: str | None = None
+
+
+class DepthResult(BaseModel):
+    """Result of a depth task: one map per image, at the image's resolution.
+
+    ``depth_b64`` is a 16-bit grayscale PNG. Its 0..65535 is the prediction's
+    ``depth_min``..``depth_max`` mapped linearly, so a consumer that wants the
+    model's own values recovers them from the three fields. What those values
+    mean is the model's affair: Depth Anything V2 predicts *relative inverse*
+    depth (larger is nearer, no unit), so ``metric`` is False and the map is
+    a disparity map. A metric checkpoint would set it True and mean metres.
+    """
+
+    id: str
+    depth_b64: str | None = None
+    width: int = 0
+    height: int = 0
+    depth_min: float | None = None
+    depth_max: float | None = None
+    metric: bool = False
+    # 8-bit colour-mapped PNG (near red, far blue), only when the task asked.
+    visualization_b64: str | None = None
+    error: str | None = None
+
+
+class MultiviewView(BaseModel):
+    """One input view's share of a multiview result.
+
+    The depth map is at the model's working resolution (``width`` x
+    ``height``, the input scaled to ``process_res`` on its long side and
+    rounded to a multiple of 14), not the input's; ``intrinsics`` is for that
+    size. ``depth_b64`` and ``conf_b64`` are 16-bit PNGs spanning their
+    ``*_min``..``*_max`` linearly, as with ``DepthResult``. ``extrinsics`` is
+    the 3x4 world-to-camera matrix in OpenCV convention (COLMAP's), in the
+    model's own scale unless the task supplied poses.
+    """
+
+    index: int
+    width: int = 0
+    height: int = 0
+    depth_b64: str | None = None
+    depth_min: float | None = None
+    depth_max: float | None = None
+    conf_b64: str | None = None
+    conf_min: float | None = None
+    conf_max: float | None = None
+    extrinsics: list[list[float]] = Field(default_factory=list)  # 3x4, w2c
+    intrinsics: list[list[float]] = Field(default_factory=list)  # 3x3
+
+
+class MultiviewResult(BaseModel):
+    """Result of a multiview task: consistent depth and poses for N views.
+
+    Depth here is real depth along the ray (not inverse), so views unproject
+    directly with their intrinsics and extrinsics into one world frame. The
+    scale is arbitrary but shared across views (``metric`` is false) unless
+    the task passed extrinsics, in which case it is theirs. ``glb_b64`` is
+    the model's own fused, confidence-filtered point cloud with camera
+    wireframes, only when the task asked.
+    """
+
+    id: str
+    views: list[MultiviewView] = Field(default_factory=list)
+    metric: bool = False
+    process_res: int = 0
+    glb_b64: str | None = None
+    error: str | None = None
+
+
+# Backward compatibility - JobResult was the old name for LLMResult
+JobResult = LLMResult
+
+
+class JobStatusResponse(BaseModel):
+    """Full job status with results."""
+
+    job_id: str
+    status: JobStatus
+    worker: WorkerType
+    model: str
+    results: list[dict[str, Any]] | None = None  # Polymorphic results
+    duration_ms: int | None = None
+
+
+class ServiceState(StrEnum):
+    """Overall service state."""
+
+    idle = "idle"  # No work, no worker loaded
+    ready = "ready"  # Worker loaded, waiting for work
+    running = "running"  # Actively processing a job
+    blocked = "blocked"  # Jobs queued but can't run (VRAM)
+    paused = "paused"  # Serving suspended by an operator; GPU handed back
+    error = "error"  # Something went wrong
+
+
+class ServiceStatus(BaseModel):
+    """Current service status."""
+
+    # Overall state
+    state: ServiceState
+    state_message: str | None = None  # Human-readable explanation
+
+    # Active worker info. The scalars report one loaded worker for
+    # back-compat; `active` lists every card's slot with its binding.
+    active_worker: WorkerType | None = None
+    active_model: str | None = None
+    active: list[dict[str, Any]] = []
+
+    # VRAM status. Describes ONE card — the device giq loads models on, named
+    # in `gpu` below. On a multi-card rig the machine total is not this, and
+    # reading it as such is how the two numbers drifted apart in the first
+    # place; /gpus has the per-card breakdown.
+    gpu: dict[str, Any] | None = None
+    vram_used_gb: float
+    vram_total_gb: float
+    vram_free_gb: float
+    # How the used figure splits: models giq is holding vs everything else on
+    # the card (desktop, other CUDA apps). None when it can't be measured.
+    vram_giq_gb: float | None = None
+    vram_other_gb: float | None = None
+    vram_ok: bool  # True if enough VRAM for typical workload
+    vram_message: str | None = None  # Explanation if not OK
+
+    # Queue info
+    queue_depth: int
+    jobs_pending: list[str]
+    jobs_running: list[str] = []
+
+    # Pause (operator handed the GPU back; submissions get 503)
+    # How reachable giq is and whether a token guards it — surfaced so the
+    # dashboard can say so on screen, not just in the boot log nobody reads.
+    access: dict | None = None
+    paused: bool = False
+    paused_since: str | None = None
+    pause_reason: str | None = None
+
+    # Which build is answering and since when, so the dashboard can say so
+    # without a second endpoint.
+    version: str = ""
+    uptime_s: float = 0.0
+
+
+class PauseRequest(BaseModel):
+    """Body for POST /control/pause."""
+
+    force: bool = False  # skip the drain wait and unload now
+    reason: str | None = None
+
+
+class PauseResponse(BaseModel):
+    """Result of a pause/resume control call."""
+
+    paused: bool
+    since: str | None = None
+    reason: str | None = None
+    forced: bool = False
+    drained: bool = True  # False if in-flight work outlasted the drain window
+    warnings: list[str] = []
+    vram_free_gb: float
+    vram_total_gb: float
+
+
+class ModelPolicyRequest(BaseModel):
+    """Body for POST /control/models/{worker}/{model}."""
+
+    policy: str  # pinned | auto | off
+    reason: str | None = None
+    # Pin anyway when the pinned set would not fit the card. The scheduler
+    # cannot honour an over-committed set, so this is a deliberate override.
+    force: bool = False
+
+
+class ModelDeviceRequest(BaseModel):
+    """Body for POST /control/models/{worker}/{model}/device."""
+
+    # GPU index ("1") or UUID ("GPU-xxxx…"); null unbinds, sending the model
+    # back to giq's default card. Stored as the UUID either way.
+    device: str | None = None
+    # Bind anyway when the pinned set on the target card would not fit.
+    force: bool = False
+
+
+class ModelPolicyState(BaseModel):
+    """One model's residency policy and device binding."""
+
+    worker: str
+    model: str
+    policy: str
+    source: str  # override | default
+    reason: str | None = None
+    updated_at: float | None = None
+    vram_gb: float
+    ready: bool = False
+    # Card binding. `device` is null when unbound, in which case the model
+    # runs on `effective_device` — giq's selected card — anyway.
+    device: str | None = None
+    device_source: str = "default"  # override | config | default
+    effective_device: str | None = None
+    device_index: int | None = None
+    device_name: str | None = None
+
+
+class ModelPolicyResponse(BaseModel):
+    """Result of a policy change, with the pinned-set budget after it."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    state: ModelPolicyState
+    pinned: list[str]
+    # Budget for ONE card — the one this model lands on. A machine-wide total
+    # would be meaningless: two cards' pinned sets do not compete.
+    pinned_vram_gb: float
+    vram_total_gb: float
+    # Pinned models grouped by the card they load on, keyed by GPU UUID.
+    pinned_by_device: dict[str, list[str]] = {}
+    warnings: list[str] = []
+
+
+class WorkerCapability(BaseModel):
+    """Capabilities of a worker type."""
+
+    backend: str
+    models: list[str]
+    max_batch: int | None = None
+    voices: list[str] | None = None  # TTS only
+
+
+class Capabilities(BaseModel):
+    """Full service capabilities."""
+
+    workers: dict[WorkerType, WorkerCapability]
+    constraints: dict[str, Any]

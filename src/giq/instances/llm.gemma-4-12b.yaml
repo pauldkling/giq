@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The resident chat model: first in the resident set, small enough to stay
+# loaded beside the audio stack.
+name: gemma-4-12b
+worker: llm
+engine: llama.cpp
+detail: "chat · 128k ctx · 4 slots"
+weights:
+  path: unsloth-gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+  format: gguf
+capabilities: [chat]
+params:
+  # 128k q8_0 KV is cheap on this arch: 5:1 sliding-window attention caps
+  # 40/48 layers at the 1024-token window; only the 8 global layers grow
+  # (~68 MiB per 8k tokens → ~1.1 GB at 131k). Measured server total ~9.2 GB.
+  ctx_size: 131072
+  # q8_0 for attention fidelity on recently emitted tokens, the same rule as
+  # the 26B; K and V stay one type (see DEFAULT_CACHE_TYPE_K in
+  # workers/llm.py).
+  cache_type_k: q8_0
+  cache_type_v: q8_0
+  # No --reasoning flag: the chat template decides. Thinking is on by
+  # default, and callers opt out per request via chat_template_kwargs.
+  reasoning: template
+  # Four slots sharing the 128k context = 32k per slot. (An 8k total would
+  # give 2k per slot and silently reject prompts over 2k.) More than one
+  # slot turns on --cont-batching.
+  parallel: 4
+  # The id served on /v1/models; clients request "gemma-4-12b" by name.
+  alias: gemma-4-12b
+residency:
+  priority: 0
+vram:
+  # ~9.2 GB server total at 128k ctx with q8_0 KV.
+  gb: 9.5
+  measured: true
+max_batch: 32

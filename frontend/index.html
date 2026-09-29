@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+
+SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>giq</title>
+    <script>
+      /* Inline and before the stylesheet on purpose: applied after first
+         paint, a stored theme shows a flash of the other one on every load,
+         and a stored language would flip <html lang> under a screen reader. */
+      try {
+        var t = localStorage.getItem("giq-theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+        var l = localStorage.getItem("giq-lang") || (navigator.language || "en").slice(0, 2);
+        document.documentElement.setAttribute("lang", l === "de" ? "de" : "en");
+      } catch (e) { /* storage disabled: follow the OS theme, English */ }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

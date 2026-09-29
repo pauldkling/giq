@@ -1,0 +1,181 @@
+{
+  "app": {
+    "name": "giq",
+    "subtitle": "gpu inference queue",
+    "skipToContent": "Skip to content",
+    "notBuilt": "UI not built"
+  },
+  "nav": {
+    "label": "Main navigation",
+    "overview": "Control surface",
+    "models": "Models",
+    "usage": "Usage",
+    "sandbox": "Sandbox",
+    "openMenu": "Open navigation",
+    "closeMenu": "Close navigation"
+  },
+  "live": {
+    "polling": "live · {{seconds}} s poll",
+    "paused": "serving paused",
+    "unreachable": "giq unreachable",
+    "connecting": "connecting…"
+  },
+  "state": {
+    "idle": "idle",
+    "ready": "ready",
+    "running": "running",
+    "blocked": "blocked",
+    "paused": "paused",
+    "error": "error",
+    "unreachable": "unreachable"
+  },
+  "stateMessage": {
+    "paused": "serving paused — models unloaded, GPU free; requests get 503",
+    "running_one": "{{count}} job running",
+    "running_other": "{{count}} jobs running",
+    "loaded": "{{worker}} · {{model}} loaded, waiting",
+    "queued_one": "{{count}} job queued, starting shortly",
+    "queued_other": "{{count}} jobs queued, starting shortly",
+    "blocked_one": "{{count}} job waiting for VRAM ({{free}} free)",
+    "blocked_other": "{{count}} jobs waiting for VRAM ({{free}} free)",
+    "idle": "no jobs, no model loaded"
+  },
+  "theme": {
+    "label": "Theme",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "current": "Theme: {{theme}} — click to switch"
+  },
+  "language": {
+    "label": "Language"
+  },
+  "access": {
+    "exposed": "open to your network",
+    "token": "network · token",
+    "exposedTitle": "giq is bound to {{host}} with no token: any device on this network can submit jobs, read past results and delete model weights. Bind --host 127.0.0.1, or set GIQ_TOKEN, to close it.",
+    "tokenTitle": "giq is bound to {{host}} and requires a token."
+  },
+  "footer": {
+    "version": "giq {{version}}",
+    "uptime": "up {{uptime}}"
+  },
+  "pause": {
+    "pause": "Pause serving",
+    "resume": "Resume serving",
+    "resuming": "Resuming…",
+    "unloading": "Unloading…",
+    "draining": "Draining…",
+    "pauseTitle": "Unload every model and hand the GPU back",
+    "resumeTitle": "Resume serving — residents reload within a few seconds",
+    "menuLabel": "How to pause",
+    "graceful": "Pause when idle",
+    "gracefulHelp": "Waits up to 60 s for in-flight jobs and live chat sessions to finish, then unloads.",
+    "force": "Force pause now",
+    "forceHelp": "Tears workers down immediately — anything mid-generation fails.",
+    "hint": "Either way: every model unloads, the card goes idle, and API calls get 503 until you resume. Nothing queues up meanwhile.",
+    "forceConfirmTitle": "Force pause?",
+    "forceConfirmBody": "Force pause kills the workers immediately — anything mid-generation fails.",
+    "forceConfirm": "Force pause",
+    "warningsTitle": "Paused, with warnings",
+    "pauseFailed": "Pause failed",
+    "resumeFailed": "Resume failed",
+    "bannerTitle": "Serving paused",
+    "bannerSince": "since {{time}}",
+    "bannerDraining": "finishing in-flight work, then unloading",
+    "bannerFreed": "{{free}} of {{total}} free · all models unloaded",
+    "banner503": "requests get 503"
+  },
+  "worker": {
+    "llm": "LLM",
+    "text2image": "Text to image",
+    "image_edit": "Image edit",
+    "audio": "Speech recognition",
+    "stt": "Speech to text",
+    "tts": "Text to speech",
+    "embed": "Voiceprint",
+    "ocr": "Document OCR",
+    "depth": "Depth",
+    "multiview": "Multiview"
+  },
+  "policy": {
+    "pinned": "keep warm",
+    "auto": "on demand",
+    "off": "off",
+    "pinnedHelp": "Stay loaded; reloads after eviction and on boot.",
+    "autoHelp": "Load when a job arrives; the scheduler may evict it.",
+    "offHelp": "Refuse jobs and block every load path until changed."
+  },
+  "fit": {
+    "loaded": "loaded",
+    "fits_now": "fits",
+    "fits_after_eviction": "fits after eviction",
+    "wont_fit_now": "won't fit now",
+    "never": "never fits"
+  },
+  "gpu": {
+    "label": "GPU {{index}}",
+    "card": "card",
+    "cards_one": "{{count}} GPU",
+    "cards_other": "{{count}} GPUs",
+    "default": "default card",
+    "vram": "VRAM",
+    "load": "Load",
+    "power": "Power",
+    "temp": "Temp",
+    "fan": "Fan",
+    "giq": "giq",
+    "other": "other",
+    "giqTitle": "held by giq's models",
+    "otherTitle": "desktop, other CUDA apps — giq cannot free this"
+  },
+  "actions": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "close": "Close",
+    "retry": "Retry",
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "more": "More actions",
+    "dismiss": "Dismiss"
+  },
+  "range": {
+    "label": "Time range",
+    "h24": "24 h",
+    "d7": "7 d",
+    "d30": "30 d",
+    "d90": "90 d"
+  },
+  "empty": {
+    "noData": "No data yet",
+    "loading": "Loading…",
+    "collecting": "collecting samples…",
+    "noJobs": "no jobs in this window",
+    "failed": "Couldn't load: {{error}}"
+  },
+  "chart": {
+    "now": "now",
+    "legend": "Legend",
+    "failed_one": "{{count}} failed",
+    "failed_other": "{{count}} failed"
+  },
+  "file": {
+    "choose": "Choose file",
+    "none": "No file chosen — or drop one here"
+  },
+  "job": {
+    "completed": "completed",
+    "failed": "failed"
+  },
+  "notify": {
+    "errorTitle": "Something went wrong"
+  },
+  "units": {
+    "tokPerSec": "tok/s",
+    "jobs_one": "{{count}} job",
+    "jobs_other": "{{count}} jobs",
+    "tokens_one": "{{count}} token",
+    "tokens_other": "{{count}} tokens"
+  }
+}

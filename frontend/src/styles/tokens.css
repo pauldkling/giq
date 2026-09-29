@@ -1,0 +1,181 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* giq's semantic layer over Nocturne. Components take colours from here (or
+   from Nocturne's own tokens), never as literals, so a theme is one block of
+   variables and nothing else.
+
+   Themes: Nocturne is dark and dark is the reference. The light set is built
+   from the same ramps (ground from neutral-100/200, text neutral-900, accent
+   stepped to 600). Three states, each with its own selector:
+     - no [data-theme]     → follow the OS (the media query)
+     - [data-theme=light]  → light even on a dark OS
+     - [data-theme=dark]   → dark even on a light OS (Nocturne's defaults)
+   A media query and an attribute selector cannot share one declaration
+   block, so the light set is spelled twice. Keep the two in sync. */
+
+:root {
+  color-scheme: dark;
+
+  /* Status ramps. Nocturne is a mono scheme with no status hues, so these
+     are generated in OKLCH on its shared lightness scale (the same step of
+     any ramp has the same visual weight as the neutral and accent ramps). */
+  --color-good-300: #b4e2bc; --color-good-400: #75ce8a; --color-good-600: #1b9246;
+  --color-good-700: #197037; --color-good-800: #1d4e2b; --color-good-900: #1a321f;
+  --color-warning-300: #ecd0a0; --color-warning-400: #e2ad4a; --color-warning-600: #9e710e;
+  --color-warning-700: #7a5604; --color-warning-800: #583d05; --color-warning-900: #37290f;
+  --color-serious-300: #fbc7ab; --color-serious-400: #f99d68; --color-serious-600: #bd5909;
+  --color-serious-700: #91450d; --color-serious-800: #643417; --color-serious-900: #3d2416;
+  --color-critical-300: #ffc3bd; --color-critical-400: #fc978f; --color-critical-600: #c34f4b;
+  --color-critical-700: #963d3a; --color-critical-800: #67302c; --color-critical-900: #3f2220;
+
+  /* Ink */
+  --text-strong: var(--color-neutral-200);
+  --text-muted: var(--color-neutral-400);
+  --text-subtle: var(--color-neutral-500);
+  --accent-ink: var(--color-accent-300); /* paragraph-size text in the accent */
+  --surface-raised: color-mix(in srgb, var(--color-surface) 70%, var(--color-neutral-800));
+  --hover-tint: color-mix(in srgb, var(--color-text) 7%, transparent);
+  --accent-tint: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --track: var(--color-neutral-800);
+
+  /* Status: a mark colour, a tint for fills behind text, and the ink that
+     reads on that tint. Status colours are reserved for state and always
+     travel with an icon or a label, never as colour alone. */
+  --good: var(--color-good-400);
+  --good-tint: var(--color-good-900);
+  --good-ink: var(--color-good-300);
+  --warning: var(--color-warning-400);
+  --warning-tint: var(--color-warning-900);
+  --warning-ink: var(--color-warning-300);
+  --serious: var(--color-serious-400);
+  --serious-tint: var(--color-serious-900);
+  --serious-ink: var(--color-serious-300);
+  --critical: var(--color-critical-400);
+  --critical-tint: var(--color-critical-900);
+  --critical-ink: var(--color-critical-300);
+
+  /* Tags (Nocturne's .tag-* read these, see the overrides below) */
+  --tag-accent-bg: var(--color-accent-800);
+  --tag-accent-fg: var(--color-accent-100);
+  --tag-neutral-bg: var(--color-neutral-800);
+  --tag-neutral-fg: var(--color-neutral-100);
+
+  /* Charts. The categorical series is the validated eight-slot palette
+     (fixed order; every adjacent pair clears CVD ΔE 8 and normal-vision
+     ΔE 15, all ≥ 3:1 on the dark surface). Colour follows the entity: a
+     worker keeps its slot whatever else is on screen. */
+  --chart-grid: color-mix(in srgb, var(--color-text) 9%, transparent);
+  --chart-axis: var(--color-neutral-700);
+  --chart-label: var(--color-neutral-500);
+  --chart-seq: var(--color-accent);
+  --chart-seq-2: var(--color-accent-700);
+  --chart-ring: var(--color-surface);
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --series-other: var(--color-neutral-600);
+
+  /* Inter ships bundled (@fontsource-variable/inter registers it as
+     "Inter Variable"); an installed static Inter is the next best thing. */
+  --font-heading: "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-body: "Inter Variable", "Inter", system-ui, sans-serif;
+
+  /* Nocturne is a dense system; the shell's measures live here. */
+  --sidebar-width: 208px;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, monospace;
+}
+
+/* Worker → series slot. Ten workers, eight slots: the two rarest workers
+   (depth, multiview) share the neutral "other" rather than a generated ninth
+   hue that no palette check has passed; their icon and label still name them. */
+:root {
+  --s-llm: var(--series-1);
+  --s-text2image: var(--series-2);
+  --s-audio: var(--series-3);
+  --s-embed: var(--series-4);
+  --s-image_edit: var(--series-5);
+  --s-tts: var(--series-6);
+  --s-stt: var(--series-7);
+  --s-ocr: var(--series-8);
+  --s-depth: var(--series-other);
+  --s-multiview: var(--series-other);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --color-bg: var(--color-neutral-200);
+    --color-surface: var(--color-neutral-100);
+    --color-text: var(--color-neutral-900);
+    --color-accent: var(--color-accent-600);
+    --color-divider: color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+    --shadow-sm: 0 0 0 1px var(--color-neutral-300);
+    --shadow-md: 0 0 0 1px var(--color-neutral-300), 0 6px 18px rgba(41, 43, 49, 0.12);
+    --shadow-lg: 0 0 0 1px var(--color-neutral-400), 0 16px 40px rgba(41, 43, 49, 0.18);
+    --text-strong: var(--color-neutral-900);
+    --text-muted: var(--color-neutral-600);
+    --text-subtle: var(--color-neutral-500);
+    --accent-ink: var(--color-accent-700);
+    --surface-raised: color-mix(in srgb, var(--color-surface) 60%, var(--color-neutral-200));
+    --track: var(--color-neutral-300);
+    --good: var(--color-good-600); --good-tint: color-mix(in srgb, var(--color-good-300) 45%, transparent); --good-ink: var(--color-good-800);
+    --warning: var(--color-warning-600); --warning-tint: color-mix(in srgb, var(--color-warning-300) 45%, transparent); --warning-ink: var(--color-warning-800);
+    --serious: var(--color-serious-600); --serious-tint: color-mix(in srgb, var(--color-serious-300) 45%, transparent); --serious-ink: var(--color-serious-800);
+    --critical: var(--color-critical-600); --critical-tint: color-mix(in srgb, var(--color-critical-300) 45%, transparent); --critical-ink: var(--color-critical-800);
+    --tag-accent-bg: var(--color-accent-200);
+    --tag-accent-fg: var(--color-accent-800);
+    --tag-neutral-bg: color-mix(in srgb, var(--color-neutral-300) 70%, transparent);
+    --tag-neutral-fg: var(--color-neutral-900);
+    --chart-axis: var(--color-neutral-400);
+    --chart-label: var(--color-neutral-600);
+    --chart-seq-2: var(--color-accent-400);
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+    --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+    --series-other: var(--color-neutral-500);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: var(--color-neutral-200);
+  --color-surface: var(--color-neutral-100);
+  --color-text: var(--color-neutral-900);
+  --color-accent: var(--color-accent-600);
+  --color-divider: color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+  --shadow-sm: 0 0 0 1px var(--color-neutral-300);
+  --shadow-md: 0 0 0 1px var(--color-neutral-300), 0 6px 18px rgba(41, 43, 49, 0.12);
+  --shadow-lg: 0 0 0 1px var(--color-neutral-400), 0 16px 40px rgba(41, 43, 49, 0.18);
+  --text-strong: var(--color-neutral-900);
+  --text-muted: var(--color-neutral-600);
+  --text-subtle: var(--color-neutral-500);
+  --accent-ink: var(--color-accent-700);
+  --surface-raised: color-mix(in srgb, var(--color-surface) 60%, var(--color-neutral-200));
+  --track: var(--color-neutral-300);
+  --good: var(--color-good-600); --good-tint: color-mix(in srgb, var(--color-good-300) 45%, transparent); --good-ink: var(--color-good-800);
+  --warning: var(--color-warning-600); --warning-tint: color-mix(in srgb, var(--color-warning-300) 45%, transparent); --warning-ink: var(--color-warning-800);
+  --serious: var(--color-serious-600); --serious-tint: color-mix(in srgb, var(--color-serious-300) 45%, transparent); --serious-ink: var(--color-serious-800);
+  --critical: var(--color-critical-600); --critical-tint: color-mix(in srgb, var(--color-critical-300) 45%, transparent); --critical-ink: var(--color-critical-800);
+  --tag-accent-bg: var(--color-accent-200);
+  --tag-accent-fg: var(--color-accent-800);
+  --tag-neutral-bg: color-mix(in srgb, var(--color-neutral-300) 70%, transparent);
+  --tag-neutral-fg: var(--color-neutral-900);
+  --chart-axis: var(--color-neutral-400);
+  --chart-label: var(--color-neutral-600);
+  --chart-seq-2: var(--color-accent-400);
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+  --series-other: var(--color-neutral-500);
+}
+
+/* Nocturne's tags name ramp steps directly, which only reads on a dark
+   ground; routing them through the tokens above lets the light set restep
+   them. Status tags are giq's addition. */
+.tag-accent { background: var(--tag-accent-bg); color: var(--tag-accent-fg); }
+.tag-neutral { background: var(--tag-neutral-bg); color: var(--tag-neutral-fg); }
+.tag-good { background: var(--good-tint); color: var(--good-ink); }
+.tag-warning { background: var(--warning-tint); color: var(--warning-ink); }
+.tag-serious { background: var(--serious-tint); color: var(--serious-ink); }
+.tag-critical { background: var(--critical-tint); color: var(--critical-ink); }

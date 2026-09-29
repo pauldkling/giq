@@ -1,0 +1,151 @@
+<!--
+SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# giq
+
+**GPU Inference Queue** — one local service that owns your GPUs and serves
+LLM, image, speech, OCR and depth models to every client on the machine
+through a single job queue.
+
+![The control surface: two GPUs with their loaded models, the job queue and the last 24 hours](docs/images/control-surface.png)
+
+## Features
+
+- **One way in.** Every request — the job API, the OpenAI-compatible routes,
+  the OCR/depth/multiview endpoints — goes through one job queue, so clients
+  never race each other for VRAM. Jobs carry batches of tasks.
+- **OpenAI-compatible API.** `/v1/chat/completions` with streaming and tool
+  calls, `/v1/models`, `/v1/audio/transcriptions`, `/v1/audio/speech` and
+  `/v1/audio/embeddings` — point an existing client at it.
+- **Many workers, local runtimes.** LLMs via llama.cpp (vision via
+  `--mmproj`, speculative decoding via `--spec-type`); text-to-image and image
+  edit via stable-diffusion.cpp; speech to text with diarization
+  (faster-whisper + pyannote); text to speech (Kokoro); speaker voiceprints
+  (ECAPA-TDNN); OCR (Unlimited-OCR, GLM-OCR); depth (Depth Anything V2);
+  multiview depth and camera poses (Depth Anything 3).
+- **Residency you choose.** Each model is *keep warm*, *on demand* or *off*,
+  changeable at runtime and persistent. Before a load, a VRAM gate checks the
+  model's declared figure — measured on real hardware, and marked as an
+  estimate where it is not — against the card's free VRAM, and evicts
+  keep-warm models on that card if that is what it takes.
+- **Multiple GPUs.** Bind a model to a card and it is gated against, loads on
+  and evicts only on that card; used VRAM is split into what giq holds and
+  what everything else does.
+- **Records that a job ran, never what it said.** Prompts, images and outputs
+  stay in memory; the stats database has no column one could go in, and a
+  test pushes a canary through every logging path. Every advertised model is
+  served locally — no request is forwarded to a hosted API.
+- **Safe on loopback, explicit off it.** DNS-rebinding and cross-site requests
+  are refused by Host/Origin checks; binding beyond loopback without a token
+  is announced at startup and on the dashboard; an optional shared token
+  guards everything.
+- **Dashboard** at `/dash`: control surface, usage, model catalog and a
+  sandbox (chat, tool calls, vision, image generation and edit, transcription,
+  speech, voiceprints), in English and German, light and dark, with its
+  fonts and icons bundled so it works without internet.
+
+![The model catalog in German, light theme: residency, GPU binding and engine per model](docs/images/models-de.png)
+
+## How it works
+
+A request becomes a job, and the job waits in the queue for its model. If the
+model is already loaded — a keep-warm model, or the on-demand model that ran
+last — it runs at once; keep-warm LLMs take several requests in parallel. If
+not, giq checks the model's card: the declared VRAM figure plus a margin,
+against what is free there now. When it does not fit, giq evicts keep-warm
+models on that card until it does, runs the job, and the residents loop
+brings the evicted models back afterwards. An on-demand model unloads after
+two idle minutes.
+
+Models run in their own processes — `llama-server` or `sd-server` on a
+loopback port, or a Python child for the other workers — started with
+`CUDA_VISIBLE_DEVICES` set to their card, so unloading a model gives its VRAM
+back. (The batch `stt` worker is the exception: it runs inside giq's process,
+and its CUDA context stays until giq restarts.)
+`POST /control/pause` unloads everything and hands the GPUs back until
+`/control/resume`.
+
+## Quick start
+
+Requirements: Linux, an NVIDIA GPU with `nvidia-smi` on PATH, Python 3.11+,
+[uv](https://docs.astral.sh/uv/), Node.js 22.12+ for the dashboard, and for
+LLMs a [llama.cpp](https://github.com/ggml-org/llama.cpp) build
+(`llama-server`). Image models additionally need a
+[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+`sd-server`.
+
+```bash
+git clone <this repository> giq
+cd giq
+make sync        # uv sync, the OCR and multiview interpreters, and the dashboard
+uv run python -m giq.main          # loopback, port 8084
+
+# or with options
+GIQ_MODELS_DIR=/data/models uv run python -m giq.main --host 127.0.0.1 --port 8084
+```
+
+`uv sync` alone installs giq itself; `make ui` builds just the dashboard.
+
+Then open `http://localhost:8084/dash`.
+
+Model weights are not shipped. Put them under `~/models` (or point
+`GIQ_MODELS_DIR` elsewhere); the weight paths in the instance files are
+relative to that directory.
+`/capabilities` and the dashboard show which registered models were found on
+disk. Paths, engines and GPUs are set in `config.yaml` — see
+[docs/configuration.md](docs/configuration.md).
+
+Each model comes with its own licence, and checking it for your use is up to
+you: most registered models are Apache-2.0 or MIT, the Gemma models follow
+the Gemma Terms of Use, Llama 3.2 its community licence, and the pyannote
+diarization pipeline is CC-BY-4.0 and gated on the Hugging Face Hub.
+Non-commercial models are deliberately not registered.
+
+## API in brief
+
+```bash
+# OpenAI-compatible chat (add "stream": true for server-sent events)
+curl http://localhost:8084/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model": "gemma-4-12b", "messages": [{"role": "user", "content": "Hello!"}]}'
+
+# The job API: any worker, a batch of tasks; ?wait=true returns the result
+curl -X POST 'http://localhost:8084/run?wait=true' \
+  -H 'content-type: application/json' \
+  -d '{"worker": "text2image", "model": "flux_klein",
+       "tasks": [{"id": "1", "prompt": "A sunset over mountains"}]}'
+```
+
+## Documentation
+
+- [API](docs/api.md) — the job API, every endpoint, worker task shapes, OCR,
+  depth, multiview and vision
+- [Configuration](docs/configuration.md) — `config.yaml`, environment
+  variables, residency, multiple GPUs, the systemd service
+- [Access and privacy](docs/access-and-privacy.md) — what is recorded, the
+  Host/Origin rules, the token, leaving loopback
+- [Deployment](docs/deployment.md) — a Debian server as a systemd service,
+  one data directory (`GIQ_HOME`), reverse proxy, updates and backups
+- [Engines](docs/engines.md) — llama.cpp, stable-diffusion.cpp and the
+  interpreters giq runs models with
+- [Development](docs/development.md) — tests, the dashboard, languages,
+  architecture
+- Design decisions: [ADR-001](docs/ADR-001-ontology.md),
+  [ADR-002](docs/ADR-002-model-instances.md)
+
+## Contributing
+
+Issues and pull requests are welcome. Run `make test` and `make check` before
+sending one. New files need a REUSE header:
+`reuse annotate --copyright "vikworks UG (haftungsbeschränkt)" --license Apache-2.0 <file>`.
+
+## License
+
+giq is developed by [vikworks](https://vik.works).
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright 2026 vikworks UG (haftungsbeschränkt).
+The project follows the [REUSE](https://reuse.software) specification: every file
+carries an SPDX header; `reuse lint` checks it.

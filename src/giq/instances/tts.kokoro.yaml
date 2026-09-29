@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# kokoro runs in giq's own process, so its CUDA context is never reclaimed
+# on stop — the ~1 GB stays held until giq restarts. The subprocess-isolated
+# workers (_audio_child, _ocr_child) are the pattern that avoids that;
+# kokoro does not use it yet.
+name: kokoro
+worker: tts
+engine: kokoro
+detail: "loads on demand without evicting residents"
+weights:
+  source: hf:hexgrad/Kokoro-82M
+  licence: apache-2.0
+vram:
+  # 968 MiB measured (nvidia-smi, mid-synthesis). A declaration of 0.5 — the
+  # weights alone, ignoring runtime — lets the gate load it into ~1.5 GB of
+  # free VRAM on the strength of "0.5 + 0.5 margin", and it then OOMs
+  # mid-render with the resident set up. Gate figures are upper bounds.
+  gb: 1.0
+  measured: true
+# "kokoro-82m" is the name /capabilities advertised before this model had a
+# VRAM entry of its own, and clients use both. An alias, not a rename.
+aliases: [kokoro-82m]
+voices: [af_heart, am_adam, af_bella]

@@ -1,0 +1,12 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Loaded models beside the queue, as in the concept; stacked when narrow. */
+.ov-split {
+  display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  gap: var(--space-4); align-items: start;
+}
+@media (max-width: 1200px) { .ov-split { grid-template-columns: minmax(0, 1fr); } }

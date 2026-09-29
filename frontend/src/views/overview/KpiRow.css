@@ -1,0 +1,19 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Six tiles on a wide screen, three on a laptop half, two on a phone. */
+.ov-kpi-row {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-4); margin-bottom: var(--space-6);
+}
+@media (max-width: 1280px) { .ov-kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .ov-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.ov-vram-split { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); }
+.ov-vram-split > span { cursor: help; }
+
+/* One line per mount, clipped rather than wrapped: paths can be long. */
+.ov-disk-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

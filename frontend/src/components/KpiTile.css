@@ -1,0 +1,27 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.kpi {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  color: var(--color-text); text-align: left;
+  background: none; border: 0; padding: var(--space-2); margin: calc(-1 * var(--space-2));
+  border-radius: var(--radius-md);
+}
+.kpi-action { cursor: pointer; }
+.kpi-action:hover { background: var(--hover-tint); color: var(--color-text); }
+.kpi-label {
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-muted);
+}
+.kpi-value { font-size: 24px; font-weight: 500; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi-unit { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+.kpi-extra {
+  font-size: 11px; color: var(--text-subtle);
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+}
+/* The tile is a flex column that a grid row may stretch; without flex: none a
+   child that clips (a meter, an ellipsised note: overflow hidden drops its
+   automatic minimum height) is the first thing flex shrinks, down to nothing. */
+.kpi > *, .kpi-extra > * { flex: none; min-width: 0; }

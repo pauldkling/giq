@@ -1,0 +1,161 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "giq"
+version = "0.4.0"
+description = "GPU Inference Queue - efficient GPU worker management for multimodal AI"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "LICENSES/*.txt"]
+authors = [{ name = "vikworks UG (haftungsbeschränkt)" }]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Everything giq needs to serve every model its registry declares. Nothing
+    # here is optional: `uv sync` with no flags must produce a working install,
+    # because it PRUNES to the lock — a bare sync that left the TTS stack in an
+    # extra silently removed it and left /capabilities advertising models that
+    # could no longer load.
+    #
+    # --- service -------------------------------------------------------------
+    "fastapi>=0.141.1",
+    "uvicorn>=0.40.0",
+    "pydantic>=2.12.5",
+    "httpx>=0.28.1",
+    "aiofiles>=25.1.0",
+    "pyyaml>=6.0.3",
+    "pillow>=12.1.1",
+    "numpy>=2.4.2",
+    "scipy>=1.17.1",
+    "psutil>=7.2.2",
+    "python-multipart>=0.0.22",
+    "einops>=0.8.2",
+
+    # --- torch trio: upgrade these three together, never one alone -----------
+    # torchvision pins torch exactly (0.26 -> 2.11), but torchaudio 2.11
+    # declares NO torch requirement at all, so a bare `torchaudio` floats to
+    # the newest wheel and loads against whatever libtorch is present. That is
+    # not theoretical: it happened here and broke _torchaudio.abi3.so.
+    #
+    # torchaudio's newest release is 2.11, and pyannote (>=2.8) and speechbrain
+    # (>=2.1) both require it — so torchaudio's release cadence, not anything
+    # giq does, is what caps torch. torch 2.12/2.13 exist and are unreachable
+    # until torchaudio follows or those two drop it.
+    #
+    # This line is cu130 and needs a CUDA 13 driver (>= 580). Moving it
+    # re-dates every `measured: true` VRAM figure in src/giq/instances/.
+    "torch>=2.11.0,<2.12.0",
+    "torchvision>=0.26.0,<0.27.0",
+    "torchaudio>=2.11.0,<2.12.0",
+    "torchsde>=0.2.6",
+
+    # --- audio: ASR, diarization, voiceprints --------------------------------
+    # faster-whisper does the transcription (ctranslate2, no torch); pyannote
+    # does diarization; speechbrain does ECAPA voiceprints. whisperx is not
+    # used: it pins torch~=2.8 and would force a second interpreter.
+    # pyannote pulls torchcodec, its declared reader. It works on this cu130
+    # line (it did not on 2.10+cu128 — 0.14+ link CUDA 13). The audio child
+    # still decodes once with PyAV and passes a waveform, because one decode
+    # shared by ASR and diarizer beats two.
+    "faster-whisper>=1.2.1",
+    "pyannote-audio>=4.0.7",
+    "speechbrain>=1.1.0",
+    "soundfile>=0.13.1",
+
+    # --- text to speech ------------------------------------------------------
+    # kokoro -> misaki -> spacy. spacy's English model is not on PyPI, and if it
+    # is absent misaki fetches it on first use by shelling out to `pip install`
+    # — so the TTS child needs network on its first run and dies outright with
+    # "No module named pip" if pip is missing (uv does not put pip in a venv).
+    # Declaring the model wheel directly makes a synced checkout complete and
+    # offline-ready; pip stays because misaki still reaches for it.
+    "kokoro>=0.9.4",
+
+    "pip>=26.0",
+
+    # --- document OCR --------------------------------------------------------
+    # transformers 5 is what GLM-OCR (5.1+) and PP-DocLayoutV3 (5.3+) need.
+    # Unlimited-OCR's remote code targets 4.57 but ships shims for the 5.x
+    # cache API; its generation still needs 4.57, hence envs/unlimited-ocr.
+    "transformers>=5.16.1",
+    # easydict is imported by Unlimited-OCR's remote code; pypdfium2 rasterizes
+    # PDFs (BSD/Apache — the README's PyMuPDF is AGPL, which is why not that);
+    # opencv is what PP-DocLayoutV3's processor turns masks into polygons with.
+    "easydict>=1.13",
+    "pypdfium2>=4.30.0",
+    "opencv-python-headless>=4.10.0",
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
+
+[project.urls]
+Homepage = "https://vik.works"
+Repository = "https://github.com/vik-works/giq"
+Issues = "https://github.com/vik-works/giq/issues"
+
+[project.scripts]
+giq = "giq.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# The dashboard is built from frontend/ (`make ui`) into this gitignored
+# directory; hatch leaves ignored files out unless they are named here.
+artifacts = ["src/giq/static/ui/**"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/giq"]
+
+# spacy's English model is pinned by URL (it is not on PyPI). hatchling refuses
+# to build metadata containing a direct reference unless this is set.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["giq"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's `Depends()` / `File(...)` / `Form(...)` defaults look like B008
+# violations but are the framework's intended dependency-injection idiom.
+"src/giq/api/*" = ["B008"]
+
+[tool.ty.environment]
+# ty moved this under [tool.ty.environment]; at the top level it now hard-fails
+# the whole `make check` target rather than warning.
+python-version = "3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+
+# uv installs this group by default, so `uv sync` gives a dev-ready checkout.
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    # `make check`/`make fmt` used to fetch these ephemerally through `uv run`,
+    # so a clean checkout could not lint or type-check offline.
+    "ruff>=0.15.0",
+    "ty>=0.0.74",
+]

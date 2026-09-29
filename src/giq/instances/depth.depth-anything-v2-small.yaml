@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Depth Anything V2 (DINOv2 encoder + DPT head), the HF-format checkpoint
+# from a local snapshot pinned to a reviewed revision, loaded by path with the
+# hub disabled (`hf download --revision 5426e4f --local-dir <dir>`; sha256 of
+# model.safetensors 3152477ce0d8d6978d76b995120de97cb5b928701fd0f817769f59e249a16b70,
+# so a download can be checked against what was reviewed). The path is under
+# GIQ_DEPTH_MODELS_DIR when that is set. Relative inverse depth, no unit. Chosen over
+# Marigold V2 because it fits beside the residents; the reasoning is on the
+# worker.
+#
+# Licences differ by size: Small is Apache-2.0; Base and Large are
+# CC-BY-NC-4.0 (non-commercial) and have no instance, so the catalog only
+# offers what may be run commercially.
+name: depth-anything-v2-small
+label: Depth Anything V2 Small
+worker: depth
+engine: transformers
+detail: "relative depth · ViT-S 25M · Apache-2.0 · fits beside anything"
+weights:
+  path: depth-anything-Depth-Anything-V2-Small-hf
+  source: hf:depth-anything/Depth-Anything-V2-Small-hf
+  revision: 5426e4f
+  format: safetensors
+  licence: apache-2.0
+vram:
+  # fp32, a 1280x2276 photo (the prediction is resampled to the input size on
+  # the GPU, so a bigger input peaks higher; the child caps inputs at 4096 on
+  # the long side): 614 MiB idle after load, 1222 MiB peak. Declared above
+  # the peak, as gate figures are.
+  gb: 1.5
+  measured: true
+  measured_on: NVIDIA GeForce RTX 5090
+max_batch: 8

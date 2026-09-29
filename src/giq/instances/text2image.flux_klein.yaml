@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# FLUX.2 klein 4B distilled (Apache-2.0), under sd.cpp. image_edit/flux_klein
+# is the same weights serving edits.
+#
+# Image files are single safetensors, one subfolder per part
+# (diffusion_models/, text_encoders/, vae/, loras/) under GIQ_MODELS_DIR.
+#
+# The VAE: the klein 4B repository ships the FLUX.2 VAE under the same
+# Apache-2.0 licence. A repack of it sits in the FLUX.2 [dev] repository,
+# whose card is non-commercial, so take it from klein for commercial use.
+#
+# Image figures plus the gate's margin must stay under a 16 GB card's
+# 15.93 GB, or these models can never load there.
+name: flux_klein
+worker: text2image
+engine: sd.cpp
+weights:
+  licence: apache-2.0
+  parts:
+    diffusion: diffusion_models/flux-2-klein-4b.safetensors
+    text_encoder: text_encoders/qwen_3_4b_flux2_klein.safetensors
+    vae: {path: vae/flux2-vae.safetensors, licence: apache-2.0}
+vram:
+  # sd.cpp with --offload-to-cpu: sd-server's own peak is 7.91 GB, sampled
+  # per process through a live render (a whole-card reading says ~8.5, which
+  # counts more than the process's own). Declared 8.0 so the eviction planner
+  # sees a deficit the resident LLM alone can cover — at 9.0 it falls
+  # through to evicting the audio residents too whenever free VRAM dips under
+  # ~2 GB. The figure is engine-specific: without CPU offload the same weights
+  # need about 13 GB (7.75 diffusion bf16 + 3.85 Qwen3-4B TE + 0.3 VAE +
+  # activations).
+  gb: 8.0
+  measured: true
+max_batch: 8

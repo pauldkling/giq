@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# zai-org/GLM-OCR (0.9B) behind PP-DocLayoutV3 (133 MB): the layout model
+# finds regions with labels, GLM reads each with the prompt for its kind —
+# tables come back as HTML. Both native transformers 5, no remote code, both
+# local snapshots loaded by path with the hub disabled
+# (`hf download --revision <rev> --local-dir <dir>`). GIQ_GLM_OCR_MODEL_DIR
+# and GIQ_GLM_LAYOUT_DIR override the two paths.
+name: glm-ocr
+label: GLM-OCR
+worker: ocr
+engine: transformers
+detail: "layout + per-region recognition · tables as HTML · fits beside anything"
+weights:
+  path: zai-GLM-OCR
+  source: hf:zai-org/GLM-OCR
+  revision: ca5d8b3
+  format: safetensors
+  parts:
+    layout:
+      path: PaddlePaddle-PP-DocLayoutV3
+      source: hf:PaddlePaddle/PP-DocLayoutV3_safetensors
+      revision: 97d101e
+      format: safetensors
+vram:
+  # 2.26 GiB after load, 3.19 GiB peak through a 4-page invoice at 200 dpi,
+  # ~100 tok/s.
+  gb: 4.0
+  measured: true
+  measured_on: NVIDIA GeForce RTX 5090
+max_batch: 4

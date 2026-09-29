@@ -1,0 +1,50 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.sidebar {
+  width: var(--sidebar-width); flex-shrink: 0; display: flex; flex-direction: column;
+  gap: var(--space-6); padding: var(--space-6) var(--space-4);
+  border-right: 1px solid var(--color-divider); background: var(--color-bg);
+  overflow-y: auto;
+}
+.sidebar-brand { display: flex; flex-direction: column; color: var(--color-text); }
+.sidebar-brand:hover { color: var(--color-text); }
+.brand-mark {
+  font-family: var(--font-heading); font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.brand-cursor { color: var(--color-accent); }
+.brand-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-link {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--radius-md); font-size: 13px; color: var(--color-neutral-300);
+}
+.sidebar-link:hover { background: var(--hover-tint); color: var(--color-text); }
+.sidebar-link[aria-current="page"] {
+  color: var(--accent-ink); background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+.sidebar-link[aria-current="page"] svg { color: var(--color-accent); }
+.sidebar-footer { margin-top: auto; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+.sidebar-switches { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.sidebar-meta { font-size: 11px; color: var(--text-subtle); line-height: 1.6; }
+
+:root[data-theme="light"] .sidebar-link { color: var(--color-neutral-700); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .sidebar-link { color: var(--color-neutral-700); }
+}
+
+/* Narrow screens: the sidebar becomes a drawer under the top bar. */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed; z-index: 80; top: 0; bottom: 0; left: 0;
+    transform: translateX(-100%); transition: transform 0.2s ease;
+    visibility: hidden;
+  }
+  /* Hidden, not just off-screen, when closed: its links must not be tab stops. */
+  .sidebar-open { transform: none; visibility: visible; box-shadow: var(--shadow-lg); }
+}

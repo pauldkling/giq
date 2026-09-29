@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# ECAPA speaker embeddings, the third member of the resident set. Loads by
+# repository from the HF cache; GIQ_EMBED_MODEL overrides it.
+name: ecapa-tdnn
+worker: embed
+engine: speechbrain
+detail: "speaker voiceprints"
+weights:
+  source: hf:speechbrain/spkrec-ecapa-voxceleb
+residency:
+  priority: 2
+vram:
+  gb: 0.6
+  measured: true

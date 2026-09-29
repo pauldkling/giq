@@ -1,0 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.giq-seg-sm .seg-opt { padding: 3px 9px; font-size: 12px; }
+.giq-seg .seg-opt:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }

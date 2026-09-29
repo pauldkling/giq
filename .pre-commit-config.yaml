@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Runs under prek (https://github.com/j178/prek) or pre-commit:
+#   prek install      # once per clone
+#   prek run -a       # everything, e.g. before a release
+repos:
+  # prek runs these natively (Rust), pre-commit through Python.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        exclude: (^|/)uv\.lock$
+      - id: detect-private-key
+
+  # Pinned to the ruff in uv.lock, so the hook and `uv run ruff` agree.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff-format
+      - id: ruff-check
+        args: [--fix]
+
+  # REUSE compliance: every file carries an SPDX copyright + license header.
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v6.2.0
+    hooks:
+      - id: reuse
+
+  # The dashboard's type check. Uses the checkout's own node_modules (never
+  # installs anything); without them it says so and steps aside.
+  - repo: local
+    hooks:
+      - id: frontend-typecheck
+        name: frontend typecheck (tsc)
+        language: system
+        entry: bash -c 'cd frontend && if [ ! -d node_modules ]; then echo "frontend/node_modules missing, skipping (make ui installs them)"; exit 0; fi; npx --no-install tsc --noEmit'
+        files: ^frontend/
+        pass_filenames: false

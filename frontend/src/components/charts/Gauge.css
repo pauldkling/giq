@@ -1,0 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.gauge { display: flex; gap: 2px; border-radius: 3px; overflow: hidden; background: var(--track); }
+.gauge-seg { height: 100%; transition: width 0.8s ease; }
+.gauge-seg:first-child { border-radius: 3px 0 0 3px; }

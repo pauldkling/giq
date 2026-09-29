@@ -1,0 +1,19 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.giq-tooltip {
+  position: fixed; z-index: 1000; pointer-events: none; left: -9999px; top: 0;
+  max-width: 320px; padding: 6px 9px; border-radius: var(--radius-sm);
+  background: var(--surface-raised); color: var(--color-text); box-shadow: var(--shadow-md);
+  font-size: 12px; line-height: 1.45; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.giq-tooltip b, .giq-tooltip strong { font-weight: 500; }
+.giq-tooltip .tip-muted { color: var(--text-muted); }
+.giq-tooltip .tip-swatch {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px;
+  vertical-align: 0;
+}

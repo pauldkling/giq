@@ -1,0 +1,82 @@
+{
+  "title": "Nutzung",
+  "period": {
+    "label": "Zeitraum",
+    "day": "Heute",
+    "week": "7 Tage",
+    "month": "30 Tage",
+    "all": "Gesamt"
+  },
+  "gpuFilter": {
+    "label": "GPU",
+    "all": "Alle Karten",
+    "current": "{{name}} · aktuell",
+    "past": "{{name}} · {{from}} – {{to}}"
+  },
+  "kpi": {
+    "calls": "Aufrufe",
+    "tokensIn": "Token · Prompt",
+    "tokensOut": "Token · generiert",
+    "failed": "Fehlgeschlagen",
+    "failedShare": "{{pct}} der Aufrufe",
+    "tokensExact_one": "{{n}} Token",
+    "tokensExact_other": "{{n}} Token"
+  },
+  "chart": {
+    "kicker": "Token im Zeitverlauf",
+    "aria": "Token pro Intervall, gestapelt nach Modell",
+    "empty": "Keine Token in diesem Zeitraum",
+    "hint": "Einige Aufrufe in diesem Zeitraum stammen aus der Zeit vor der Token-Zählung – sie zählen als Aufrufe, tragen aber keine Token bei.",
+    "bucketNote": {
+      "day": "pro Stunde",
+      "week": "pro Tag",
+      "month": "pro Tag",
+      "all": "pro Monat"
+    },
+    "segment": "{{total}} ({{in}} ein · {{out}} aus · {{calls}})"
+  },
+  "calls_one": "{{n}} Aufruf",
+  "calls_other": "{{n}} Aufrufe",
+  "eras": {
+    "kicker": "Karten dieses Rechners",
+    "meta_one": "{{count}} Karte",
+    "meta_other": "{{count}} Karten",
+    "card": "Karte",
+    "vram": "VRAM",
+    "from": "Von",
+    "to": "Bis",
+    "jobs": "Jobs",
+    "failed": "Fehlgeschl.",
+    "tokens": "Token",
+    "avgRun": "Ø Laufzeit",
+    "current": "aktuell",
+    "now": "jetzt",
+    "empty": "Noch keine Karten erfasst"
+  },
+  "models": {
+    "kicker": "Pro Modell",
+    "meta_one": "{{count}} Modell",
+    "meta_other": "{{count}} Modelle",
+    "model": "Modell",
+    "calls": "Aufrufe",
+    "failed": "Fehlgeschl.",
+    "tasks": "Aufgaben",
+    "tokensIn": "Token ein",
+    "tokensOut": "Token aus",
+    "total": "Gesamt",
+    "lastUsed": "Zuletzt genutzt",
+    "empty": "Keine Aufrufe in diesem Zeitraum"
+  },
+  "wall": {
+    "kicker": "Letzte Aufrufe",
+    "meta": "die letzten {{count}}",
+    "when": "Wann",
+    "model": "Modell",
+    "status": "Status",
+    "queue": "Wartezeit",
+    "run": "Laufzeit",
+    "tokIn": "Token ein",
+    "tokOut": "Token aus",
+    "empty": "Noch keine Aufrufe erfasst"
+  }
+}

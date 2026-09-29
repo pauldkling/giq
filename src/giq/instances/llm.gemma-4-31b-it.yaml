@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Gemma 4 31B dense has a thinking mode like the 26B, but runs with the
+# default `--reasoning off`.
+name: gemma-4-31b-it
+worker: llm
+engine: llama.cpp
+weights:
+  path: unsloth-gemma-4-31B-it-GGUF/gemma-4-31B-it-Q4_K_M.gguf
+  format: gguf
+capabilities: [chat]
+vram:
+  gb: 22.0
+  measured: false
+max_batch: 32

@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# TLS reverse proxy in front of giq on 127.0.0.1:8084. Copy to
+# /etc/nginx/sites-available/giq, set server_name and the certificate paths,
+# link it into sites-enabled, `nginx -t && systemctl reload nginx`.
+#
+# giq checks the Host header against the names it knows (IP literals, this
+# machine's hostname, the address it is bound to). Forwarding the public name
+# as Host is right, so add that name to access.allow_hosts in config.yaml:
+#
+#   access:
+#     allow_hosts: [giq.example.org]
+#
+# Behind a proxy giq itself is bound to loopback, so its startup banner does
+# not ask for a token — but everything that can reach nginx can reach giq.
+# Set GIQ_TOKEN in /etc/giq/giq.env.
+
+upstream giq {
+    server 127.0.0.1:8084;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name giq.example.org;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name giq.example.org;
+
+    ssl_certificate     /etc/letsencrypt/live/giq.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/giq.example.org/privkey.pem;
+
+    # OCR takes whole PDFs and the audio endpoints whole recordings in one
+    # request. giq's own OCR limit is GIQ_OCR_MAX_UPLOAD_MB (64 by default);
+    # this sits above it so giq, not nginx, gives the answer that says why.
+    client_max_body_size 256m;
+    client_body_timeout 300s;
+
+    location / {
+        proxy_pass http://giq;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Streamed chat completions and the dashboard's event streams are
+        # server-sent events: each token must leave as it is produced.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_request_buffering off;
+
+        # A request can wait in giq's queue while a model loads or another
+        # job holds the GPU, and a long generation or an OCR run of a thick
+        # PDF streams for many minutes. nginx's 60 s default cuts those off.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

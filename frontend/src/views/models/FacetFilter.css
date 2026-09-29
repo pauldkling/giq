@@ -1,0 +1,27 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.md-facet-card { gap: var(--space-2); }
+.md-facet-list { display: flex; flex-direction: column; gap: 1px; }
+.md-facet-chip {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; text-align: left;
+  padding: 5px 7px; border: 1px solid transparent; border-radius: var(--radius-md);
+  background: none; color: var(--color-text); font-size: 12.5px;
+}
+.md-facet-chip:hover { background: var(--hover-tint); }
+.md-facet-chip:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.md-facet-chip[aria-pressed="true"] {
+  background: var(--accent-tint); border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+.md-facet-label { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.md-facet-n { margin-left: auto; color: var(--text-subtle); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+
+/* One column: the list becomes wrapping chips, so two facets do not push
+   the catalog a screen further down. */
+@container models (max-width: 760px) {
+  .md-facet-list { flex-direction: row; flex-wrap: wrap; gap: var(--space-1); }
+  .md-facet-chip { width: auto; border-color: var(--color-divider); }
+}

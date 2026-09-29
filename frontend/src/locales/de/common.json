@@ -1,0 +1,181 @@
+{
+  "app": {
+    "name": "giq",
+    "subtitle": "GPU-Inferenz-Warteschlange",
+    "skipToContent": "Zum Inhalt springen",
+    "notBuilt": "Oberfläche nicht gebaut"
+  },
+  "nav": {
+    "label": "Hauptnavigation",
+    "overview": "Leitstand",
+    "models": "Modelle",
+    "usage": "Nutzung",
+    "sandbox": "Sandbox",
+    "openMenu": "Navigation öffnen",
+    "closeMenu": "Navigation schließen"
+  },
+  "live": {
+    "polling": "live · Abfrage alle {{seconds}} s",
+    "paused": "Betrieb pausiert",
+    "unreachable": "giq nicht erreichbar",
+    "connecting": "verbinde…"
+  },
+  "state": {
+    "idle": "Leerlauf",
+    "ready": "bereit",
+    "running": "läuft",
+    "blocked": "blockiert",
+    "paused": "pausiert",
+    "error": "Fehler",
+    "unreachable": "nicht erreichbar"
+  },
+  "stateMessage": {
+    "paused": "Betrieb pausiert — Modelle entladen, GPU frei; Anfragen erhalten 503",
+    "running_one": "{{count}} Job läuft",
+    "running_other": "{{count}} Jobs laufen",
+    "loaded": "{{worker}} · {{model}} geladen, wartet",
+    "queued_one": "{{count}} Job in der Warteschlange, startet gleich",
+    "queued_other": "{{count}} Jobs in der Warteschlange, starten gleich",
+    "blocked_one": "{{count}} Job wartet auf VRAM ({{free}} frei)",
+    "blocked_other": "{{count}} Jobs warten auf VRAM ({{free}} frei)",
+    "idle": "keine Jobs, kein Modell geladen"
+  },
+  "theme": {
+    "label": "Design",
+    "system": "System",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "current": "Design: {{theme}} — klicken zum Wechseln"
+  },
+  "language": {
+    "label": "Sprache"
+  },
+  "access": {
+    "exposed": "offen im Netzwerk",
+    "token": "Netzwerk · Token",
+    "exposedTitle": "giq lauscht auf {{host}} ohne Token: Jedes Gerät in diesem Netzwerk kann Jobs einreichen, frühere Ergebnisse lesen und Modellgewichte löschen. Mit --host 127.0.0.1 oder GIQ_TOKEN wird das geschlossen.",
+    "tokenTitle": "giq lauscht auf {{host}} und verlangt ein Token."
+  },
+  "footer": {
+    "version": "giq {{version}}",
+    "uptime": "läuft seit {{uptime}}"
+  },
+  "pause": {
+    "pause": "Betrieb pausieren",
+    "resume": "Betrieb fortsetzen",
+    "resuming": "Setze fort…",
+    "unloading": "Entlade…",
+    "draining": "Arbeite ab…",
+    "pauseTitle": "Alle Modelle entladen und die GPU freigeben",
+    "resumeTitle": "Betrieb fortsetzen — vorgehaltene Modelle laden in wenigen Sekunden neu",
+    "menuLabel": "Wie pausieren",
+    "graceful": "Pausieren, sobald frei",
+    "gracefulHelp": "Wartet bis zu 60 s, bis laufende Jobs und Chat-Sitzungen fertig sind, und entlädt dann.",
+    "force": "Sofort pausieren",
+    "forceHelp": "Beendet die Worker sofort — alles, was gerade generiert, schlägt fehl.",
+    "hint": "In beiden Fällen: Alle Modelle werden entladen, die Karte geht in den Leerlauf, und API-Aufrufe erhalten 503, bis der Betrieb fortgesetzt wird. In der Zwischenzeit wird nichts eingereiht.",
+    "forceConfirmTitle": "Sofort pausieren?",
+    "forceConfirmBody": "Sofortiges Pausieren beendet die Worker auf der Stelle — alles, was gerade generiert, schlägt fehl.",
+    "forceConfirm": "Sofort pausieren",
+    "warningsTitle": "Pausiert, mit Warnungen",
+    "pauseFailed": "Pausieren fehlgeschlagen",
+    "resumeFailed": "Fortsetzen fehlgeschlagen",
+    "bannerTitle": "Betrieb pausiert",
+    "bannerSince": "seit {{time}}",
+    "bannerDraining": "laufende Arbeit wird abgeschlossen, dann entladen",
+    "bannerFreed": "{{free}} von {{total}} frei · alle Modelle entladen",
+    "banner503": "Anfragen erhalten 503"
+  },
+  "worker": {
+    "llm": "LLM",
+    "text2image": "Text zu Bild",
+    "image_edit": "Bildbearbeitung",
+    "audio": "Spracherkennung",
+    "stt": "Sprache zu Text",
+    "tts": "Text zu Sprache",
+    "embed": "Stimmabdruck",
+    "ocr": "Dokument-OCR",
+    "depth": "Tiefe",
+    "multiview": "Multiview"
+  },
+  "policy": {
+    "pinned": "warm halten",
+    "auto": "bei Bedarf",
+    "off": "aus",
+    "pinnedHelp": "Bleibt geladen; lädt nach Verdrängung und beim Start neu.",
+    "autoHelp": "Lädt, wenn ein Job eintrifft; der Scheduler darf es verdrängen.",
+    "offHelp": "Lehnt Jobs ab und sperrt jeden Ladeweg, bis es geändert wird."
+  },
+  "fit": {
+    "loaded": "geladen",
+    "fits_now": "passt",
+    "fits_after_eviction": "passt nach Verdrängung",
+    "wont_fit_now": "passt gerade nicht",
+    "never": "passt nie"
+  },
+  "gpu": {
+    "label": "GPU {{index}}",
+    "card": "Karte",
+    "cards_one": "{{count}} GPU",
+    "cards_other": "{{count}} GPUs",
+    "default": "Standardkarte",
+    "vram": "VRAM",
+    "load": "Auslastung",
+    "power": "Leistung",
+    "temp": "Temp.",
+    "fan": "Lüfter",
+    "giq": "giq",
+    "other": "andere",
+    "giqTitle": "von giqs Modellen belegt",
+    "otherTitle": "Desktop, andere CUDA-Programme — giq kann das nicht freigeben"
+  },
+  "actions": {
+    "ok": "OK",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen",
+    "close": "Schließen",
+    "retry": "Erneut versuchen",
+    "refresh": "Aktualisieren",
+    "delete": "Löschen",
+    "more": "Weitere Aktionen",
+    "dismiss": "Ausblenden"
+  },
+  "range": {
+    "label": "Zeitraum",
+    "h24": "24 h",
+    "d7": "7 T",
+    "d30": "30 T",
+    "d90": "90 T"
+  },
+  "empty": {
+    "noData": "Noch keine Daten",
+    "loading": "Lädt…",
+    "collecting": "sammle Messwerte…",
+    "noJobs": "keine Jobs in diesem Zeitraum",
+    "failed": "Laden fehlgeschlagen: {{error}}"
+  },
+  "chart": {
+    "now": "jetzt",
+    "legend": "Legende",
+    "failed_one": "{{count}} fehlgeschlagen",
+    "failed_other": "{{count}} fehlgeschlagen"
+  },
+  "file": {
+    "choose": "Datei wählen",
+    "none": "Keine Datei gewählt — oder hierher ziehen"
+  },
+  "job": {
+    "completed": "abgeschlossen",
+    "failed": "fehlgeschlagen"
+  },
+  "notify": {
+    "errorTitle": "Etwas ist schiefgelaufen"
+  },
+  "units": {
+    "tokPerSec": "Token/s",
+    "jobs_one": "{{count}} Job",
+    "jobs_other": "{{count}} Jobs",
+    "tokens_one": "{{count}} Token",
+    "tokens_other": "{{count}} Token"
+  }
+}

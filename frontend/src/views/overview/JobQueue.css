@@ -1,0 +1,28 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.ov-jq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ov-jq-pending { gap: 0; border-top: 1px solid var(--color-divider); padding-top: var(--space-2); }
+.ov-jq-running { display: flex; flex-direction: column; gap: 5px; }
+.ov-jq-line, .ov-jq-queued { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.ov-jq-queued { padding: 3px 0; color: var(--text-strong); }
+.ov-jq-model { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ov-jq-queued .ov-jq-model { font-weight: 400; }
+.ov-jq-worker { color: var(--text-subtle); font-size: 11px; white-space: nowrap; }
+.ov-jq-meta { margin-left: auto; color: var(--text-muted); font-size: 11px; }
+.ov-jq-pos { width: 22px; flex: none; color: var(--text-subtle); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ov-jq-cancel { margin-left: auto; color: var(--text-muted); }
+
+/* Indeterminate: a short accent segment sweeping the track. */
+.ov-jq-bar { position: relative; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+.ov-jq-bar > span {
+  position: absolute; inset: 0 auto 0 0; width: 30%; border-radius: 2px;
+  background: var(--color-accent); animation: ov-jq-sweep 1.6s ease-in-out infinite;
+}
+@keyframes ov-jq-sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+.ov-jq-empty { margin: 0; font-size: 12px; color: var(--text-subtle); padding: var(--space-2) 0; }
+.ov-jq-message { margin: 0; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }

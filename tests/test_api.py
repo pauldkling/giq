@@ -1,0 +1,722 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Tests for giq API endpoints."""
+
+import base64
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from giq.main import app
+from giq.models import JobRequest, JobStatus, WorkerType
+from giq.queue import JobQueue
+from giq.runner import Runner
+
+
+@pytest.fixture
+async def client():
+    """Create async test client with fresh queue/runner."""
+    # Reset global state for each test
+    import giq.queue
+    import giq.runner
+
+    giq.queue._queue = JobQueue()
+    giq.runner._runner = Runner(giq.queue._queue)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://localhost",
+    ) as ac:
+        yield ac
+
+
+@pytest.mark.asyncio
+async def test_run_job(client: AsyncClient):
+    """Test submitting a job."""
+    response = await client.post(
+        "/run",
+        json={
+            "worker": "llm",
+            "model": "gemma-3-27b-it-qat",
+            "tasks": [
+                {"id": "t1", "system": "You are helpful.", "user": "Hello!"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+    assert "position" in data
+    assert isinstance(data["position"], int)
+
+
+@pytest.mark.asyncio
+async def test_run_job_multiple_tasks(client: AsyncClient):
+    """Test submitting a job with multiple tasks."""
+    response = await client.post(
+        "/run",
+        json={
+            "worker": "llm",
+            "model": "gemma-3-27b-it-qat",
+            "params": {"temperature": 0.7},
+            "tasks": [
+                {"id": "t1", "user": "First task"},
+                {"id": "t2", "user": "Second task"},
+                {"id": "t3", "user": "Third task"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+
+
+@pytest.mark.asyncio
+async def test_get_job_status(client: AsyncClient):
+    """Test getting job status."""
+    # First submit a job
+    submit_response = await client.post(
+        "/run",
+        json={
+            "worker": "llm",
+            "model": "test-model",
+            "tasks": [{"id": "t1", "user": "Test"}],
+        },
+    )
+    job_id = submit_response.json()["job_id"]
+
+    # Then get its status
+    response = await client.get(f"/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["job_id"] == job_id
+    assert data["status"] == JobStatus.pending
+    assert data["worker"] == WorkerType.llm
+    assert data["model"] == "test-model"
+
+
+@pytest.mark.asyncio
+async def test_get_job_not_found(client: AsyncClient):
+    """Test getting non-existent job."""
+    response = await client.get("/jobs/nonexistent")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancel_job(client: AsyncClient):
+    """Test cancelling a job."""
+    # Submit a job
+    submit_response = await client.post(
+        "/run",
+        json={
+            "worker": "llm",
+            "model": "test-model",
+            "tasks": [{"id": "t1", "user": "Test"}],
+        },
+    )
+    job_id = submit_response.json()["job_id"]
+
+    # Cancel it
+    response = await client.delete(f"/jobs/{job_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cancelled"] is True
+
+    # Verify it's gone
+    get_response = await client.get(f"/jobs/{job_id}")
+    assert get_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancel_job_not_found(client: AsyncClient):
+    """Test cancelling non-existent job."""
+    response = await client.delete("/jobs/nonexistent")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_service_status(client: AsyncClient):
+    """Test getting service status."""
+    response = await client.get("/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "vram_used_gb" in data
+    assert "vram_total_gb" in data
+    assert "queue_depth" in data
+    assert "jobs_pending" in data
+    assert isinstance(data["jobs_pending"], list)
+
+
+@pytest.mark.asyncio
+async def test_capabilities(client: AsyncClient):
+    """Test getting capabilities."""
+    response = await client.get("/capabilities")
+    assert response.status_code == 200
+    data = response.json()
+    assert "workers" in data
+    assert "constraints" in data
+    # Every modality giq serves, not just the original four — the
+    # hand-written payload used to omit audio, embed and stt.
+    for worker in (
+        "llm",
+        "text2image",
+        "image_edit",
+        "tts",
+        "audio",
+        "embed",
+        "stt",
+        "ocr",
+        "depth",
+        "multiview",
+    ):
+        assert worker in data["workers"], f"{worker} missing from /capabilities"
+    # Two LLM engines since vllm joined llama.cpp, reported like the image runtimes.
+    assert "llama.cpp" in data["workers"]["llm"]["backend"]
+    assert "vllm" in data["workers"]["llm"]["backend"]
+    # flux_klein is the production model and was absent from the old
+    # hand-written list.
+    assert data["workers"]["text2image"]["backend"] == "sd.cpp"
+    assert "flux_klein" in data["workers"]["text2image"]["models"]
+    assert "flux_klein" in data["workers"]["image_edit"]["models"]
+    assert "models" in data["workers"]["llm"]
+
+
+def test_the_token_budget_defaults_to_the_models_context():
+    """Unset means "as much as the context allows", and the modern OpenAI
+    spelling has to land on the same field.
+
+    It used to default to 2048 — a ceiling on thinking *and* answer, so a
+    reasoning model spent it on the thought and returned an empty answer with
+    finish_reason "length". And `max_completion_tokens`, which is what current
+    OpenAI clients send, was dropped by extra="ignore" so a client asking for
+    a big budget silently got 2048.
+    """
+    from giq.api.openai_compat import ChatCompletionRequest
+
+    msgs = [{"role": "user", "content": "hi"}]
+
+    assert ChatCompletionRequest(model="m", messages=msgs).max_tokens is None
+    # Both spellings reach the same field.
+    assert (
+        ChatCompletionRequest.model_validate(
+            {"model": "m", "messages": msgs, "max_completion_tokens": 40000}
+        ).max_tokens
+        == 40000
+    )
+    assert (
+        ChatCompletionRequest.model_validate(
+            {"model": "m", "messages": msgs, "max_tokens": 4096}
+        ).max_tokens
+        == 4096
+    )
+
+
+@pytest.mark.asyncio
+async def test_v1_models_advertises_every_installed_model(client: AsyncClient):
+    """Installed is the whole rule: on disk means offered.
+
+    Two failures, opposite directions, from the same hand-written list of ids.
+    It omitted qwen3.8-27b, which was registered and servable — and it
+    advertised five models whose GGUFs had been deleted, so a client could
+    pick one and llama-server would fail on it. Generated from
+    the registry now and filtered only on whether the weights exist.
+    """
+    from giq.registry import all_specs
+    from giq.workers.llm import weights_installed
+
+    response = await client.get("/v1/models")
+    assert response.status_code == 200
+    advertised = [m["id"] for m in response.json()["data"]]
+
+    llm = [s for s in all_specs() if s.worker == "llm"]
+    installed = {s.model for s in llm if weights_installed(s.model)}
+    assert set(advertised) == installed, (
+        f"missing {sorted(installed - set(advertised))}, "
+        f"phantom {sorted(set(advertised) - installed)}"
+    )
+
+    # No audit gate: nothing is withheld for being unaudited or unpopular.
+    # If it is on disk it is on the list, whatever we think of it.
+    for spec in llm:
+        if weights_installed(spec.model):
+            assert spec.model in advertised, f"{spec.model} is installed but withheld"
+
+    # Chat clients get chat models; /capabilities enumerates every modality.
+    assert not (set(advertised) & {s.model for s in all_specs() if s.worker != "llm"})
+
+    # Residents lead, so a client defaulting to data[0] gets the loaded model
+    # rather than one that forces an eviction.
+    residents = [
+        s.model for s in llm if s.resident_priority is not None and weights_installed(s.model)
+    ]
+    if residents:
+        assert advertised[0] in residents
+
+
+@pytest.mark.asyncio
+async def test_run_text2image_job(client: AsyncClient):
+    """Test submitting a text2image generation job."""
+    response = await client.post(
+        "/run",
+        json={
+            "worker": "text2image",
+            "model": "zimage",
+            "tasks": [
+                {"id": "img1", "prompt": "A beautiful sunset over mountains"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+
+
+@pytest.mark.asyncio
+async def test_run_image_edit_job(client: AsyncClient):
+    """Test submitting an image edit job."""
+    response = await client.post(
+        "/run",
+        json={
+            "worker": "image_edit",
+            "model": "flux_klein",
+            "tasks": [
+                {
+                    "id": "edit1",
+                    "reference_image_b64": "dGVzdA==",  # "test" in base64
+                    "instruction": "Make it look like a painting",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+
+
+@pytest.mark.asyncio
+async def test_run_tts_job(client: AsyncClient):
+    """Test submitting a TTS job."""
+    response = await client.post(
+        "/run",
+        json={
+            "worker": "tts",
+            "model": "kokoro-82m",
+            "params": {"voice": "af_heart"},
+            "tasks": [
+                {"id": "tts1", "user": "Hello, this is a test."},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "job_id" in data
+
+
+# --- /ocr --------------------------------------------------------------------
+
+
+def _completed_ocr_job(job_id: str, result: dict):
+    from giq.queue import Job
+
+    job = Job(
+        job_id=job_id,
+        request=JobRequest(worker=WorkerType.ocr, model="unlimited-ocr", tasks=[]),
+    )
+    job.status = JobStatus.completed
+    job.results = [result]
+    return job
+
+
+_OCR_RESULT = {
+    "id": "ocr-0",
+    "html": '<p class="text" data-page="1">hello</p>',
+    "pages": 1,
+    "blocks": [{"page": 1, "label": "text", "content": "hello"}],
+    "raw": "<PAGE>\n<|det|>text [1, 1, 2, 2]<|/det|>hello\n",
+    "tokens_in": 260,
+    "tokens_out": 3,
+    "truncated": False,
+    "error": None,
+}
+
+
+@pytest.fixture
+def ocr_completes(monkeypatch):
+    """wait_for_job answers with a canned result and records the submitted task."""
+    from giq.services.orchestration import Orchestrator
+
+    seen: dict = {}
+    real_submit = Orchestrator.submit_job
+
+    async def submit(self, request):
+        seen["task"] = request.tasks[0]
+        seen["model"] = request.model
+        return await real_submit(self, request)
+
+    async def wait(self, job_id, timeout=None):
+        seen["timeout"] = timeout
+        return _completed_ocr_job(job_id, _OCR_RESULT)
+
+    monkeypatch.setattr(Orchestrator, "submit_job", submit)
+    monkeypatch.setattr(Orchestrator, "wait_for_job", wait)
+    return seen
+
+
+PDF = b"%PDF-1.4 not really a document"
+
+
+@pytest.mark.asyncio
+async def test_ocr_takes_the_pdf_as_the_body(client: AsyncClient, ocr_completes):
+    """One PDF in, one document out — the job goes through the queue like any
+    other, and the answer is the assembled HTML, not a job id."""
+    r = await client.post("/ocr", content=PDF, headers={"content-type": "application/pdf"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["html"].startswith("<p") and body["pages"] == 1 and body["job_id"]
+    assert body["tokens_in"] == 260 and body["tokens_out"] == 3
+    assert "raw" not in body
+    assert ocr_completes["timeout"] >= 600
+    task = ocr_completes["task"]
+    assert task["dpi"] == 200 and task["strip"] and task["merge"] and "pages" not in task
+    assert ocr_completes["model"] == "unlimited-ocr"
+
+
+@pytest.mark.asyncio
+async def test_ocr_model_is_the_consumers_choice(client: AsyncClient, ocr_completes):
+    r = await client.post(
+        "/ocr",
+        params={"model": "glm-ocr"},
+        content=PDF,
+        headers={"content-type": "application/pdf"},
+    )
+    assert r.status_code == 200, r.text
+    assert ocr_completes["model"] == "glm-ocr"
+    r = await client.post(
+        "/ocr",
+        params={"model": "tesseract"},
+        content=PDF,
+        headers={"content-type": "application/pdf"},
+    )
+    assert r.status_code == 400 and "glm-ocr" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ocr_takes_a_multipart_file_too(client: AsyncClient, ocr_completes):
+    r = await client.post("/ocr", files={"file": ("doc.pdf", PDF, "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert r.json()["html"].startswith("<p")
+    # A multipart body without the file part is a client error, not a crash.
+    r = await client.post("/ocr", files={"other": ("x.pdf", PDF, "application/pdf")})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_ocr_options_are_query_parameters(client: AsyncClient, ocr_completes):
+    r = await client.post(
+        "/ocr",
+        params={"dpi": 150, "pages": "1-2,5", "raw": "true", "strip": "false"},
+        content=PDF,
+        headers={"content-type": "application/pdf"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["raw"].startswith("<PAGE>")
+    task = ocr_completes["task"]
+    assert task["dpi"] == 150 and task["pages"] == [1, 2, 5] and task["strip"] is False
+
+    r = await client.post(
+        "/ocr",
+        params={"response_format": "html"},
+        content=PDF,
+        headers={"content-type": "application/pdf"},
+    )
+    assert r.headers["content-type"].startswith("text/html") and r.text.startswith("<p")
+
+
+@pytest.mark.asyncio
+async def test_ocr_refuses_a_document_over_the_cap(client: AsyncClient, monkeypatch):
+    """The cap is checked before the body is buffered, and again while it
+    streams, so a lying Content-Length does not get around it."""
+    monkeypatch.setenv("GIQ_OCR_MAX_UPLOAD_MB", "1")
+    big = b"%PDF" + b"x" * (1024 * 1024 + 1)
+    r = await client.post("/ocr", content=big, headers={"content-type": "application/pdf"})
+    assert r.status_code == 413
+    r = await client.post("/ocr", files={"file": ("d.pdf", big, "application/pdf")})
+    assert r.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_ocr_rejects_what_is_not_a_pdf(client: AsyncClient):
+    r = await client.post("/ocr", content=b"hello", headers={"content-type": "text/plain"})
+    assert r.status_code == 400
+    r = await client.post("/ocr", params={"pages": "3-1"}, content=PDF)
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_ocr_endpoint_reports_a_failed_task(client: AsyncClient, monkeypatch):
+    from giq.services.orchestration import Orchestrator
+
+    async def fake_wait(self, job_id, timeout=None):
+        return _completed_ocr_job(job_id, {"id": "ocr-0", "error": "no pages to parse"})
+
+    monkeypatch.setattr(Orchestrator, "wait_for_job", fake_wait)
+    r = await client.post("/ocr", content=PDF, headers={"content-type": "application/pdf"})
+    assert r.status_code == 500 and "no pages" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ocr_runs_through_the_generic_job_path(client: AsyncClient):
+    """The worker is a first-class job type: /run accepts it and /capabilities
+    advertises it, so a consumer on another node needs nothing special."""
+    r = await client.post(
+        "/run",
+        json={"worker": "ocr", "model": "unlimited-ocr", "tasks": [{"id": "t", "pdf_b64": "AAAA"}]},
+    )
+    assert r.status_code == 200 and r.json()["job_id"]
+    caps = (await client.get("/capabilities")).json()
+    assert sorted(caps["workers"]["ocr"]["models"]) == ["glm-ocr", "unlimited-ocr"]
+
+
+def test_parse_pages():
+    from giq.api.router import parse_pages
+
+    assert parse_pages(None) is None and parse_pages(" ") is None
+    assert parse_pages("1-3,7") == [1, 2, 3, 7]
+    assert parse_pages("4") == [4]
+
+
+# --- /depth ------------------------------------------------------------------
+
+_DEPTH_RESULT = {
+    "id": "depth-0",
+    "depth_b64": "iVBORw0=",
+    "width": 2,
+    "height": 2,
+    "depth_min": 0.5,
+    "depth_max": 9.0,
+    "metric": False,
+    "visualization_b64": "iVBORw1=",
+    "error": None,
+}
+
+
+@pytest.fixture
+def depth_completes(monkeypatch):
+    """wait_for_job answers with a canned map and records the submitted task."""
+    from giq.queue import Job
+    from giq.services.orchestration import Orchestrator
+
+    seen: dict = {}
+    real_submit = Orchestrator.submit_job
+
+    async def submit(self, request):
+        seen["task"] = request.tasks[0]
+        seen["model"] = request.model
+        seen["worker"] = request.worker
+        return await real_submit(self, request)
+
+    async def wait(self, job_id, timeout=None):
+        seen["timeout"] = timeout
+        job = Job(
+            job_id=job_id,
+            request=JobRequest(worker=WorkerType.depth, model="depth-anything-v2-small", tasks=[]),
+        )
+        job.status = JobStatus.completed
+        job.results = [_DEPTH_RESULT]
+        return job
+
+    monkeypatch.setattr(Orchestrator, "submit_job", submit)
+    monkeypatch.setattr(Orchestrator, "wait_for_job", wait)
+    return seen
+
+
+PNG = b"\x89PNG\r\n\x1a\n not really an image"
+
+
+@pytest.mark.asyncio
+async def test_depth_takes_the_image_as_the_body(client: AsyncClient, depth_completes):
+    r = await client.post("/depth", content=PNG, headers={"content-type": "image/png"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["depth_b64"] == "iVBORw0=" and (body["width"], body["height"]) == (2, 2)
+    assert body["depth_min"] == 0.5 and body["metric"] is False and body["job_id"]
+    assert "visualization_b64" not in body  # only on request
+    assert depth_completes["worker"] == WorkerType.depth
+    assert depth_completes["model"] == "depth-anything-v2-small"
+    task = depth_completes["task"]
+    assert task["image_b64"] and task["visualize"] is False
+
+
+@pytest.mark.asyncio
+async def test_depth_visualization_is_opt_in(client: AsyncClient, depth_completes):
+    r = await client.post(
+        "/depth", params={"visualize": "true"}, content=PNG, headers={"content-type": "image/png"}
+    )
+    assert r.json()["visualization_b64"] == "iVBORw1="
+    assert depth_completes["task"]["visualize"] is True
+    # The image formats hand back the PNG bytes themselves.
+    r = await client.post(
+        "/depth",
+        params={"response_format": "png"},
+        content=PNG,
+        headers={"content-type": "image/png"},
+    )
+    assert r.headers["content-type"] == "image/png"
+    assert r.content == base64.b64decode("iVBORw0=")
+    r = await client.post(
+        "/depth",
+        params={"response_format": "visualization"},
+        content=PNG,
+        headers={"content-type": "image/png"},
+    )
+    assert r.status_code == 200 and depth_completes["task"]["visualize"] is True
+
+
+@pytest.mark.asyncio
+async def test_depth_model_is_the_consumers_choice(
+    client: AsyncClient, depth_completes, monkeypatch
+):
+    # The public registry has one depth model; a second one added for the
+    # test shows the query parameter reaches the job rather than the default.
+    from giq.registry import ModelSpec, get_registry
+
+    spec = ModelSpec("depth", "depth-test-large", 4.0, "transformers")
+    monkeypatch.setitem(get_registry(), spec.key, spec)
+    r = await client.post(
+        "/depth",
+        params={"model": "depth-test-large"},
+        content=PNG,
+        headers={"content-type": "image/png"},
+    )
+    assert r.status_code == 200 and depth_completes["model"] == "depth-test-large"
+    r = await client.post(
+        "/depth", params={"model": "midas"}, content=PNG, headers={"content-type": "image/png"}
+    )
+    assert r.status_code == 400 and "depth-anything-v2-small" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_depth_refuses_what_is_not_an_image(client: AsyncClient, depth_completes):
+    r = await client.post("/depth", content=b"%PDF-1.4", headers={"content-type": "image/png"})
+    assert r.status_code == 400 and "task" not in depth_completes
+    r = await client.post(
+        "/depth", files={"file": ("a.jpg", b"\xff\xd8\xff\xe0 jpeg", "image/jpeg")}
+    )
+    assert r.status_code == 200
+    r = await client.post(
+        "/depth", files={"file": ("a.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")}
+    )
+    assert r.status_code == 200
+    r = await client.post(
+        "/depth", files={"file": ("a.webp", b"RIFF\x00\x00\x00\x00WAVEfmt ", "image/webp")}
+    )
+    assert r.status_code == 400
+
+
+# --- /multiview --------------------------------------------------------------
+
+_MV_VIEW = {
+    "index": 0,
+    "width": 504,
+    "height": 378,
+    "depth_b64": "iVBORw0=",
+    "depth_min": 0.5,
+    "depth_max": 9.0,
+    "conf_b64": "iVBORw0=",
+    "conf_min": 1.0,
+    "conf_max": 3.0,
+    "extrinsics": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]],
+    "intrinsics": [[400, 0, 252], [0, 400, 189], [0, 0, 1]],
+}
+_MV_RESULT = {
+    "id": "multiview-0",
+    "views": [_MV_VIEW, {**_MV_VIEW, "index": 1}],
+    "metric": False,
+    "process_res": 504,
+    "glb_b64": "Z2xURg==",
+    "error": None,
+}
+
+
+@pytest.fixture
+def multiview_completes(monkeypatch):
+    from giq.queue import Job
+    from giq.services.orchestration import Orchestrator
+
+    seen: dict = {}
+    real_submit = Orchestrator.submit_job
+
+    async def submit(self, request):
+        seen["task"] = request.tasks[0]
+        seen["model"] = request.model
+        seen["worker"] = request.worker
+        return await real_submit(self, request)
+
+    async def wait(self, job_id, timeout=None):
+        job = Job(
+            job_id=job_id,
+            request=JobRequest(worker=WorkerType.multiview, model="da3-base", tasks=[]),
+        )
+        job.status = JobStatus.completed
+        job.results = [_MV_RESULT]
+        return job
+
+    monkeypatch.setattr(Orchestrator, "submit_job", submit)
+    monkeypatch.setattr(Orchestrator, "wait_for_job", wait)
+    return seen
+
+
+_TWO_VIEWS = [("files", ("a.png", PNG, "image/png")), ("files", ("b.png", PNG, "image/png"))]
+
+
+@pytest.mark.asyncio
+async def test_multiview_takes_repeated_files_parts(client: AsyncClient, multiview_completes):
+    r = await client.post("/multiview", files=_TWO_VIEWS)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["views"]) == 2 and body["views"][1]["index"] == 1
+    assert body["views"][0]["extrinsics"][0] == [1, 0, 0, 0] and body["process_res"] == 504
+    assert body["metric"] is False and body["job_id"] and "glb_b64" not in body
+    assert multiview_completes["worker"] == WorkerType.multiview
+    task = multiview_completes["task"]
+    assert len(task["images_b64"]) == 2 and task["glb"] is False and task["process_res"] == 504
+    assert task["use_ray_pose"] is False
+
+
+@pytest.mark.asyncio
+async def test_multiview_glb_is_opt_in(client: AsyncClient, multiview_completes):
+    r = await client.post("/multiview", params={"glb": "true"}, files=_TWO_VIEWS)
+    assert r.json()["glb_b64"] == "Z2xURg==" and multiview_completes["task"]["glb"] is True
+    r = await client.post("/multiview", params={"response_format": "glb"}, files=_TWO_VIEWS)
+    assert r.headers["content-type"] == "model/gltf-binary"
+    assert r.content == base64.b64decode("Z2xURg==")
+
+
+@pytest.mark.asyncio
+async def test_multiview_options_and_refusals(
+    client: AsyncClient, multiview_completes, monkeypatch
+):
+    # A second multiview model added for the test (the public registry has
+    # only da3-base) shows the query parameter reaches the job.
+    from giq.registry import ModelSpec, get_registry
+
+    spec = ModelSpec("multiview", "da3-test-large", 12.0, "da3")
+    monkeypatch.setitem(get_registry(), spec.key, spec)
+    r = await client.post(
+        "/multiview",
+        params={"model": "da3-test-large", "process_res": 756, "use_ray_pose": "true"},
+        files=_TWO_VIEWS,
+    )
+    assert r.status_code == 200 and multiview_completes["model"] == "da3-test-large"
+    assert multiview_completes["task"]["process_res"] == 756
+    assert multiview_completes["task"]["use_ray_pose"] is True
+    r = await client.post("/multiview", params={"model": "colmap"}, files=_TWO_VIEWS)
+    assert r.status_code == 400 and "da3-base" in r.json()["detail"]
+    r = await client.post("/multiview", files=[("files", ("a.pdf", b"%PDF-1.4", "image/png"))])
+    assert r.status_code == 400 and "file 0" in r.json()["detail"]
+    r = await client.post("/multiview", content=PNG, headers={"content-type": "image/png"})
+    assert r.status_code == 400
+    r = await client.post("/multiview", files={"file": ("a.png", PNG, "image/png")})
+    assert r.status_code == 400

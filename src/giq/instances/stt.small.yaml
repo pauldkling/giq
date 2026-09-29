@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# faster-whisper on the batch path, distinct from the resident audio stack
+# (audio/whisper-large-v3). Loads by repository from the HF cache; a
+# weights.path to a converted CTranslate2 directory would load that instead.
+name: small
+worker: stt
+engine: faster-whisper
+weights:
+  source: hf:Systran/faster-whisper-small
+vram:
+  gb: 1.0
+  measured: false

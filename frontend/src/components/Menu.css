@@ -1,0 +1,30 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.menu-root { position: relative; display: inline-flex; }
+.menu-popover {
+  position: absolute; top: calc(100% + 6px); z-index: 50;
+  min-width: 220px; max-width: min(340px, calc(100vw - 32px));
+  display: flex; flex-direction: column; padding: var(--space-1);
+  background: var(--color-surface); border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+}
+.menu-end { right: 0; }
+.menu-start { left: 0; }
+.menu-item {
+  display: flex; align-items: flex-start; gap: var(--space-2); text-align: left;
+  padding: 7px 9px; border: 0; background: none; border-radius: var(--radius-sm);
+  color: var(--color-text); font-size: 13px;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--accent-tint); outline: none; }
+.menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.menu-icon { display: inline-flex; padding-top: 2px; color: var(--text-muted); }
+.menu-text { display: flex; flex-direction: column; gap: 2px; }
+.menu-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+.menu-danger .menu-label, .menu-danger .menu-icon { color: var(--critical); }
+.menu-note {
+  padding: 7px 9px 5px; margin-top: var(--space-1); font-size: 11.5px; line-height: 1.45;
+  color: var(--text-subtle); border-top: 1px solid var(--color-divider);
+}

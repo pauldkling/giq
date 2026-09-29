@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: gemma-4-26b-a4b-it
+worker: llm
+engine: llama.cpp
+weights:
+  path: unsloth-gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+  format: gguf
+capabilities: [chat]
+params:
+  # q8_0 for high attention fidelity on recently emitted tokens (exact recall
+  # of German place names, for one). 128k ctx at q8_0 → ~4 GB KV, fits.
+  cache_type_k: q8_0
+  cache_type_v: q8_0
+  # Gemma 4 has a thinking mode — verified in this model's chat template via
+  # `enable_thinking` and `<|think|>` tokens.
+  reasoning: "on"
+vram:
+  gb: 18.0
+  measured: false
+max_batch: 32

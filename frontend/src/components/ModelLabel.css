@@ -1,0 +1,10 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.model-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.model-label-name { font-weight: 500; }
+.model-label-worker { color: var(--text-subtle); font-size: 11.5px; }
+.model-label-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }

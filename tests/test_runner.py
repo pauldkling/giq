@@ -1,0 +1,280 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Tests for job runner."""
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from giq.models import JobRequest, JobStatus, WorkerType
+from giq.queue import Job, JobQueue
+from giq.runner import Runner
+
+
+@pytest.fixture
+def queue():
+    """Create a fresh queue."""
+    return JobQueue()
+
+
+@pytest.fixture
+def runner(queue: JobQueue):
+    """Create a runner with fresh queue."""
+    return Runner(queue)
+
+
+def make_job(job_id: str, model: str = "test-model") -> Job:
+    """Helper to create a test job."""
+    return Job(
+        job_id=job_id,
+        request=JobRequest(
+            worker=WorkerType.llm,
+            model=model,
+            tasks=[{"id": "t1", "user": "Hello"}],
+        ),
+    )
+
+
+def test_runner_initial_state(runner: Runner):
+    """Test runner starts with no active worker."""
+    assert runner.active_worker is None
+    assert runner.active_model is None
+
+
+@pytest.mark.asyncio
+async def test_runner_start_stop(runner: Runner):
+    """Test runner can start and stop."""
+    await runner.start()
+    assert runner._running is True
+
+    await runner.stop()
+    assert runner._running is False
+
+
+@pytest.mark.asyncio
+async def test_runner_processes_job(queue: JobQueue, runner: Runner):
+    """Test runner picks up job from queue (without actual worker)."""
+    job = make_job("job1")
+    await queue.add(job)
+
+    # Job should be pending
+    assert job.status == JobStatus.pending
+
+    # Note: We can't test full processing without mocking llama-server
+    # This just verifies the queue integration works
+    pending = await queue.get_pending()
+    assert len(pending) == 1
+
+
+async def _prime_warm_worker(runner: Runner, worker_type: WorkerType, model: str):
+    """Set runner state as if a job for (worker_type, model) just finished."""
+    from giq.runner import _Slot
+
+    device = runner._device_for(worker_type, model)
+    worker = AsyncMock()  # _unload_worker calls .stop()
+    runner._slots[device] = _Slot(worker, worker_type, model, device)
+    runner._processing_job = False
+
+
+@pytest.mark.asyncio
+async def test_warm_timeout_keeps_worker_for_matching_model(queue: JobQueue, runner: Runner):
+    """Same (worker_type, model) pending: stay warm (don't eager-unload)."""
+    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    await queue.add(make_job("j1", model="gemma-3-27b-it-qat"))
+
+    # Drop into the eager-check branch only (skip the 120s sleep by cancelling
+    # the task immediately after the branch decides).
+    check = runner._warm_timeout_check()
+    # Await up to the sleep: the eager branch is synchronous until asyncio.sleep.
+    import asyncio
+
+    try:
+        await asyncio.wait_for(check, timeout=0.5)
+    except TimeoutError:
+        # Expected — we hit the 120s sleep, which means eager-unload did NOT fire.
+        pass
+
+    assert runner._slots  # still loaded
+    assert runner.active_model == "gemma-3-27b-it-qat"
+
+
+@pytest.mark.asyncio
+async def test_warm_timeout_evicts_for_different_model(queue: JobQueue, runner: Runner):
+    """Same worker_type, different model pending: eager-unload."""
+    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    await queue.add(make_job("j1", model="qwen-coder-30b"))
+
+    await runner._warm_timeout_check()
+
+    assert runner._slots == {}
+
+
+@pytest.mark.asyncio
+async def test_warm_timeout_evicts_for_different_worker_type(queue: JobQueue, runner: Runner):
+    """Different worker_type pending: eager-unload."""
+    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    job = Job(
+        job_id="img1",
+        request=JobRequest(
+            worker=WorkerType.text2image,
+            model="zimage",
+            tasks=[{"id": "t1", "prompt": "a cat"}],
+        ),
+    )
+    await queue.add(job)
+
+    await runner._warm_timeout_check()
+
+    assert runner._slots == {}
+
+
+RESIDENTS = [
+    (WorkerType.llm, "gemma-4-12b"),
+    (WorkerType.audio, "whisper-large-v3"),
+    (WorkerType.embed, "ecapa-tdnn"),
+]
+
+
+def _prime_resident(runner: Runner, key, vram_gb: float, width: int = 1):
+    """Install a fake ready resident."""
+    from giq.runner import _Resident
+
+    worker = AsyncMock()
+    worker.is_ready = True
+    worker.estimated_vram_gb = vram_gb
+    # Same card the model would really load on, so eviction (which only
+    # considers residents sharing the incoming model's card) sees them.
+    res = _Resident(worker, width, runner._device_for(*key))
+    res.last_active = 0.0  # long quiet — eviction grace already satisfied
+    runner._residents[key] = res
+    return res
+
+
+def test_resident_key_detection(queue: JobQueue):
+    runner = Runner(queue, residents=RESIDENTS)
+    assert runner.is_resident_key(WorkerType.llm, "gemma-4-12b")
+    assert not runner.is_resident_key(WorkerType.text2image, "flux_klein")
+    assert not runner.is_resident_key(WorkerType.llm, "qwen3.6-27b")
+
+
+@pytest.mark.asyncio
+async def test_eviction_picks_minimal_single_victim(
+    queue: JobQueue, monkeypatch: pytest.MonkeyPatch
+):
+    """The smallest single resident that covers the deficit is evicted alone."""
+    import giq.runner as runner_mod
+
+    runner = Runner(queue, residents=RESIDENTS)
+    _prime_resident(runner, RESIDENTS[0], vram_gb=9.5)  # gemma
+    audio = _prime_resident(runner, RESIDENTS[1], vram_gb=4.0)
+    _prime_resident(runner, RESIDENTS[2], vram_gb=0.6)
+
+    # 2.4GB free; llama-3.2-3b needs 3+1.5=4.5 → deficit 2.1 → audio alone
+    # covers it (smallest single ≥ deficit); embed and gemma keep serving.
+    monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.4)
+
+    await runner._evict_residents_for(WorkerType.llm, "llama-3.2-3b")
+
+    assert RESIDENTS[0] in runner._residents  # gemma survives
+    assert RESIDENTS[1] not in runner._residents  # audio evicted
+    assert RESIDENTS[2] in runner._residents  # embed survives
+    audio.worker.stop.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_eviction_flux_takes_gemma_only(queue: JobQueue, monkeypatch: pytest.MonkeyPatch):
+    """flux via sdcpp (9GB) evicts gemma alone; audio residents survive."""
+    import giq.runner as runner_mod
+
+    runner = Runner(queue, residents=RESIDENTS)
+    gemma = _prime_resident(runner, RESIDENTS[0], vram_gb=9.5)
+    _prime_resident(runner, RESIDENTS[1], vram_gb=4.0)
+    _prime_resident(runner, RESIDENTS[2], vram_gb=0.6)
+
+    # 2.5GB free; flux_klein needs 9+2=11 → deficit 8.5 → gemma (9.5) alone.
+    monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.5)
+
+    await runner._evict_residents_for(WorkerType.text2image, "flux_klein")
+
+    assert RESIDENTS[0] not in runner._residents  # gemma evicted
+    assert RESIDENTS[1] in runner._residents  # audio survives
+    assert RESIDENTS[2] in runner._residents  # embed survives
+    gemma.worker.stop.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_eviction_cumulative_fallback_takes_everything(
+    queue: JobQueue, monkeypatch: pytest.MonkeyPatch
+):
+    """When no single resident covers the deficit (zimage, 13+2GB into 0.5 free),
+    cumulative cheapest-first displaces the whole set."""
+    import giq.runner as runner_mod
+
+    runner = Runner(queue, residents=RESIDENTS)
+    for key, gb in zip(RESIDENTS, (9.5, 4.0, 0.6), strict=True):
+        _prime_resident(runner, key, vram_gb=gb)
+    monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 0.5)
+
+    await runner._evict_residents_for(WorkerType.text2image, "zimage")
+
+    assert not runner._residents
+
+
+@pytest.mark.asyncio
+async def test_eviction_noop_for_resident_job_key(queue: JobQueue):
+    """Jobs for resident models never trigger eviction (they use lanes)."""
+    runner = Runner(queue, residents=RESIDENTS)
+    _prime_resident(runner, RESIDENTS[0], vram_gb=9.5)
+    # No monkeypatched VRAM: must return before ever reading free VRAM.
+    await runner._evict_residents_for(*RESIDENTS[0])
+    assert RESIDENTS[0] in runner._residents
+
+
+@pytest.mark.asyncio
+async def test_resident_dispatch_claims_job_before_yielding(queue: JobQueue):
+    """Regression (an OOM incident): the dispatch loop must mark a resident job
+    running synchronously — otherwise get_next() returns the same pending job
+    in a tight loop, spawning unbounded tasks and starving the event loop."""
+    import asyncio
+
+    runner = Runner(queue, residents=RESIDENTS)
+    job = make_job("aud1", model="gemma-4-12b")
+    await queue.add(job)
+
+    await runner.start()
+    try:
+        await asyncio.sleep(0.3)
+        assert job.status == JobStatus.running
+        # Exactly one lane task, not thousands.
+        assert len(runner._resident_jobs) == 1
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_eviction_waits_for_in_flight_lane(queue: JobQueue, monkeypatch: pytest.MonkeyPatch):
+    """Eviction drains an active lane instead of stopping the worker mid-job."""
+    import asyncio
+
+    import giq.runner as runner_mod
+
+    runner = Runner(queue, residents=RESIDENTS)
+    embed = _prime_resident(runner, RESIDENTS[2], vram_gb=0.6, width=1)
+    monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 15.0)
+    monkeypatch.setattr(runner_mod, "EVICT_DEFER_CAP_SECONDS", 2.0)
+
+    # Simulate an in-flight embed holding the lane.
+    await embed.lane.acquire()
+    embed.active_count = 1
+
+    evict = asyncio.create_task(runner._evict_residents_for(WorkerType.embed, "other-embed"))
+    await asyncio.sleep(0.1)
+    assert RESIDENTS[2] in runner._residents  # not evicted while in flight
+
+    embed.active_count = 0
+    embed.last_active = 0.0
+    embed.lane.release()
+    await asyncio.wait_for(evict, timeout=10.0)
+    assert RESIDENTS[2] not in runner._residents

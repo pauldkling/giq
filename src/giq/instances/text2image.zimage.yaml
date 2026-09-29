@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Z-Image-Turbo, bf16, under sd.cpp.
+#
+# Image files are single safetensors, one subfolder per part
+# (diffusion_models/, text_encoders/, vae/, loras/) under GIQ_MODELS_DIR.
+name: zimage
+worker: text2image
+engine: sd.cpp
+weights:
+  parts:
+    diffusion: diffusion_models/z_image_turbo_bf16.safetensors
+    text_encoder: text_encoders/qwen_3_4b.safetensors
+    vae: vae/ae.safetensors
+vram:
+  # bf16, 12 GB of weights; peaks 12.6 GB even offloaded, so it takes the full
+  # eviction. Validated on a 16 GB card: 14.4 GB peak including the desktop.
+  gb: 13.0
+  measured: true
+max_batch: 8

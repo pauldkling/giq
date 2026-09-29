@@ -1,0 +1,131 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# giq - GPU Inference Queue configuration.
+#
+# Which file is read: $GIQ_CONFIG, else $GIQ_HOME/config.yaml, else
+# ./config.yaml in the working directory. `giq init` writes this template to
+# $GIQ_HOME/config.yaml; a checkout's ./config.yaml is a copy of it. Every
+# section is optional — delete what you don't use.
+#
+# Environment variables outrank this file wherever both exist (GIQ_TOKEN,
+# GIQ_GPU_DEVICE, GIQ_LLAMA_BINARY, GIQ_SDCPP_BINARY and the directory
+# variables below).
+
+# Data directories. Each resolves, most specific first: its environment
+# variable, this block, the $GIQ_HOME layout, the plain-checkout default.
+#
+#   key        env var             under GIQ_HOME      without GIQ_HOME
+#   models     GIQ_MODELS_DIR      $GIQ_HOME/models    ~/models
+#   instances  GIQ_INSTANCES_DIR   $GIQ_HOME/instances ~/.config/giq/instances
+#   engines    GIQ_ENGINES_DIR     $GIQ_HOME/engines   (PATH lookup)
+#   state      GIQ_DATA_DIR        $GIQ_HOME/state     <checkout>/data
+#   cache      GIQ_CACHE_DIR       $GIQ_HOME/cache     (libraries' own ~/.cache)
+#
+# Entries are absolute, or relative to GIQ_HOME (to this file's directory
+# when GIQ_HOME is unset); `~` is expanded here. A relative weights path in
+# an instance file is taken under `models`; engine builds are found under
+# engines/<engine>/bin/<binary>, e.g. engines/llama.cpp/bin/llama-server.
+paths:
+  # models: /srv/models
+  # instances: instances
+  # engines: engines
+  # state: state
+  # cache: cache
+
+# Who may reach giq. Out of the box giq binds to loopback and needs no token.
+# Before binding it to a network (--host 0.0.0.0) or putting a reverse proxy
+# in front of it, set a token: clients send it as `Authorization: Bearer …`,
+# `X-Giq-Token: …` or `?token=…`. GIQ_TOKEN overrides this; prefer it (from a
+# root-owned environment file) to keeping the secret in this file.
+#
+# `allow_hosts` adds names the Host header may carry — a reverse proxy that
+# forwards its public name, say. IP literals and this machine's own hostname
+# are always accepted. `allow_origins` adds web origins whose pages may call
+# this API from a browser; giq's own dashboard needs no entry.
+access:
+  token: ""
+  allow_hosts: []
+  #   - giq.example.org
+  allow_origins: []
+  #   - https://app.example.org
+
+# GPUs. `device` is the default card for models that name none: an index
+# ("1") or an NVML UUID ("GPU-xxxx…" — stable across reboots and PCI
+# re-enumeration, and what giq reports back). Unset = the biggest card, which
+# is also usually not the one driving the desktop.
+#
+# `bind` places individual models. A bound model is gated against its own
+# card's VRAM, loads there, and can only ever evict residents that share it —
+# so a render on one card cannot cost you the LLM on the other. Operator
+# changes made through the dashboard or /control/models/.../device outrank
+# this and persist in stats.db; what is here is the checked-in default.
+#
+# `reserve` leaves VRAM unclaimed on a card giq shares with something it does
+# not schedule. Free VRAM already nets out what the desktop holds right now;
+# this is headroom for what it grabs next.
+gpu:
+  device:
+  # bind:
+  #   llm/gemma-4-12b: 0
+  #   text2image/flux_klein: 1
+  # reserve:
+  #   "1": 1.0        # the card driving the desktop
+
+# Inference engines: one declared binary per runtime. giq probes each for its
+# version at startup and reports it on /engines and in the model catalog, so
+# you can always tell which build is serving. Unset = the build under the
+# engines directory (engines/llama.cpp/bin/llama-server,
+# engines/sd.cpp/bin/sd-server) when there is one, else whatever PATH
+# resolves; GIQ_LLAMA_BINARY / GIQ_SDCPP_BINARY override all of these. A
+# binary that cannot be found fails at spawn.
+#
+# A llama.cpp build tree links its shared libraries with an absolute RUNPATH
+# into its own build directory, so the directory cannot be renamed without
+# rebuilding — and copying just the binary elsewhere is a trap. Point this at
+# the build, or install it with `cmake --install` (docs/deployment.md).
+engines:
+  # llama.cpp:
+  #   binary: /path/to/llama.cpp/build/bin/llama-server
+  # sd.cpp:
+  #   binary: /path/to/stable-diffusion.cpp/build/bin/sd-server
+
+# Image models are instances like every other model: their files (diffusion
+# model, text encoder, VAE, LoRA) are the instance's `weights.parts`, under
+# `models` (docs/configuration.md, "Image models"). An `image_models:` block
+# here is still read, deprecated: its entries replace the instance's files,
+# and giq logs, once, the instance-file equivalent of each.
+
+# Models kept loaded whenever nothing else claims the VRAM, in reload-priority
+# order. Jobs for these run on per-model lanes; everything else is "sleepy" and
+# evicts them on demand. Commented out = the instances' `residency.priority`
+# (the built-ins: gemma-4-12b, whisper-large-v3, ecapa-tdnn). This set must
+# fit the card with room for the largest
+# sleepy model you actually use, or renders will thrash reloads.
+# residents:
+#   - llm/gemma-4-12b
+#   - audio/whisper-large-v3
+#   - embed/ecapa-tdnn
+
+# Default generation parameters
+image_generation:
+  width: 800
+  height: 480
+  steps: 8
+  cfg: 1.0
+  sampler: euler
+  scheduler: simple
+  denoise: 1.0
+
+# AI-provenance marking of generated images: embeds an XMP/IPTC
+# "trainedAlgorithmicMedia" packet + Software tag as PNG chunks — no
+# re-encode, costs microseconds. On by default; set false to opt out.
+# Platforms that re-encode uploads strip metadata downstream.
+provenance:
+  mark_images: true
+
+# Global negative prompt for image generation
+negative_prompt: >-
+  blurry, low quality, distorted, deformed, ugly, bad anatomy,
+  watermark, text, logo, signature, oversaturated, grainy, noisy

@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "giq-env-vllm"
+version = "0.1.0"
+description = "Interpreter for giq's vllm engine: vLLM serving vendor checkpoints (ModelOpt NVFP4/FP8) natively"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # vLLM pins its own torch line (2.13, cu130 on PyPI) one step ahead of
+    # giq's 2.11 and brings flashinfer, xformers-free kernels and its own
+    # transformers floor — none of which giq's venv should carry, so the
+    # engine gets its own interpreter like da3 and unlimited-ocr. It runs as
+    # a separate `vllm serve` process that giq talks to over HTTP, exactly as
+    # it talks to llama-server.
+    "vllm==0.30.0",
+]
+
+[tool.uv]
+# torch 2.13's CUDA runtime headers are 13.0, but vllm[cu13] pulls the newest
+# nvcc/crt (via humming-kernels). FlashInfer JIT-compiles its sm_120 FP8 GEMM
+# on first use with that nvcc against those headers, and libcudacxx refuses a
+# compiler newer than its toolkit headers — so every compiler part is held on
+# the runtime's minor version. They are separate wheels in CUDA 13: nvcc and
+# crt (the driver and host headers), nvvm (cicc, which emits the PTX) and the
+# assembler-side tools; a newer cicc emits PTX the pinned ptxas rejects.
+constraint-dependencies = [
+    "nvidia-cuda-nvcc==13.0.88",
+    "nvidia-cuda-crt==13.0.88",
+    "nvidia-nvvm==13.0.88",
+    "nvidia-nvjitlink==13.0.88",
+]

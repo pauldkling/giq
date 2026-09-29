@@ -1,0 +1,170 @@
+{
+  "lede": "Standard-Abläufe, keine Stellschrauben über das Nötigste hinaus. Es läuft erst etwas, wenn der Knopf gedrückt wird.",
+  "tabsLabel": "Sandbox-Bereiche",
+  "tabDisabled": "Kein Modell für diesen Bereich kann auf dieser Maschine laden",
+  "catalogFailed": "Der Modellkatalog wurde nicht geladen, daher sind die Modelllisten leer. Er wird jede Minute erneut abgefragt.",
+  "preselectMissed": "{{model}} ist in diesem Bereich nicht verfügbar (nicht registriert oder passt nie auf diese Karten).",
+  "tab": {
+    "chat": "Chat",
+    "tools": "Tool-Aufrufe",
+    "t2i": "Text → Bild",
+    "edit": "Bild + Prompt",
+    "vision": "Bild + Frage",
+    "asr": "Sprache → Text",
+    "tts": "Text → Sprache",
+    "voice": "Stimmabdruck-Vergleich"
+  },
+  "field": {
+    "prompt": "Prompt",
+    "model": "Modell",
+    "temperature": "Temperatur",
+    "maxTokens": "Max. Token",
+    "thinking": "Thinking",
+    "seed": "Seed",
+    "seedRandom": "zufällig",
+    "negative": "Negativ-Prompt (optional)",
+    "referenceImage": "Referenzbild",
+    "instruction": "Anweisung",
+    "image": "Bild",
+    "question": "Frage",
+    "audio": "Audio (wav, mp3, ogg, webm)",
+    "language": "Sprache",
+    "languageAuto": "automatisch erkennen",
+    "diarize": "Sprecher",
+    "text": "Text",
+    "voice": "Stimme"
+  },
+  "toggle": {
+    "on": "an",
+    "off": "aus"
+  },
+  "model": {
+    "option": "{{model}} ({{size}} · {{fit}})",
+    "none": "kein Modell verfügbar",
+    "notOnDisk": "nicht auf dem Datenträger"
+  },
+  "run": {
+    "chat": "Ausführen",
+    "generating": "Generiere…",
+    "stop": "Stoppen",
+    "stopping": "Stoppe…",
+    "tools": "Ausführen",
+    "running": "Läuft…",
+    "t2i": "Generieren",
+    "generatingImage": "Generiere… (kann vorgehaltene Modelle verdrängen)",
+    "edit": "Bearbeiten",
+    "editing": "Bearbeite…",
+    "vision": "Fragen",
+    "asr": "Transkribieren",
+    "transcribing": "Transkribiere…",
+    "tts": "Sprechen",
+    "synthesizing": "Synthetisiere…",
+    "voice": "Sprecher vergleichen",
+    "embedding": "Berechne Stimmabdrücke…"
+  },
+  "out": {
+    "kicker": "Ergebnis",
+    "latency": "Latenz {{value}}",
+    "seed": "Seed {{seed}}"
+  },
+  "stream": {
+    "secs": "{{value}} s",
+    "waiting": "{{elapsed}} · warte auf das Modell",
+    "tokens_one": "{{n}} Token",
+    "tokens_other": "{{n}} Token",
+    "rate": "{{value}} Token/s",
+    "thoughtChars_one": "{{n}} Zeichen Thinking",
+    "thoughtChars_other": "{{n}} Zeichen Thinking",
+    "stopped": "gestoppt",
+    "cutOff": "an der Token-Grenze abgeschnitten",
+    "thinking": "Thinking",
+    "thinkingLive": "Thinking…",
+    "thinkingStopped": "Thinking (gestoppt)",
+    "jump": "Zum Neuesten springen",
+    "emptyLength": "<err>Beim Thinking an der Max.-Token-Grenze gestoppt — die Antwort hat nie begonnen.</err> Das Thinking oben ist das, wofür das Budget verbraucht wurde, und beim Lesen zeigt sich, was passiert ist: Entweder führt der Gedankengang noch irgendwohin, dann lässt ein größeres „Max. Token“ ihn zu Ende kommen – oder er kreist um eine Frage ohne saubere Lösung, dann kauft mehr Budget nur mehr Kreisen. Mit Thinking aus gibt es eine direkte Antwort.",
+    "empty": "(leere Antwort)"
+  },
+  "chat": {
+    "defaultPrompt": "Erkläre in zwei Sätzen, warum der Himmel blau ist.",
+    "load": {
+      "off": "<b>{{model}} ist ausgeschaltet</b> — es lehnt Jobs ab und kann nicht laden. Zuerst unter <link>Modelle</link> auf „bei Bedarf“ oder „warm halten“ stellen.",
+      "loaded": "{{model}} ist geladen — antwortet in etwa einer Sekunde.",
+      "evicts": "{{model}} ist nicht geladen; Ausführen verdrängt vorgehaltene Modelle, um Platz zu schaffen, die erste Antwort dauert also eine Weile.",
+      "loads": "{{model}} ist nicht geladen — die erste Antwort wartet, bis es geladen ist."
+    },
+    "think": {
+      "raised": "<b>Max. Token auf {{floor}} angehoben</b> — das Thinking wird aus diesem Budget bezahlt, bevor die Antwort beginnt, und schwierige Aufgaben brauchten gemessen 10k–21k Token; ein kleineres Budget liefert eine leere Antwort, keine kurze. Es ist eine Obergrenze, kurzes Thinking kostet also nichts extra.",
+      "canThink": "Es kann nachdenken; der Thinking-Schalter schaltet das ein.",
+      "noEffect": "<b>Thinking hat hier keine Wirkung</b> — giq startet dieses Modell mit ausgeschaltetem Reasoning."
+    }
+  },
+  "tools": {
+    "defaultPrompt": "Wirf zwei sechsseitige Würfel und nenne mir die aktuelle Uhrzeit zusammen mit der Summe.",
+    "promptLabel": "Prompt (das Modell kann <code>get_current_time</code> und <code>roll_dice</code> aufrufen)",
+    "hint": "Tool-Aufrufe im OpenAI-Stil (das MCP-Übertragungsmuster): Das Modell fordert Tools an, die Sandbox führt sie hier im Browser aus, und das Modell formuliert die endgültige Antwort. Läuft auf <code>{{model}}</code>.",
+    "unavailable": "{{model}} ist nicht verfügbar (nicht registriert, ausgeschaltet oder passt nie) – und genau dieses Modell nutzt dieser Bereich.",
+    "call": "→ Modell ruft auf",
+    "result": "← Sandbox liefert",
+    "noAnswer_one": "Keine endgültige Antwort: Das Modell rief nach {{count}} Runde noch Tools auf.",
+    "noAnswer_other": "Keine endgültige Antwort: Das Modell rief nach {{count}} Runden noch Tools auf."
+  },
+  "t2i": {
+    "defaultPrompt": "Eine gemütliche Kleinstadt am Fluss in der Abenddämmerung, warm leuchtende Fenster, im Stil einer Graphic Novel",
+    "none": "Kein Text-zu-Bild-Modell passt auf diese Karten.",
+    "evicts": "Generieren verdrängt die vorgehaltenen Modelle — das erste Bild dauert Minuten, danach laden sie neu."
+  },
+  "edit": {
+    "defaultPrompt": "Verwandle dieses Foto in eine Aquarell-Illustration",
+    "needImage": "Zuerst ein Referenzbild wählen.",
+    "none": "Kein Bildbearbeitungsmodell passt auf diese Karten — Bereich deaktiviert.",
+    "evicts": "Bearbeiten kann vorgehaltene Modelle verdrängen — das kann ein paar Minuten dauern."
+  },
+  "vision": {
+    "defaultPrompt": "Was ist auf diesem Bild zu sehen?",
+    "needImage": "Zuerst ein Bild wählen.",
+    "none": "Kein Modell mit Bildverständnis ist registriert — der Bereich hat niemanden zu fragen.",
+    "noWeights": "{{model}} ist registriert, aber seine Gewichte liegen nicht auf dem Datenträger — vor dem Fragen das GGUF (und sein mmproj) herunterladen.",
+    "loadsFirst": "Die Frage lädt zuerst das Modell — die erste Antwort dauert eine Weile."
+  },
+  "asr": {
+    "record": "Aufnehmen",
+    "stopRecording": "Aufnahme beenden",
+    "captured": "{{size}} aufgenommen",
+    "recordHint": "Über das Mikrofon aufnehmen oder eine Datei hochladen. Eine gewählte Datei hat Vorrang vor einer Aufnahme.",
+    "secureHint": "Mikrofonaufnahme braucht einen sicheren Kontext (localhost oder https) — Hochladen funktioniert immer.",
+    "needAudio": "Zuerst eine Audiodatei wählen (oder aufnehmen).",
+    "micFailed": "Mikrofon nicht verfügbar: {{error}}",
+    "noSpeech": "(keine Sprache erkannt)",
+    "time": "Zeit",
+    "speaker": "Sprecher",
+    "text": "Text",
+    "span": "{{start}}–{{end}} s",
+    "audio": "{{value}} s Audio",
+    "lang": "Sprache {{lang}}",
+    "speakers_one": "{{count}} Sprecher",
+    "speakers_other": "{{count}} Sprecher"
+  },
+  "tts": {
+    "defaultText": "Die GPU gehört allen — dreißig Sekunden am Stück.",
+    "defaultVoice": "{{voice}} (Standard)",
+    "hint": "{{model}} ({{size}}) lädt bei Bedarf, ohne vorgehaltene Modelle zu verdrängen."
+  },
+  "voice": {
+    "clipA": "Stimmprobe A",
+    "clipB": "Stimmprobe B",
+    "needClip": "Eine Probe wählen.",
+    "hint": "ecapa-tdnn-Stimmabdrücke, Kosinus-Ähnlichkeit — derselbe Sprecher erreicht typischerweise ≥ 0,5, verschiedene Sprecher < 0,25.",
+    "cosine": "Kosinus {{value}}",
+    "gauge": "Kosinus-Ähnlichkeit",
+    "tag": {
+      "same": "derselbe Sprecher",
+      "inconclusive": "nicht eindeutig",
+      "different": "verschiedene Sprecher"
+    },
+    "verdict": {
+      "same": "Sehr wahrscheinlich derselbe Sprecher.",
+      "inconclusive": "Nicht eindeutig — grenzwertige Ähnlichkeit.",
+      "different": "Sehr wahrscheinlich verschiedene Sprecher."
+    }
+  }
+}
