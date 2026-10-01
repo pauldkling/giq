@@ -4,9 +4,9 @@
 
 """The model catalog as the hand-written registry and llm tables defined it.
 
-Captured from the code the instance files replaced, and never regenerated:
-it is the fixed point the built-in instances must reproduce field for field.
-Change it only together with the instance file whose value moves, and say why
+Captured from the code the recipe files replaced, and never regenerated:
+it is the fixed point the built-in recipes must reproduce field for field.
+Change it only together with the recipe file whose value moves, and say why
 in that commit.
 """
 

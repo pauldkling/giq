@@ -4,7 +4,7 @@
 
 # Qwen3.8-27B as NVIDIA quantised it (ModelOpt NVFP4 weights, some layers
 # FP8), served by vllm for many users at once. The same model as
-# llm/qwen3.8-27b under llama.cpp; this one is the throughput instance.
+# llm/qwen3.8-27b under llama.cpp; this one is the throughput recipe.
 # Measured on an RTX 5090 at 256 generated tokens per request: 72 tok/s for
 # one request, 937 tok/s in total at 16 parallel, where one llama-server
 # slot gives 56 tok/s at any load.
@@ -30,9 +30,9 @@ params:
   # The budget is a KV size, not a fraction of the card, so it means the same
   # on a 32 GB RTX 5090 and a 96 GB RTX PRO 6000. 6 GiB of fp8 KV holds
   # about 180k tokens (36 KiB per token): one full 128k request and change,
-  # or 32 requests averaging 5.6k — and keeps the whole instance loadable on
+  # or 32 requests averaging 5.6k — and keeps the whole recipe loadable on
   # a 32 GB card through giq's gate with its 2 GB margin. On a bigger card,
-  # replace this file in the instances directory with a larger budget (and a
+  # replace this file in the recipes directory with a larger budget (and a
   # vram figure to match) rather than a fraction.
   kv_cache_memory: 6G
   # 128k, not the native 256k: a full-length request must fit the pool.

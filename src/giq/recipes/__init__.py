@@ -2,14 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Model instances: every model giq serves, loaded from YAML files (ADR-002).
+"""Model recipes: every model giq serves, loaded from YAML files (ADR-002).
 
 Two sources, read in order:
 
-- the built-in instances, one file each next to this module
+- the built-in recipes, one file each next to this module
   (``<worker>.<name>.yaml``), shipped in the package;
 - the operator's, ``*.yaml``/``*.yml`` directly in
-  :func:`giq.paths.instances_dir`, which add instances or replace a built-in
+  :func:`giq.paths.recipes_dir`, which add recipes or replace a built-in
   that has the same worker and name.
 
 They are validated into one immutable :class:`Snapshot`. Consumers read the
@@ -38,7 +38,7 @@ from pydantic import ValidationError
 from yaml.constructor import ConstructorError
 from yaml.resolver import BaseResolver
 
-from giq.instances.schema import Instance
+from giq.recipes.schema import Recipe
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,8 @@ SUFFIXES = (".yaml", ".yml")
 Key = tuple[str, str]
 
 
-class InstanceError(ValueError):
-    """An instance file that cannot be used, with the file named."""
+class RecipeError(ValueError):
+    """A recipe file that cannot be used, with the file named."""
 
     def __init__(self, message: str, file: Path | None = None, detail: str | None = None):
         super().__init__(message)
@@ -58,15 +58,15 @@ class InstanceError(ValueError):
         self.detail = detail if detail is not None else message
 
 
-def _file_error(path: Path, detail: str) -> InstanceError:
-    return InstanceError(f"{path}: {detail}", file=path, detail=detail)
+def _file_error(path: Path, detail: str) -> RecipeError:
+    return RecipeError(f"{path}: {detail}", file=path, detail=detail)
 
 
 @dataclass(frozen=True)
 class LoadError:
     """An operator file left out of the snapshot, and why."""
 
-    # None when the problem is not one file's (two files defining one instance).
+    # None when the problem is not one file's (two files defining one recipe).
     file: str | None
     message: str
 
@@ -103,8 +103,8 @@ def _format(err: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def load_file(path: Path) -> Instance:
-    """Parse and validate one instance file."""
+def load_file(path: Path) -> Recipe:
+    """Parse and validate one recipe file."""
     try:
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
     except (OSError, yaml.YAMLError) as e:
@@ -112,7 +112,7 @@ def load_file(path: Path) -> Instance:
     if not isinstance(data, dict):
         raise _file_error(path, "expected a mapping at the top level")
     try:
-        return Instance.model_validate(data)
+        return Recipe.model_validate(data)
     except ValidationError as e:
         raise _file_error(path, _format(e)) from e
 
@@ -121,37 +121,37 @@ def _files(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.suffix in SUFFIXES and p.is_file())
 
 
-def _alias_clashes(instances: Iterable[Instance]) -> list[str]:
-    """Names a client could send that would mean two instances."""
+def _alias_clashes(recipes: Iterable[Recipe]) -> list[str]:
+    """Names a client could send that would mean two recipes."""
     owner: dict[Key, str] = {}
     clashes = []
-    for inst in instances:
-        for name in (inst.name, *inst.aliases):
-            key = (inst.worker, name)
-            if key in owner and owner[key] != inst.ref:
-                clashes.append(f"{inst.worker}/{name} names both {owner[key]} and {inst.ref}")
-            owner.setdefault(key, inst.ref)
+    for recipe in recipes:
+        for name in (recipe.name, *recipe.aliases):
+            key = (recipe.worker, name)
+            if key in owner and owner[key] != recipe.ref:
+                clashes.append(f"{recipe.worker}/{name} names both {owner[key]} and {recipe.ref}")
+            owner.setdefault(key, recipe.ref)
     return clashes
 
 
 @lru_cache(maxsize=1)
-def builtin() -> Mapping[Key, tuple[Instance, Path]]:
-    """The shipped instances. Any problem raises: it is a bug, not a setting."""
-    found: dict[Key, tuple[Instance, Path]] = {}
+def builtin() -> Mapping[Key, tuple[Recipe, Path]]:
+    """The shipped recipes. Any problem raises: it is a bug, not a setting."""
+    found: dict[Key, tuple[Recipe, Path]] = {}
     for path in _files(BUILTIN_DIR):
-        inst = load_file(path)
-        if path.stem != f"{inst.worker}.{inst.name}":
+        recipe = load_file(path)
+        if path.stem != f"{recipe.worker}.{recipe.name}":
             raise _file_error(path, "a built-in is named <worker>.<name>.yaml")
-        if inst.key in found:
-            raise _file_error(path, f"{inst.ref} is already defined in {found[inst.key][1]}")
-        found[inst.key] = (inst, path)
-    if clashes := _alias_clashes(inst for inst, _ in found.values()):
-        raise InstanceError(f"built-in instances: {'; '.join(clashes)}")
+        if recipe.key in found:
+            raise _file_error(path, f"{recipe.ref} is already defined in {found[recipe.key][1]}")
+        found[recipe.key] = (recipe, path)
+    if clashes := _alias_clashes(recipe for recipe, _ in found.values()):
+        raise RecipeError(f"built-in recipes: {'; '.join(clashes)}")
     return MappingProxyType(found)
 
 
-def _operator(directory: Path, errors: list[LoadError]) -> dict[Key, tuple[Instance, Path]]:
-    """The operator's instances; files that fail are reported and left out."""
+def _operator(directory: Path, errors: list[LoadError]) -> dict[Key, tuple[Recipe, Path]]:
+    """The operator's recipes; files that fail are reported and left out."""
     if not directory.is_dir():
         return {}
     try:
@@ -159,15 +159,15 @@ def _operator(directory: Path, errors: list[LoadError]) -> dict[Key, tuple[Insta
     except OSError as e:
         errors.append(LoadError(str(directory), str(e)))
         return {}
-    loaded: dict[Key, list[tuple[Instance, Path]]] = {}
+    loaded: dict[Key, list[tuple[Recipe, Path]]] = {}
     for path in files:
         try:
-            inst = load_file(path)
-        except InstanceError as e:
+            recipe = load_file(path)
+        except RecipeError as e:
             errors.append(LoadError(str(e.file or path), e.detail))
             continue
-        loaded.setdefault(inst.key, []).append((inst, path))
-    found: dict[Key, tuple[Instance, Path]] = {}
+        loaded.setdefault(recipe.key, []).append((recipe, path))
+    found: dict[Key, tuple[Recipe, Path]] = {}
     for key, entries in loaded.items():
         if len(entries) > 1:
             # Neither file wins: which one would is an accident of sorting.
@@ -180,10 +180,10 @@ def _operator(directory: Path, errors: list[LoadError]) -> dict[Key, tuple[Insta
 
 @dataclass(frozen=True)
 class Snapshot:
-    """Every instance giq serves, validated together; never mutated."""
+    """Every recipe giq serves, validated together; never mutated."""
 
-    instances: Mapping[Key, Instance]
-    # Which file each instance came from.
+    recipes: Mapping[Key, Recipe]
+    # Which file each recipe came from.
     sources: Mapping[Key, Path]
     # Operator files that were left out, one message each.
     errors: tuple[str, ...] = ()
@@ -192,35 +192,35 @@ class Snapshot:
     # The operator directory this snapshot read; None if none was given.
     operator_dir: Path | None = None
 
-    def get(self, worker: str, name: str) -> Instance | None:
-        return self.instances.get((worker, name))
+    def get(self, worker: str, name: str) -> Recipe | None:
+        return self.recipes.get((worker, name))
 
-    def of_worker(self, worker: str) -> list[Instance]:
-        return [i for i in self.instances.values() if i.worker == worker]
+    def of_worker(self, worker: str) -> list[Recipe]:
+        return [i for i in self.recipes.values() if i.worker == worker]
 
 
 def load(operator_dir: Path | None = None) -> Snapshot:
     """Built-ins, then the operator directory over them."""
     if operator_dir is None:
-        from giq.paths import instances_dir
+        from giq.paths import recipes_dir
 
-        operator_dir = instances_dir()
+        operator_dir = recipes_dir()
     merged = dict(builtin())
     errors: list[LoadError] = []
-    for key, (inst, path) in sorted(_operator(operator_dir, errors).items()):
-        candidate = {**{k: i for k, (i, _) in merged.items()}, key: inst}
+    for key, (recipe, path) in sorted(_operator(operator_dir, errors).items()):
+        candidate = {**{k: i for k, (i, _) in merged.items()}, key: recipe}
         if clashes := _alias_clashes(candidate.values()):
             errors.append(LoadError(str(path), "; ".join(clashes)))
             continue
         if key in merged:
-            logger.info(f"instances: {inst.ref} from {path} replaces the built-in")
+            logger.info(f"recipes: {recipe.ref} from {path} replaces the built-in")
         else:
-            logger.info(f"instances: {inst.ref} from {path}")
-        merged[key] = (inst, path)
+            logger.info(f"recipes: {recipe.ref} from {path}")
+        merged[key] = (recipe, path)
     for problem in errors:
-        logger.error(f"instances: ignoring {problem}")
+        logger.error(f"recipes: ignoring {problem}")
     return Snapshot(
-        instances=MappingProxyType({k: i for k, (i, _) in merged.items()}),
+        recipes=MappingProxyType({k: i for k, (i, _) in merged.items()}),
         sources=MappingProxyType({k: p for k, (_, p) in merged.items()}),
         errors=tuple(str(e) for e in errors),
         problems=tuple(errors),
@@ -296,8 +296,8 @@ def subscribe(fn: Callable[[Snapshot], None]) -> None:
 
 __all__ = [
     "BUILTIN_DIR",
-    "Instance",
-    "InstanceError",
+    "Recipe",
+    "RecipeError",
     "LoadError",
     "Snapshot",
     "builtin",

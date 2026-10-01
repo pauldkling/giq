@@ -9,7 +9,7 @@ _audio_cache: AudioCache | None = None
 
 
 def get_orchestrator() -> Orchestrator:
-    """Get a fresh Orchestrator instance that uses the current queue."""
+    """Get a fresh Orchestrator recipe that uses the current queue."""
     return Orchestrator()
 
 

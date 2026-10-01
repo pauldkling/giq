@@ -92,7 +92,7 @@ GIQ_MODELS_DIR=/data/models uv run python -m giq.main --host 127.0.0.1 --port 80
 Then open `http://localhost:8084/dash`.
 
 Model weights are not shipped. Put them under `~/models` (or point
-`GIQ_MODELS_DIR` elsewhere); the weight paths in the instance files are
+`GIQ_MODELS_DIR` elsewhere); the weight paths in the recipe files are
 relative to that directory.
 `/capabilities` and the dashboard show which registered models were found on
 disk. Paths, engines and GPUs are set in `config.yaml` — see

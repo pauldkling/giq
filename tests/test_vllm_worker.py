@@ -12,9 +12,9 @@ import signal
 import httpx
 import pytest
 
-from giq.instances.schema import Instance
 from giq.models import WorkerType
 from giq.queue import JobQueue, JobStream
+from giq.recipes.schema import Recipe
 from giq.workers import vllm
 from giq.workers.engine import ServedLLM, WorkerStartError
 from giq.workers.vllm import (
@@ -24,13 +24,13 @@ from giq.workers.vllm import (
     check_checkpoint,
     flashinfer_arch,
 )
-from tests._vllm import NAME, doc, instance, make_checkpoint, params_of
+from tests._vllm import NAME, doc, make_checkpoint, make_recipe, params_of
 
 
-def worker_for(inst: Instance, **kw) -> VLLMWorker:
+def worker_for(recipe: Recipe, **kw) -> VLLMWorker:
     cfg = VLLMWorkerConfig(
-        model=inst.name,
-        instance=inst,
+        model=recipe.name,
+        recipe=recipe,
         device="GPU-test",
         port=8088,
         python="/opt/giq/envs/vllm/.venv/bin/python",
@@ -42,12 +42,12 @@ def worker_for(inst: Instance, **kw) -> VLLMWorker:
 
 @pytest.fixture
 def operator_dir(tmp_path, monkeypatch):
-    """An operator instances directory, the catalog rebuilt around it."""
+    """An operator recipes directory, the catalog rebuilt around it."""
     from giq.registry import reload_registry
 
-    monkeypatch.setenv("GIQ_INSTANCES_DIR", str(tmp_path / "instances"))
-    (tmp_path / "instances").mkdir()
-    yield tmp_path / "instances"
+    monkeypatch.setenv("GIQ_RECIPES_DIR", str(tmp_path / "recipes"))
+    (tmp_path / "recipes").mkdir()
+    yield tmp_path / "recipes"
     monkeypatch.undo()
     reload_registry()
 
@@ -58,7 +58,7 @@ def operator_dir(tmp_path, monkeypatch):
 @pytest.mark.parametrize("nested", [True, False])
 def test_mtp_head_found_top_level_or_nested(tmp_path, nested):
     weights = make_checkpoint(tmp_path, mtp=1, nested=nested)
-    check_checkpoint(weights, instance(weights, "interactive").params)
+    check_checkpoint(weights, make_recipe(weights, "interactive").params)
 
 
 def test_start_check_refuses_a_gguf(tmp_path):
@@ -76,7 +76,7 @@ def test_start_check_refuses_a_directory_without_config(tmp_path):
 @pytest.mark.asyncio
 async def test_start_checks_the_weights_before_spawning(tmp_path, monkeypatch):
     weights = make_checkpoint(tmp_path, mtp=1)
-    worker = worker_for(instance(weights, "interactive"))
+    worker = worker_for(make_recipe(weights, "interactive"))
     (weights / "config.json").write_text(json.dumps({"text_config": {}}))  # head gone since load
 
     async def no_spawn(*a, **kw):
@@ -92,7 +92,7 @@ async def test_a_second_vllm_on_a_card_moves_port_before_touching_a_scope(tmp_pa
     """The scope is named after the port, and start() stops a scope of that
     name as left over from a crashed run. With the card's port held by a
     running vllm, the second must move first — or it stops the first."""
-    worker = worker_for(instance(make_checkpoint(tmp_path)), log_path=str(tmp_path / "v.log"))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)), log_path=str(tmp_path / "v.log"))
     held = worker.config.port
     stopped: list[str] = []
     spawned: list[tuple] = []
@@ -129,7 +129,7 @@ def argv_value(cmd: list[str], flag: str) -> str:
 
 def test_command_from_the_throughput_profile(tmp_path):
     weights = make_checkpoint(tmp_path)
-    inst = Instance.model_validate(
+    recipe = Recipe.model_validate(
         doc(
             weights,
             "throughput",
@@ -140,7 +140,7 @@ def test_command_from_the_throughput_profile(tmp_path):
             tool_call_parser="qwen3_coder",
         )
     )
-    cmd = worker_for(inst).build_command(card_total_gb=31.84)
+    cmd = worker_for(recipe).build_command(card_total_gb=31.84)
 
     assert cmd[:3] == ["/opt/giq/envs/vllm/.venv/bin/vllm", "serve", str(weights)]
     assert argv_value(cmd, "--served-model-name") == NAME
@@ -163,7 +163,7 @@ def test_a_kv_budget_sizes_the_start_check_to_the_model(tmp_path):
     """With a byte budget vllm still refuses to start unless free memory covers
     gpu_memory_utilization x card, 0.9 by default — a shared card never would.
     giq passes the model's own figure over the card's size instead."""
-    inst = Instance.model_validate(
+    recipe = Recipe.model_validate(
         doc(
             make_checkpoint(tmp_path),
             "interactive",
@@ -171,9 +171,9 @@ def test_a_kv_budget_sizes_the_start_check_to_the_model(tmp_path):
             kv_cache_memory="8G",
         )
     )
-    assert inst.vram.gb == pytest.approx(31.73), "weights + KV + overhead"
+    assert recipe.vram.gb == pytest.approx(31.73), "weights + KV + overhead"
 
-    worker = worker_for(inst)
+    worker = worker_for(recipe)
     on_pro6000 = worker.build_command(card_total_gb=95.59)
     assert argv_value(on_pro6000, "--kv-cache-memory-bytes") == str(8 * 2**30)
     assert float(argv_value(on_pro6000, "--gpu-memory-utilization")) == pytest.approx(0.332)
@@ -184,7 +184,7 @@ def test_a_kv_budget_sizes_the_start_check_to_the_model(tmp_path):
 def test_command_from_the_interactive_profile(tmp_path):
     weights = make_checkpoint(tmp_path)
     text_only = {**doc(weights, "interactive", enforce_eager=True), "capabilities": ["chat"]}
-    cmd = worker_for(Instance.model_validate(text_only)).build_command()
+    cmd = worker_for(Recipe.model_validate(text_only)).build_command()
 
     assert json.loads(argv_value(cmd, "--speculative-config")) == {
         "method": "mtp",
@@ -332,7 +332,7 @@ def test_runner_builds_a_vllm_worker_for_engine_vllm(operator_dir, tmp_path, mon
 def test_lanes_follow_max_num_seqs(tmp_path):
     from giq.runner import _lane_width
 
-    worker = worker_for(instance(make_checkpoint(tmp_path), "interactive"))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path), "interactive"))
     assert _lane_width(WorkerType.llm, NAME, worker) == 4
     c = worker.concurrency()
     assert (c.max_parallel, c.per_request_context, c.shared_kv) == (4, 131072, True)
@@ -343,7 +343,7 @@ def test_http_timeout_lets_the_job_timeout_fire_first(tmp_path):
     from giq.queue import Job
     from giq.runner import _job_timeout
 
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     job = Job(job_id="j", request=JobRequest(worker="llm", model=NAME, chat_request={}))
     assert _job_timeout(WorkerType.llm, job) < worker.http_timeout().read
 
@@ -387,7 +387,7 @@ def sse(chunks: list[dict]) -> bytes:
 
 def serving_worker(tmp_path, handler) -> VLLMWorker:
     served = {**doc(make_checkpoint(tmp_path)), "request_defaults": {"top_k": 20, "min_p": 0.0}}
-    worker = worker_for(Instance.model_validate(served))
+    worker = worker_for(Recipe.model_validate(served))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -437,7 +437,7 @@ async def test_stream_is_normalised_to_reasoning_content(tmp_path):
     assert result["id"] == "chatcmpl-9f2" and result["model"] == NAME
 
     assert sent["stream"] is True and sent["stream_options"] == {"include_usage": True}
-    assert sent["top_k"] == 20 and sent["min_p"] == 0.0, "instance request defaults apply"
+    assert sent["top_k"] == 20 and sent["min_p"] == 0.0, "recipe request defaults apply"
     assert "giq_loop_guard" not in sent and "reasoning_budget_tokens" not in sent
 
 
@@ -547,7 +547,7 @@ def install_group(monkeypatch, process: FakeProcess) -> list[int]:
 
 @pytest.mark.asyncio
 async def test_stop_terminates_the_group_and_the_scope(tmp_path, monkeypatch, fast_stop):
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     process = FakeProcess(dies_on=signal.SIGTERM)
     worker._process = process  # type: ignore[assignment]
     worker._ready = True
@@ -565,7 +565,7 @@ async def test_stop_terminates_the_group_and_the_scope(tmp_path, monkeypatch, fa
 
 @pytest.mark.asyncio
 async def test_stop_escalates_to_sigkill(tmp_path, monkeypatch, fast_stop):
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     process = FakeProcess(dies_on=None)
     worker._process = process  # type: ignore[assignment]
     signals = install_group(monkeypatch, process)
@@ -579,7 +579,7 @@ async def test_stop_escalates_to_sigkill(tmp_path, monkeypatch, fast_stop):
 
 @pytest.mark.asyncio
 async def test_an_unkillable_server_keeps_its_reference(tmp_path, monkeypatch, fast_stop):
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     process = FakeProcess(dies_on=None)
     worker._process = process  # type: ignore[assignment]
     monkeypatch.setattr(vllm.os, "killpg", lambda pgid, sig: None)  # nothing ever dies
@@ -591,7 +591,7 @@ async def test_an_unkillable_server_keeps_its_reference(tmp_path, monkeypatch, f
 
 @pytest.mark.asyncio
 async def test_stop_of_an_exited_server_only_cleans_up(tmp_path, monkeypatch, fast_stop):
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     process = FakeProcess()
     process.die(1)
     worker._process = process  # type: ignore[assignment]
@@ -608,7 +608,7 @@ async def test_stop_of_an_exited_server_only_cleans_up(tmp_path, monkeypatch, fa
 async def test_a_start_that_dies_fails_at_once_with_the_log(tmp_path):
     log = tmp_path / "vllm.log"
     log.write_text("loading\nValueError: Free memory on device is less than desired\n")
-    worker = worker_for(instance(make_checkpoint(tmp_path)), log_path=str(log))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)), log_path=str(log))
     process = FakeProcess()
     process.die(1)
     worker._process = process  # type: ignore[assignment]
@@ -630,7 +630,7 @@ async def test_ready_needs_health_and_the_model_listed(tmp_path):
             return httpx.Response(200 if calls["health"] > 2 else 503)
         return httpx.Response(200, json={"data": [{"id": NAME}]})
 
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     worker._process = FakeProcess()  # type: ignore[assignment]
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
@@ -641,7 +641,7 @@ async def test_ready_needs_health_and_the_model_listed(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ready_times_out(tmp_path):
-    worker = worker_for(instance(make_checkpoint(tmp_path)))
+    worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
     worker._process = FakeProcess()  # type: ignore[assignment]
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(lambda r: httpx.Response(503))
@@ -695,7 +695,7 @@ async def test_warm_up_starts_with_time_to_compile_and_always_stops(tmp_path, mo
     async def stop(self):
         calls.append(("stop", None))
 
-    monkeypatch.setattr(vllm, "instance_for", lambda model: instance(make_checkpoint(tmp_path)))
+    monkeypatch.setattr(vllm, "recipe_for", lambda model: make_recipe(make_checkpoint(tmp_path)))
     monkeypatch.setattr(vllm.VLLMWorker, "start", start)
     monkeypatch.setattr(vllm.VLLMWorker, "stop", stop)
     with pytest.raises(TimeoutError):

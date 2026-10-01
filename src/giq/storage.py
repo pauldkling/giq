@@ -8,7 +8,7 @@ Resolves every model in the VRAM registry to its on-disk files (GGUF files,
 safetensors components, HF-cache snapshot dirs), detects files shared between
 models (text2image and image_edit flux_klein share every file; stt large-v3 and the audio resident
 share the faster-whisper snapshot), and aggregates per-mount disk usage.
-Where a model's files are is its instance's to say (``giq.weights``).
+Where a model's files are is its recipe's to say (``giq.weights``).
 """
 
 from __future__ import annotations
@@ -85,14 +85,14 @@ def resolve_model_paths() -> dict[tuple[str, str], list[Path]]:
             # A deprecated config.yaml entry still decides which files render.
             paths = [Path(p) for p in (im.diffusion, im.text_encoder, im.vae, im.lora) if p]
         elif found := locations(worker, model):
-            # What the instance names (with the workers' env overrides): local
+            # What the recipe names (with the workers' env overrides): local
             # files and snapshot directories for the models loaded by path —
             # the hub is never consulted for those — and HF-cache repos for
             # the models loaded by repository. faster-whisper large-v3 appears
             # twice on purpose: stt/large-v3 and the audio resident load one
             # snapshot. LLMs come through here too, whatever their format: a
             # llama.cpp GGUF (its shards expanded) and a vllm checkpoint
-            # directory are both just the instance's weights.path. Asking the
+            # directory are both just the recipe's weights.path. Asking the
             # llama.cpp tables instead left every vllm model with no files.
             paths = [p for loc in found for p in _expand_gguf(_on_disk(loc, hub))]
         # resolve() unifies symlinked routes (e.g. a symlinked home dir) so

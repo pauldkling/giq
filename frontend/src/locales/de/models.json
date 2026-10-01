@@ -148,11 +148,11 @@
     "working": "Arbeite an {{key}}…",
     "dismiss": "Schließen"
   },
-  "instanceErrors": {
-    "kicker": "Instanzdateien",
-    "title_one": "{{count}} Instanzdatei ausgelassen",
-    "title_other": "{{count}} Instanzdateien ausgelassen",
-    "body": "Diese Dateien aus {{dir}} konnte giq nicht verwenden und läuft ohne sie; ein mitgeliefertes Modell gleichen Namens bleibt in Betrieb. Dateien korrigieren, dann giq neu starten.",
+  "recipeErrors": {
+    "kicker": "Rezeptdateien",
+    "title_one": "{{count}} Rezeptdatei ausgelassen",
+    "title_other": "{{count}} Rezeptdateien ausgelassen",
+    "body": "Diese Dateien aus {{dir}} konnte giq nicht verwenden und läuft ohne sie; ein mitgeliefertes Rezept gleichen Namens bleibt in Betrieb. Dateien korrigieren, dann giq neu starten.",
     "several": "mehrere Dateien"
   }
 }

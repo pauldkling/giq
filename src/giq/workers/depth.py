@@ -49,7 +49,7 @@ class DepthWorker(SubprocessWorker):
 
     def __init__(self, config: DepthWorkerConfig, device: str | None = None):
         super().__init__(config, device)
-        # The instance's weights.path, under GIQ_DEPTH_MODELS_DIR when that is
+        # The recipe's weights.path, under GIQ_DEPTH_MODELS_DIR when that is
         # set. Unknown model or no weights: fail here, not at spawn.
         self.weights = require_path("depth", config.model)
 

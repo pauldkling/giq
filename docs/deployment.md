@@ -83,7 +83,7 @@ is expanded.
 |----------|-------------|---------------|-----------------|---------|
 | Config file | `GIQ_CONFIG` | — | `$GIQ_HOME/config.yaml` | `./config.yaml` |
 | Models | `GIQ_MODELS_DIR` | `paths.models` | `$GIQ_HOME/models` | `~/models` |
-| Instances | `GIQ_INSTANCES_DIR` | `paths.instances` | `$GIQ_HOME/instances` | `~/.config/giq/instances` |
+| Instances | `GIQ_RECIPES_DIR` | `paths.recipes` | `$GIQ_HOME/recipes` | `~/.config/giq/recipes` |
 | Engines | `GIQ_ENGINES_DIR` | `paths.engines` | `$GIQ_HOME/engines` | — (PATH) |
 | State | `GIQ_DATA_DIR` | `paths.state` | `$GIQ_HOME/state` | `$STATE_DIRECTORY`, else `<checkout>/data` |
 | Stats DB | `GIQ_STATS_DB` | — | `<state>/stats.db` | `<state>/stats.db` |
@@ -93,7 +93,7 @@ is expanded.
 
 The config file's location never comes from the config itself. The
 per-worker model variables (`GIQ_OCR_MODEL_DIR` and friends) still outrank
-the instance files' weight paths for their worker (see
+the recipe files' weight paths for their worker (see
 [Weights](configuration.md#weights)).
 
 When giq has a cache directory it exports `HF_HOME`, `XDG_CACHE_HOME`,
@@ -179,7 +179,7 @@ It checks the prerequisites before changing anything, then:
 It never downloads models and never overwrites `config.yaml` or `giq.env`.
 It warns when no `llama-server` is found in `engines/` or on PATH.
 
-Models go under `$GIQ_HOME/models` (paths as the instance files name them;
+Models go under `$GIQ_HOME/models` (paths as the recipe files name them;
 see [configuration.md](configuration.md#instances)). Weights loaded by library name —
 faster-whisper, pyannote, speechbrain, kokoro — live in
 `$GIQ_HOME/cache/huggingface`. The unit sets `HF_HUB_OFFLINE=1`, so fetch
@@ -218,7 +218,7 @@ curl -X POST localhost:8084/control/pause -H "Authorization: Bearer $T" \
 sudo systemd-run --scope -p MemoryMax=40G -p MemorySwapMax=0 -- \
     runuser -u giq -- env GIQ_HOME=/projects/giq HOME=/projects/giq \
     /opt/giq/.venv/bin/python -m giq prepare vllm --memory-max none \
-    --instance qwen3.8-27b-nvfp4
+    --recipe qwen3.8-27b-nvfp4
 curl -X POST localhost:8084/control/resume -H "Authorization: Bearer $T"
 ```
 
@@ -361,7 +361,7 @@ A restart unloads every model; the resident set reloads on its own.
 
 ## Backups
 
-Back up `$GIQ_HOME/config.yaml`, `$GIQ_HOME/instances/`, `$GIQ_HOME/state/`
+Back up `$GIQ_HOME/config.yaml`, `$GIQ_HOME/recipes/`, `$GIQ_HOME/state/`
 and `/etc/giq/giq.env`. `stats.db` is SQLite in WAL mode: copy it with
 `sqlite3 stats.db ".backup /path/to/copy.db"`, or stop giq first. Models,
 engines and caches can be re-fetched or rebuilt; back them up only if that

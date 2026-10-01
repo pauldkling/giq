@@ -148,11 +148,11 @@
     "working": "Working on {{key}}…",
     "dismiss": "Dismiss"
   },
-  "instanceErrors": {
-    "kicker": "Instance files",
-    "title_one": "{{count}} instance file left out",
-    "title_other": "{{count}} instance files left out",
-    "body": "giq could not use these files from {{dir}} and serves without them; a built-in model of the same name keeps serving. Fix the files, then restart giq.",
+  "recipeErrors": {
+    "kicker": "Recipe files",
+    "title_one": "{{count}} recipe file left out",
+    "title_other": "{{count}} recipe files left out",
+    "body": "giq could not use these files from {{dir}} and serves without them; a built-in recipe of the same name keeps serving. Fix the files, then restart giq.",
     "several": "several files"
   }
 }

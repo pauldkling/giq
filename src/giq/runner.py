@@ -186,21 +186,21 @@ DEFAULT_START_BUDGET_SECONDS = 300.0
 
 
 def start_budget(worker_type: WorkerType, model: str) -> float:
-    """How long ``worker_type/model`` may take to start, from its engine or instance.
+    """How long ``worker_type/model`` may take to start, from its engine or recipe.
 
     A start is not part of a job's run time — ``_job_timeout`` only begins
     once the worker is up — but a caller waiting on the job sits through it.
     vllm needs minutes (192 s cold on an RTX 5090, CUDA graph capture
     included), llama.cpp seconds to minutes depending on the disk; each
-    engine says so, and an instance file can say more.
+    engine says so, and a recipe file can say more.
     """
     if worker_type == WorkerType.llm:
         if engine_for(model) == "vllm":
-            from giq.workers.vllm import instance_for
+            from giq.workers.vllm import recipe_for
 
-            inst = instance_for(model)
-            if inst is not None:
-                return float(inst.params.ready_timeout)
+            recipe = recipe_for(model)
+            if recipe is not None:
+                return float(recipe.params.ready_timeout)
         from giq.workers.llm import DEFAULT_READY_TIMEOUT, MODEL_READY_TIMEOUT
 
         return float(MODEL_READY_TIMEOUT.get(model, DEFAULT_READY_TIMEOUT))
@@ -1029,7 +1029,7 @@ class Runner:
 
             return EmbedWorker(config=EmbedWorkerConfig(model=model), device=device)
         if worker_type in (WorkerType.text2image, WorkerType.image_edit):
-            # sd.cpp is the one image runtime; the instance schema admits no other.
+            # sd.cpp is the one image runtime; the recipe schema admits no other.
             from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
 
             return SdCppWorker(
@@ -1648,7 +1648,7 @@ class Runner:
                     await self._unload_worker()
 
 
-# Global runner instance
+# Global runner recipe
 _runner: Runner | None = None
 
 
@@ -1659,7 +1659,7 @@ def get_runner(
     """Get or create global runner.
 
     Both arguments only apply on first construction (the service lifespan
-    passes ``use_policy=True``); later calls return the existing instance.
+    passes ``use_policy=True``); later calls return the existing recipe.
     ``residents`` pins a static set instead, which is the legacy/test path.
     """
     global _runner

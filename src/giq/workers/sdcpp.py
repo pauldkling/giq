@@ -46,7 +46,7 @@ RENDER_TIMEOUT_SECONDS = 600.0
 
 @dataclass
 class SdCppWorkerConfig:
-    """Paths come from the model's instance file (``giq.weights.image_files``)."""
+    """Paths come from the model's recipe file (``giq.weights.image_files``)."""
 
     model: str
     diffusion: str = ""

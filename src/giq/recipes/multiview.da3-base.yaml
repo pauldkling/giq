@@ -11,7 +11,7 @@
 # that is set.
 #
 # Licences: DA3-BASE is Apache-2.0 everywhere. DA3-LARGE-1.1 has no
-# instance: its model card says Apache-2.0 while the repository README's
+# recipe: its model card says Apache-2.0 while the repository README's
 # table lists Large as CC BY-NC 4.0 (as the pre-1.1 DA3-LARGE card does), and
 # a licence that unclear is not one to offer for commercial use.
 name: da3-base

@@ -37,7 +37,7 @@ interpreters; `GIQ_UNLIMITED_OCR_PYTHON` / `GIQ_DA3_PYTHON` /
 
 ## Engine names
 
-Each engine has one name, used alike in instance files (`engine:`),
+Each engine has one name, used alike in recipe files (`engine:`),
 `config.yaml` (`engines:`), the catalog (`/stats/models`: `backend`, and
 `engine` for the image models) and the dashboard:
 
@@ -119,13 +119,13 @@ again.
 The GEMMs are the big part, not all of it: a first start still compiles
 FlashInfer's attention and sampling modules for the model's shapes, runs
 torch.compile and captures CUDA graphs — tens of minutes from an empty
-cache, longer than a start may take. `--instance` does one full start of an
+cache, longer than a start may take. `--recipe` does one full start of an
 instance with an hour to spare and stops it again, so every later start
 finds the caches warm (82 s on an RTX 5090). It uses the card while it runs;
 pause giq first if it is serving:
 
 ```bash
-giq prepare vllm --gpu 0 --instance qwen3.8-27b-nvfp4 --instance qwen3.8-27b-nvfp4-chat
+giq prepare vllm --gpu 0 --recipe qwen3.8-27b-nvfp4 --recipe qwen3.8-27b-nvfp4-chat
 ``` Compute capability 12.0 (RTX 50,
 RTX PRO 6000 Blackwell) builds the `12.0f` family target; 10.x (B200, B300)
 the `sm_100` modules. The kernels land in `$GIQ_HOME/cache/.cache/flashinfer`
@@ -187,7 +187,7 @@ other models it takes everything. A KV budget means the same on any card,
 and giq's VRAM figure for the instance is then the sum of three measured
 parts — `vram.weights_gb` (vllm logs "Model loading took …") +
 `kv_cache_memory` + `vram.overhead_gb` (CUDA context, activations, graphs,
-the vision encoder's profile) — which the instance file may state instead of
+the vision encoder's profile) — which the recipe file may state instead of
 `vram.gb`. vllm still refuses to start unless free memory covers
 `gpu_memory_utilization × card` (0.9 by default) even with a byte budget, so
 giq passes the instance's own figure over the card's size, and the check
@@ -218,11 +218,11 @@ the paged pool, so it suits a large card without costing a small one memory.
 (interactive) serve `nvidia/Qwen3.8-27B-NVFP4` from
 `$GIQ_MODELS_DIR/nvidia-Qwen3.8-27B-NVFP4`. Their KV budgets keep them
 loadable on a 32 GB card through giq's gate; on a larger card, replace the
-file in your instances directory with a larger `kv_cache_memory` (the VRAM
+file in your recipes directory with a larger `kv_cache_memory` (the VRAM
 figure follows) — see [configuration.md](configuration.md#instances):
 
 ```yaml
-# ~/.config/giq/instances/qwen3.8-27b-nvfp4.yaml — on a 96 GB card
+# ~/.config/giq/recipes/qwen3.8-27b-nvfp4.yaml — on a 96 GB card
 name: qwen3.8-27b-nvfp4
 worker: llm
 engine: vllm

@@ -16,7 +16,7 @@ trusted the discovery endpoint got a hard failure.
 
 So: one record per model, one place to add one, and everything else — VRAM
 gating, the catalog, ``/capabilities``, the resident set, the dashboard —
-reads from here. The records are instance files (``giq.instances``): the
+reads from here. The records are recipe files (``giq.recipes``): the
 built-ins shipped with giq and the operator's own, which add models or
 replace a built-in by name. This module turns the current snapshot of them
 into ModelSpecs and lays config.yaml's overlays on top.
@@ -24,7 +24,7 @@ into ModelSpecs and lays config.yaml's overlays on top.
 Registration is not a whitelist. ``get_vram_requirement`` still falls back to
 a default for unregistered pairs so an experimental model can be submitted
 without a code change; it just won't be schedulable on a small card, which is
-exactly the trap above. Give a model you intend to run an instance file.
+exactly the trap above. Give a model you intend to run a recipe file.
 """
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 
-from giq import instances
+from giq import recipes
 from giq.engines import canonical_engine
-from giq.instances.schema import Instance, LlamaCppParams, VllmParams
+from giq.recipes.schema import LlamaCppParams, Recipe, VllmParams
 
 logger = logging.getLogger(__name__)
 
@@ -100,26 +100,26 @@ class ModelSpec:
         return self.label or self.model
 
 
-def spec_of(instance: Instance) -> ModelSpec:
-    """The ModelSpec an instance file declares."""
-    params = instance.params
+def spec_of(recipe: Recipe) -> ModelSpec:
+    """The ModelSpec a recipe file declares."""
+    params = recipe.params
     return ModelSpec(
-        worker=instance.worker,
-        model=instance.name,
-        vram_gb=instance.vram.gb,
-        backend=instance.engine,
-        label=instance.label,
-        detail=instance.detail,
-        engine=instance.engine if instance.worker in IMAGE_WORKERS else None,
+        worker=recipe.worker,
+        model=recipe.name,
+        vram_gb=recipe.vram.gb,
+        backend=recipe.engine,
+        label=recipe.label,
+        detail=recipe.detail,
+        engine=recipe.engine if recipe.worker in IMAGE_WORKERS else None,
         # D8: vllm's max_num_seqs is how many requests it really runs at once;
         # llama.cpp keeps its separate lane width until its -np is aligned.
-        lane_width=(params.max_num_seqs if isinstance(params, VllmParams) else instance.lane_width),
-        resident_priority=instance.residency.priority,
-        max_batch=instance.max_batch,
-        voices=instance.voices,
-        aliases=instance.aliases,
-        measured=instance.vram.measured,
-        vision="vision" in instance.capabilities,
+        lane_width=(params.max_num_seqs if isinstance(params, VllmParams) else recipe.lane_width),
+        resident_priority=recipe.residency.priority,
+        max_batch=recipe.max_batch,
+        voices=recipe.voices,
+        aliases=recipe.aliases,
+        measured=recipe.vram.measured,
+        vision="vision" in recipe.capabilities,
         mmproj=params.mmproj if isinstance(params, LlamaCppParams) else None,
     )
 
@@ -131,13 +131,13 @@ _alias_index: dict[tuple[str, str], tuple[str, str]] | None = None
 
 
 def _apply_config(specs: dict[tuple[str, str], ModelSpec]) -> None:
-    """Overlay config.yaml on the instance specs.
+    """Overlay config.yaml on the recipe specs.
 
     ``image_models`` (deprecated: an image model's files belong in its
-    instance file) is keyed by model name and applies to whichever image
+    recipe file) is keyed by model name and applies to whichever image
     worker serves it (flux_klein is both a text2image and an image_edit
     model). Only keys the entry actually sets are overlaid, so one that omits
-    vram_gb keeps the measured instance figure rather than a default.
+    vram_gb keeps the measured recipe figure rather than a default.
     """
     from giq.config import get_config, warn_image_model
 
@@ -183,11 +183,11 @@ def _apply_config(specs: dict[tuple[str, str], ModelSpec]) -> None:
 
 
 def _build() -> dict[tuple[str, str], ModelSpec]:
-    # VRAM figures are measured per-model peaks unless an instance says
+    # VRAM figures are measured per-model peaks unless a recipe says
     # otherwise. They must be measured, not derived from weight size:
     # flux_klein and zimage run under identical --offload-to-cpu flags and
     # peak 8.5 vs 12.6 GB.
-    specs = {inst.key: spec_of(inst) for inst in instances.current().instances.values()}
+    specs = {recipe.key: spec_of(recipe) for recipe in recipes.current().recipes.values()}
     try:
         _apply_config(specs)
     except Exception as e:  # config problems must not take the service down
@@ -205,21 +205,21 @@ def get_registry() -> dict[tuple[str, str], ModelSpec]:
     return _registry
 
 
-def _invalidate(_snapshot: instances.Snapshot | None = None) -> None:
+def _invalidate(_snapshot: recipes.Snapshot | None = None) -> None:
     global _registry, _alias_index
     _registry = None
     _alias_index = None
 
 
 def reload_registry() -> dict[tuple[str, str], ModelSpec]:
-    """Re-read the instance files and the config, and rebuild."""
-    instances.reload()  # notifies _invalidate
+    """Re-read the recipe files and the config, and rebuild."""
+    recipes.reload()  # notifies _invalidate
     _invalidate()
     return get_registry()
 
 
-# A reload of the instances, from wherever it comes, rebuilds on next use.
-instances.subscribe(_invalidate)
+# A reload of the recipes, from wherever it comes, rebuilds on next use.
+recipes.subscribe(_invalidate)
 
 
 def get_spec(worker: str, model: str) -> ModelSpec | None:

@@ -6,9 +6,9 @@
 # needs no newer engine than 3.6 does.
 #
 # It ships a multi-token-prediction head (the `blk.64.nextn.*` tensors) that
-# `--spec-type draft-mtp` can draft with, but this instance runs no
+# `--spec-type draft-mtp` can draft with, but this recipe runs no
 # speculative decoding: it carries the vision projector, and this build has
-# not been measured under draft-mtp. A text-only `-fast` instance over the
+# not been measured under draft-mtp. A text-only `-fast` recipe over the
 # same GGUF is how that speedup would be served (see the speculative-decoding
 # notes in workers/llm.py); it goes in with its own measurement.
 name: qwen3.8-27b

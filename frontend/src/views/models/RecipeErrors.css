@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-.md-instance-errors { border-left: 3px solid var(--serious); margin-bottom: var(--space-4); }
-.md-instance-errors-list {
+.md-recipe-errors { border-left: 3px solid var(--serious); margin-bottom: var(--space-4); }
+.md-recipe-errors-list {
   list-style: none; margin: var(--space-3) 0 0; padding: 0;
   display: flex; flex-direction: column; gap: var(--space-3);
 }
-.md-instance-errors-file { font-size: 12px; color: var(--text-strong); overflow-wrap: anywhere; }
+.md-recipe-errors-file { font-size: 12px; color: var(--text-strong); overflow-wrap: anywhere; }
 /* Server text: kept as written, wrapped anywhere. */
-.md-instance-errors-msg {
+.md-recipe-errors-msg {
   font-size: 12px; line-height: 1.5; color: var(--serious-ink); margin-top: 2px;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }

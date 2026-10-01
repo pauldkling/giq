@@ -2,12 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared pieces of the vllm tests: a fake checkpoint and instance documents."""
+"""Shared pieces of the vllm tests: a fake checkpoint and recipe documents."""
 
 import json
 from pathlib import Path
 
-from giq.instances.schema import Instance, VllmParams
+from giq.recipes.schema import Recipe, VllmParams
 
 NAME = "qwen3.8-27b-nvfp4"
 BUDGET = {"kv_cache_memory": "6G", "max_model_len": 131072}
@@ -45,11 +45,11 @@ def doc(
     return out
 
 
-def instance(weights: Path, profile: str | None = None, **params) -> Instance:
-    return Instance.model_validate(doc(weights, profile, **params))
+def make_recipe(weights: Path, profile: str | None = None, **params) -> Recipe:
+    return Recipe.model_validate(doc(weights, profile, **params))
 
 
 def params_of(profile: str | None = None, **given) -> VllmParams:
-    p = Instance.model_validate(doc("/nonexistent/ckpt", profile, **given)).params
+    p = Recipe.model_validate(doc("/nonexistent/ckpt", profile, **given)).params
     assert isinstance(p, VllmParams)
     return p

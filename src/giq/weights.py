@@ -2,23 +2,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Where a model's weights are, as its instance file says (ADR-002).
+"""Where a model's weights are, as its recipe file says (ADR-002).
 
 Workers used to find their weights through tables of their own — a snapshot
-directory name per model, hard-coded next to the worker — so an instance
+directory name per model, hard-coded next to the worker — so a recipe
 file could add a model to the catalog that its worker then refused to load.
-Every worker now asks here, and the answer comes from the instance:
+Every worker now asks here, and the answer comes from the recipe:
 ``weights.path`` for the main weights, ``weights.parts.<name>`` for the other
 files a model needs (an image model's text encoder and VAE, OCR's layout
 model). A relative path is taken under the models directory; ``~`` and
 absolute paths are used as written.
 
-The environment variables that located these snapshots before instance
-files existed still work, and outrank the instance, as an environment
+The environment variables that located these snapshots before recipe
+files existed still work, and outrank the recipe, as an environment
 variable outranks a file everywhere else in giq:
 
 - a directory for one model's weights (``DIR_OVERRIDES``), which applies to
-  that model name only — an operator's second OCR instance is not redirected
+  that model name only — an operator's second OCR recipe is not redirected
   by a variable documented for the built-in;
 - a root for one worker's relative paths (``ROOT_OVERRIDES``), in place of
   the models directory.
@@ -35,14 +35,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from giq import instances
-from giq.instances.schema import Instance
+from giq import recipes
 from giq.paths import model_path
+from giq.recipes.schema import Recipe
 
 if TYPE_CHECKING:
     from giq.config import ImageModelConfig
 
-# A directory that replaces one instance's weights: (worker, name, part) ->
+# A directory that replaces one recipe's weights: (worker, name, part) ->
 # variable; part None is the main weights.
 DIR_OVERRIDES: dict[tuple[str, str, str | None], str] = {
     ("ocr", "unlimited-ocr", None): "GIQ_OCR_MODEL_DIR",
@@ -59,12 +59,12 @@ ROOT_OVERRIDES: dict[str, str] = {
 HF_PREFIX = "hf:"
 
 
-def instance_of(worker: str, model: str) -> Instance | None:
-    """The current instance ``worker/model`` names, by name or alias."""
-    snapshot = instances.current()
-    inst = snapshot.get(str(worker), str(model))
-    if inst is not None:
-        return inst
+def recipe_of(worker: str, model: str) -> Recipe | None:
+    """The current recipe ``worker/model`` names, by name or alias."""
+    snapshot = recipes.current()
+    recipe = snapshot.get(str(worker), str(model))
+    if recipe is not None:
+        return recipe
     return next((i for i in snapshot.of_worker(str(worker)) if model in i.aliases), None)
 
 
@@ -73,7 +73,7 @@ def _env(var: str | None) -> str | None:
 
 
 def resolve_path(worker: str, raw: str) -> str:
-    """A path as an instance writes it, made absolute for ``worker``."""
+    """A path as a recipe writes it, made absolute for ``worker``."""
     p = Path(raw).expanduser()
     if p.is_absolute():
         return str(p)
@@ -85,18 +85,18 @@ def resolve_path(worker: str, raw: str) -> str:
 def path_of(worker: str, model: str, part: str | None = None) -> str | None:
     """Absolute path of a model's main weights (``part=None``) or of one part.
 
-    None when neither an override nor the instance gives one — the model is
+    None when neither an override nor the recipe gives one — the model is
     unknown, has no such part, or loads by repository rather than by path.
     """
     if override := _env(DIR_OVERRIDES.get((str(worker), str(model), part))):
         return str(Path(override).expanduser())
-    inst = instance_of(worker, model)
-    if inst is None or inst.weights is None:
+    recipe = recipe_of(worker, model)
+    if recipe is None or recipe.weights is None:
         return None
     if part is None:
-        raw = inst.weights.path
+        raw = recipe.weights.path
     else:
-        piece = inst.weights.parts.get(part)
+        piece = recipe.weights.parts.get(part)
         raw = piece.path if piece is not None else None
     return resolve_path(worker, raw) if raw else None
 
@@ -106,9 +106,9 @@ def require_path(worker: str, model: str, part: str | None = None) -> str:
     path = path_of(worker, model, part)
     if path is None:
         what = "weights.path" if part is None else f"weights.parts.{part}"
-        if instance_of(worker, model) is None:
-            raise ValueError(f"unknown {worker} model {model!r}: no instance file defines it")
-        raise ValueError(f"{worker}/{model} has no {what} in its instance file")
+        if recipe_of(worker, model) is None:
+            raise ValueError(f"unknown {worker} model {model!r}: no recipe file defines it")
+        raise ValueError(f"{worker}/{model} has no {what} in its recipe file")
     return path
 
 
@@ -122,17 +122,17 @@ def hub_repo(source: str | None) -> str | None:
 def load_ref(worker: str, model: str, part: str | None = None) -> str | None:
     """What a library that takes "a path or a repo id" should load.
 
-    The path when the instance gives one (or an override does), else the
+    The path when the recipe gives one (or an override does), else the
     repository of its ``hf:`` source, else None.
     """
     if path := path_of(worker, model, part):
         return path
-    inst = instance_of(worker, model)
-    if inst is None or inst.weights is None:
+    recipe = recipe_of(worker, model)
+    if recipe is None or recipe.weights is None:
         return None
     if part is None:
-        return hub_repo(inst.weights.source)
-    piece = inst.weights.parts.get(part)
+        return hub_repo(recipe.weights.source)
+    piece = recipe.weights.parts.get(part)
     return hub_repo(piece.source) if piece is not None else None
 
 
@@ -144,7 +144,7 @@ def image_files(worker: str, model: str) -> ImageModelConfig:
     """An image model's files and runtime, as the image workers take them.
 
     A ``config.yaml`` ``image_models`` entry of that name still wins, with a
-    deprecation warning; otherwise the instance's ``weights.parts`` (paths
+    deprecation warning; otherwise the recipe's ``weights.parts`` (paths
     resolved like any weights) and its engine and VRAM figure.
     """
     from giq.config import ImageModelConfig, get_config, warn_image_model
@@ -153,22 +153,22 @@ def image_files(worker: str, model: str) -> ImageModelConfig:
     if legacy is not None:
         warn_image_model(str(model), legacy)
         return legacy
-    inst = instance_of(worker, model)
-    if inst is None:
-        raise ValueError(f"unknown {worker} model {model!r}: no instance file defines it")
-    files = {part: path_of(worker, inst.name, part) for part in IMAGE_PARTS}
+    recipe = recipe_of(worker, model)
+    if recipe is None:
+        raise ValueError(f"unknown {worker} model {model!r}: no recipe file defines it")
+    files = {part: path_of(worker, recipe.name, part) for part in IMAGE_PARTS}
     if missing := [p for p in _REQUIRED_IMAGE_PARTS if not files[p]]:
         raise ValueError(
             f"{worker}/{model} names no {', '.join(f'weights.parts.{p}' for p in missing)} "
-            "in its instance file"
+            "in its recipe file"
         )
     return ImageModelConfig(
         diffusion=str(files["diffusion"]),
         text_encoder=str(files["text_encoder"]),
         vae=str(files["vae"]),
         lora=files["lora"],
-        vram_gb=inst.vram.gb,
-        engine=inst.engine,
+        vram_gb=recipe.vram.gb,
+        engine=recipe.engine,
     )
 
 
@@ -184,8 +184,8 @@ class Location:
 
 def locations(worker: str, model: str) -> list[Location]:
     """Every file, snapshot or repository ``worker/model`` loads, main weights first."""
-    inst = instance_of(worker, model)
-    weights = inst.weights if inst is not None else None
+    recipe = recipe_of(worker, model)
+    weights = recipe.weights if recipe is not None else None
     parts: list[tuple[str | None, str | None]] = [
         (None, weights.source if weights else None),
         *((name, p.source) for name, p in (weights.parts.items() if weights else ())),

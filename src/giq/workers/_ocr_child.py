@@ -17,7 +17,7 @@ is adapted from the model's remote code in baidu/Unlimited-OCR
 Baidu; the MIT licence text is in LICENSES/MIT.txt.
 
 Weights and remote code load from the local snapshot the parent names with
-``--weights`` (the instance's ``weights.path``, pinned to HF revision
+``--weights`` (the recipe's ``weights.path``, pinned to HF revision
 07dea83; ``GIQ_OCR_MODEL_DIR`` overrides it), with the hub disabled before
 transformers is imported, so a later change to the upstream repo cannot reach this process.
 Verified with strace: the process opens no network sockets.

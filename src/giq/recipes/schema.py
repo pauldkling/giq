@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""What an instance file may say (ADR-002).
+"""What a recipe file may say (ADR-002).
 
-An instance is one servable model: a name clients send, the weights it runs,
+A recipe is one servable model: a name clients send, the weights it runs,
 the engine that runs them, that engine's parameters, residency defaults and
 the VRAM figure the scheduler gates on. The file format covers the whole
 design; this schema accepts only what giq acts on. A key it does not know is
@@ -13,7 +13,7 @@ engine without profiles, ``residency.gpu``, ``default_policy: off``) — a file
 must never claim a behaviour the service does not have.
 
 Every model is strict and frozen: a typo is refused at load rather than
-silently becoming a default, and a loaded instance cannot be edited in place,
+silently becoming a default, and a loaded recipe cannot be edited in place,
 so a snapshot handed out stays what it was when it was validated.
 """
 
@@ -46,7 +46,7 @@ Name = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$", max_length=
 Arg = Annotated[str, Field(min_length=1, pattern=r"^[^-]")]
 
 # Which engines can serve which worker. The workers are written against one
-# runtime each (ocr against two), so an instance that pairs a
+# runtime each (ocr against two), so a recipe that pairs a
 # worker with a foreign engine could never load.
 WORKER_ENGINES: dict[str, frozenset[str]] = {
     "llm": frozenset({"llama.cpp", "vllm"}),
@@ -185,7 +185,7 @@ class Residency(_Strict):
 
 
 class EngineParams(_Strict):
-    """Parameters of an engine that takes none from an instance."""
+    """Parameters of an engine that takes none from a recipe."""
 
     def given(self) -> dict[str, Any]:
         """Only the parameters the file set — unset ones take the engine default."""
@@ -311,7 +311,7 @@ class VllmParams(EngineParams):
         return size_bytes(self.kv_cache_memory)
 
 
-# Named parameter sets (D9), under an instance's own `params`. The measured
+# Named parameter sets (D9), under a recipe's own `params`. The measured
 # trade-off on an RTX 5090 with NVIDIA's NVFP4 Qwen3.8-27B: MTP with three
 # draft tokens took one request from 72 to 117 tok/s and the total at 16
 # parallel requests from 937 down to 750, accepting 0.66 / 0.37 / 0.17 by
@@ -320,7 +320,7 @@ class VllmParams(EngineParams):
 # 16 parallel was the measured point; 32 is only a ceiling over the paged KV
 # pool (short requests fill it, long ones wait inside the budget), so it
 # suits a large card without costing a small one memory. The VRAM budget is
-# in neither: it belongs to the instance and the card it shares.
+# in neither: it belongs to the recipe and the card it shares.
 ENGINE_PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     "vllm": {
         "interactive": {
@@ -337,7 +337,7 @@ ENGINE_PROFILES: dict[str, dict[str, dict[str, Any]]] = {
     },
 }
 
-# Sampling fields a vllm instance may default; the caller's body wins.
+# Sampling fields a vllm recipe may default; the caller's body wins.
 VLLM_REQUEST_DEFAULTS = frozenset(
     {
         "top_k",
@@ -376,8 +376,8 @@ def read_hf_config(weights_dir: str | Path) -> dict[str, Any] | None:
 ENGINE_PARAMS: dict[str, type[EngineParams]] = {"llama.cpp": LlamaCppParams, "vllm": VllmParams}
 
 
-class Instance(_Strict):
-    """One servable model, as an instance file declares it."""
+class Recipe(_Strict):
+    """One servable model, as a recipe file declares it."""
 
     name: Name
     worker: str
@@ -394,7 +394,7 @@ class Instance(_Strict):
     request_defaults: dict[str, RequestValue] = Field(default_factory=dict)
     residency: Residency = Residency()
     vram: Vram
-    # Other names clients may send for this instance.
+    # Other names clients may send for this recipe.
     aliases: tuple[Name, ...] = ()
     # Concurrent jobs on a resident's lane; unset = the worker's default.
     lane_width: int | None = Field(default=None, ge=1)
@@ -414,7 +414,7 @@ class Instance(_Strict):
     @field_validator("engine")
     @classmethod
     def _known_engine(cls, v: str) -> str:
-        v = canonical_engine(v, "instance file")
+        v = canonical_engine(v, "recipe file")
         if v not in ENGINE_OF_BACKEND:
             raise ValueError(f"unknown engine {v!r} (known: {', '.join(ENGINE_OF_BACKEND)})")
         return v
@@ -468,7 +468,7 @@ class Instance(_Strict):
         return data
 
     @model_validator(mode="after")
-    def _consistent(self) -> Instance:
+    def _consistent(self) -> Recipe:
         engines = WORKER_ENGINES.get(self.worker, frozenset())
         if self.engine not in engines:
             raise ValueError(
@@ -495,14 +495,14 @@ class Instance(_Strict):
                     + (f"only {', '.join(sorted(readable))}" if readable else "no parts")
                 )
         if self.name in self.aliases:
-            raise ValueError(f"alias {self.name!r} repeats the instance name")
+            raise ValueError(f"alias {self.name!r} repeats the recipe name")
         if len(set(self.aliases)) != len(self.aliases):
             raise ValueError("aliases repeat")
         if self.engine == "llama.cpp":
             params = self.params
             assert isinstance(params, LlamaCppParams)
             if not (self.weights and self.weights.path):
-                raise ValueError("a llama.cpp instance needs weights.path")
+                raise ValueError("a llama.cpp recipe needs weights.path")
             # Without the projector the weights serve text and silently drop
             # image parts, so vision and mmproj are declared together.
             if ("vision" in self.capabilities) != bool(params.mmproj):
@@ -517,10 +517,10 @@ class Instance(_Strict):
         params = self.params
         assert isinstance(params, VllmParams)
         if not (self.weights and self.weights.path):
-            raise ValueError("a vllm instance needs weights.path (a checkpoint directory)")
+            raise ValueError("a vllm recipe needs weights.path (a checkpoint directory)")
         # D4 accepts(): vllm reads Hugging Face checkpoint directories.
         if self.weights.format not in ("safetensors", "modelopt"):
-            raise ValueError("a vllm instance needs weights.format safetensors or modelopt")
+            raise ValueError("a vllm recipe needs weights.format safetensors or modelopt")
         if self.lane_width is not None:
             raise ValueError("lane_width is derived from params.max_num_seqs for vllm (D8)")
         stray = sorted(set(self.request_defaults) - VLLM_REQUEST_DEFAULTS)

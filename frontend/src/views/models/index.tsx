@@ -13,7 +13,7 @@ import { cardChoices } from "../../lib/cards";
 import { ENGINE_NOTE_KEY, engineVersions, facetCounts, joinStorage, matches, toggled } from "./catalog";
 import { DiskDetail } from "./DiskDetail";
 import { FacetFilter } from "./FacetFilter";
-import { InstanceErrors } from "./InstanceErrors";
+import { RecipeErrors } from "./RecipeErrors";
 import { ModelCatalog } from "./ModelCatalog";
 import { ResidencyBudgets } from "./ResidencyBudgets";
 import { useModelActions } from "./useModelActions";
@@ -78,7 +78,7 @@ export default function ModelsView() {
             />
           </aside>
           <div className="md-main">
-            <InstanceErrors instances={storage.data?.instances} />
+            <RecipeErrors recipes={storage.data?.recipes} />
             {catalog.data ? (
               <ModelCatalog
                 entries={shown}

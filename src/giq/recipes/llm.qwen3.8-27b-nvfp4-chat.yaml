@@ -10,7 +10,7 @@
 # 0.37 and 0.17 by draft position. The interactive profile drafts two and
 # schedules at most four requests.
 #
-# Two instances over one checkpoint share the card: asking for one evicts
+# Two recipes over one checkpoint share the card: asking for one evicts
 # the other through the ordinary swap. Not resident by default, like its
 # sibling.
 name: qwen3.8-27b-nvfp4-chat
@@ -28,7 +28,7 @@ capabilities: [chat, vision]
 # MTP with 2 draft tokens, up to 4 requests, an 8192-token scheduling budget.
 profile: interactive
 params:
-  # A gigabyte less KV than the throughput instance: the MTP head's weights
+  # A gigabyte less KV than the throughput recipe: the MTP head's weights
   # and its own KV come out of the same card. 5 GiB is ~150k tokens, more
   # than four requests at a time need.
   kv_cache_memory: 5G

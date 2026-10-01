@@ -17,12 +17,12 @@ import os
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from giq.weights import instance_of, load_ref
+from giq.weights import load_ref, recipe_of
 from giq.workers._subprocess import SubprocessWorker
 
 
 def _refs(env: dict[str, str], worker: str, model: str, wanted: dict[str, str | None]) -> None:
-    """Hand the child what the instance loads, by the variables it reads.
+    """Hand the child what the recipe loads, by the variables it reads.
 
     ``wanted`` maps a variable to a part (None: the main weights). A variable
     already set in giq's environment wins — the operator said so, and the
@@ -95,8 +95,8 @@ class EmbedWorker(SubprocessWorker):
     def _spawn_env(self) -> dict[str, str]:
         env = super()._spawn_env()
         _refs(env, "embed", self.config.model, {"GIQ_EMBED_MODEL": None})
-        inst = instance_of("embed", self.config.model)
-        revision = inst.weights.revision if inst and inst.weights else None
+        recipe = recipe_of("embed", self.config.model)
+        revision = recipe.weights.revision if recipe and recipe.weights else None
         if revision and "GIQ_EMBED_REVISION" not in os.environ:
             env["GIQ_EMBED_REVISION"] = revision
         return env

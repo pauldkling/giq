@@ -5,7 +5,7 @@
 """How long a model may take to start, and how long a caller waits for it.
 
 A start is not a job's run: it has its own budget, per engine and per
-instance, and its own failure. These pin the three places that used to get
+recipe, and its own failure. These pin the three places that used to get
 it wrong — llama.cpp's fixed 30 s, a failed start reported as a job timeout,
 and the API's flat 120 s wait that a cold vllm start could not meet.
 """
@@ -81,12 +81,12 @@ def test_llama_ready_timeout_is_the_engine_default_unless_the_instance_sets_one(
 
 
 def test_vllm_start_budget_is_the_instance_ready_timeout():
-    from giq.workers.vllm import instance_for
+    from giq.workers.vllm import recipe_for
 
-    inst = instance_for("qwen3.8-27b-nvfp4")
-    assert inst is not None
+    recipe = recipe_for("qwen3.8-27b-nvfp4")
+    assert recipe is not None
     budget = runner.start_budget(WorkerType.llm, "qwen3.8-27b-nvfp4")
-    assert budget == inst.params.ready_timeout
+    assert budget == recipe.params.ready_timeout
     # The measured cold start the API's old flat wait could not cover.
     assert budget > 192
 

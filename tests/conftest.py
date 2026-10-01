@@ -17,6 +17,6 @@ os.environ.setdefault(
 os.environ.setdefault(
     "GIQ_INFLIGHT_LOG", os.path.join(tempfile.mkdtemp(prefix="giq-test-inflight-"), "inflight.log")
 )
-# Operator instance files would otherwise come from ~/.config/giq/instances
+# Operator recipe files would otherwise come from ~/.config/giq/recipes
 # and change the catalog under test; the built-ins are what the suite checks.
-os.environ.setdefault("GIQ_INSTANCES_DIR", tempfile.mkdtemp(prefix="giq-test-instances-"))
+os.environ.setdefault("GIQ_RECIPES_DIR", tempfile.mkdtemp(prefix="giq-test-recipes-"))

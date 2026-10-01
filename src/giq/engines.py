@@ -143,7 +143,7 @@ ENGINE_OF_BACKEND: dict[str, str] = {
 
 # Old spellings of an engine name, accepted on input with a warning. There is
 # one name per engine — the one /engines, the catalog and the dashboard show —
-# and instance files, ModelSpec and config.yaml all use it; `sdcpp` is what
+# and recipe files, ModelSpec and config.yaml all use it; `sdcpp` is what
 # config.yaml's image_models said before that.
 ENGINE_ALIASES: dict[str, str] = {"sdcpp": "sd.cpp"}
 

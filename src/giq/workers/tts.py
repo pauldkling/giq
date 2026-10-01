@@ -20,7 +20,7 @@ from typing import Any, ClassVar
 
 from giq.models import JobResult
 from giq.registry import vram_for
-from giq.weights import hub_repo, instance_of
+from giq.weights import hub_repo, recipe_of
 from giq.workers._subprocess import SubprocessWorker
 
 logger = logging.getLogger(__name__)
@@ -74,9 +74,9 @@ class TTSWorker(SubprocessWorker):
     def child_args(self) -> list[str]:
         args = ["--lang-code", self.config.lang_code]
         # kokoro fetches its model and voices by repository (hf_hub_download
-        # per file), so the instance's hf: source is what it can take.
-        inst = instance_of("tts", self.config.model)
-        if inst and inst.weights and (repo := hub_repo(inst.weights.source)):
+        # per file), so the recipe's hf: source is what it can take.
+        recipe = recipe_of("tts", self.config.model)
+        if recipe and recipe.weights and (repo := hub_repo(recipe.weights.source)):
             args += ["--repo", repo]
         return args
 
@@ -90,6 +90,6 @@ class TTSWorker(SubprocessWorker):
     async def run_batch(
         self, tasks: list[dict[str, Any]], params: dict[str, Any] | None = None
     ) -> list[JobResult]:
-        """Hydrate the raw result dicts back into ``JobResult`` instances."""
+        """Hydrate the raw result dicts back into ``JobResult`` recipes."""
         result_dicts = await super().run_batch(tasks, params)
         return [JobResult(**r) for r in result_dicts]

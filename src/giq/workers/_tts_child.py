@@ -67,7 +67,7 @@ def _synthesize(pipeline, text: str, voice: str) -> bytes:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lang-code", default="a", help="Kokoro language code (a = US English)")
-    # The instance's hf: source. Unset = kokoro's own default repository.
+    # The recipe's hf: source. Unset = kokoro's own default repository.
     parser.add_argument("--repo", default=None)
     args = parser.parse_args()
 

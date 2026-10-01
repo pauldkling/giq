@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from giq import instances
 from giq import paths as giq_paths
+from giq import recipes
 from giq.api.dependencies import get_orchestrator
 from giq.engines import ENGINE_OF_BACKEND
 from giq.gpus import get_gpus, resolve_device, selected_device
@@ -582,14 +582,14 @@ async def model_catalog() -> dict:
 @router.get("/storage")
 async def storage() -> dict:
     """Per-model disk footprint, last use, per-mount disk breakdown, the
-    data directories giq resolved (``paths``), and the operator's instance
-    files (``instances``): the directory, the files serving, the built-ins
+    data directories giq resolved (``paths``), and the operator's recipe
+    files (``recipes``): the directory, the files serving, the built-ins
     they replace, and the files left out with the reason.
 
     The directories sit here rather than on /status because this endpoint
     already answers with absolute model paths under the same access rules:
     it tells the operator nothing about the host that it did not before, and
-    "which config and which state dir is this instance using" is a storage
+    "which config and which state dir is this recipe using" is a storage
     question.
     """
     models, disks = await asyncio.to_thread(storage_report)
@@ -603,7 +603,7 @@ async def storage() -> dict:
     resident_keys = set(get_policy_store().residents())
     return {
         "paths": giq_paths.resolved(),
-        "instances": instances.describe(instances.current()),
+        "recipes": recipes.describe(recipes.current()),
         "disks": disks,
         "models": [
             {

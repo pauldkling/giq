@@ -38,14 +38,14 @@ def fake_layout(tmp_path, monkeypatch):
     (whisper / "snapshots" / "w.bin").write_bytes(b"w" * 700)
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(hub))
 
-    # A vllm checkpoint is a directory, served by two instances; its own
+    # A vllm checkpoint is a directory, served by two recipes; its own
     # safetensors shards are not a GGUF shard set.
     ckpt = tmp_path / "ckpt"
     ckpt.mkdir()
     (ckpt / "config.json").write_bytes(b"{}")
     (ckpt / "model-00001-of-00002.safetensors").write_bytes(b"s" * 3000)
     (ckpt / "model-00002-of-00002.safetensors").write_bytes(b"s" * 1000)
-    # A GGUF split in two: the instance names the first shard.
+    # A GGUF split in two: the recipe names the first shard.
     for i in (1, 2):
         (tmp_path / "ggufs" / f"big-0000{i}-of-00002.gguf").write_bytes(b"g" * 600)
 
@@ -111,7 +111,7 @@ def test_resolution_and_sizes(fake_layout):
 
 
 def test_llm_weights_of_every_format_are_found(fake_layout):
-    """An LLM's weights are whatever its instance names: a GGUF (every shard
+    """An LLM's weights are whatever its recipe names: a GGUF (every shard
     of a split one) for llama.cpp, a checkpoint directory for vllm."""
     models, _ = storage_report()
     by_key = {(m.worker, m.model): m for m in models}

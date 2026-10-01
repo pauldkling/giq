@@ -166,7 +166,7 @@ class JobQueue:
         return len(self._jobs)
 
 
-# Global queue instance
+# Global queue recipe
 _queue = JobQueue()
 
 

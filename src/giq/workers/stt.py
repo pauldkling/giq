@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 def model_ref(model: str) -> str:
-    """What faster-whisper loads for ``model``: the instance's weights.path
-    or the repository of its ``hf:`` source. A name without an instance
+    """What faster-whisper loads for ``model``: the recipe's weights.path
+    or the repository of its ``hf:`` source. A name without a recipe
     falls through to faster-whisper's own table of size names."""
     return load_ref("stt", model) or model
 

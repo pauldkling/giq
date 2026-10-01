@@ -70,7 +70,7 @@ NoNewPrivileges=yes
 # `giq init`, model downloads and engine builds run outside the unit as the
 # operator. Deleting weights from the dashboard is refused for that reason.
 ProtectSystem=strict
-ReadWritePaths=/projects/giq/state /projects/giq/cache /projects/giq/instances
+ReadWritePaths=/projects/giq/state /projects/giq/cache /projects/giq/recipes
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes

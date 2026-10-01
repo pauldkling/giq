@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING, ClassVar
 
 import httpx
 
-from giq import instances
+from giq import recipes
 from giq.gpus import device_env, device_port, server_port
-from giq.instances.schema import Instance, LlamaCppParams
 from giq.loopguard import LoopGuard
 from giq.models import JobResult
 from giq.paths import model_path as resolve_path
 from giq.paths import state_dir
+from giq.recipes.schema import LlamaCppParams, Recipe
 from giq.registry import vram_for
 from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
@@ -57,20 +57,20 @@ def resolved_model_path(model: str) -> str | None:
     return resolve_path(raw) if raw else None
 
 
-# --- per-model settings, from the instance files -----------------------------
+# --- per-model settings, from the recipe files -----------------------------
 #
-# Every llm instance (giq/instances/llm.*.yaml, and the operator's files in
-# giq.paths.instances_dir()) sets some llama-server parameters; the MODEL_*
+# Every llm recipe (giq/recipes/llm.*.yaml, and the operator's files in
+# giq.paths.recipes_dir()) sets some llama-server parameters; the MODEL_*
 # tables in this module hold exactly what the files set, keyed by model name.
 # A model absent from a table takes the DEFAULT_* beside it. The tables are
-# refilled in place when the instances are reloaded, so a module that imported
+# refilled in place when the recipes are reloaded, so a module that imported
 # one keeps a live reference. Why a model runs with the values it does is
-# written in its instance file; what stays here are the defaults and the
+# written in its recipe file; what stays here are the defaults and the
 # engine knowledge that holds for every model.
 
 
-def tables_of(declared: Iterable[Instance]) -> dict[str, dict]:
-    """The MODEL_* tables, as a set of instances declares them.
+def tables_of(declared: Iterable[Recipe]) -> dict[str, dict]:
+    """The MODEL_* tables, as a set of recipes declares them.
 
     Sparse like the tables: a model appears in one only when its file sets
     that parameter, so everything unset keeps taking the DEFAULT_*.
@@ -139,7 +139,7 @@ MODEL_REASONING: dict[str, str] = {}
 # KV cache quantization (llama-server --cache-type-k/--cache-type-v).
 # q4_0 = aggressive 0.5 B/elem, saves VRAM, loses precision at long context.
 # q8_0 = 1 B/elem, near-f16 quality, ~2× the KV memory.
-# Defaults stay at q4_0 so high-context configs (256k) still fit; an instance
+# Defaults stay at q4_0 so high-context configs (256k) still fit; a recipe
 # raises both to q8_0 when there is a quality reason.
 # Ceiling on the *thought*, separate from max_tokens' ceiling on the whole
 # response. When the budget is spent llama.cpp injects an end-of-thinking tag
@@ -157,14 +157,14 @@ MODEL_REASONING: dict[str, str] = {}
 # a thought going nowhere truncates one that was getting somewhere — the 102k
 # think above read as fluent and on-track, not as looping. With finish_reason
 # reported to the caller, hitting the ceiling is legible rather than silent,
-# which is the cheaper half of the problem solved. An instance sets
+# which is the cheaper half of the problem solved. A recipe sets
 # params.reasoning_budget when that model demonstrably needs the deadline.
 #
 # (A per-request budget does exist, under a key that is easy to get wrong: the
 # body field is `reasoning_budget_tokens` — `server-common.cpp:1354`, alias
 # `thinking_budget_tokens`, -1 meaning "fall back to this flag". Any other key
 # is silently ignored. The per-request form is what `request_defaults` in the
-# instance files use, which answers the objection above: one number no longer
+# recipe files use, which answers the objection above: one number no longer
 # has to serve a 512-token request and a 65k one.)
 DEFAULT_REASONING_BUDGET: int | None = None
 MODEL_REASONING_BUDGET: dict[str, int] = {}
@@ -202,7 +202,7 @@ MODEL_CACHE_TYPE_V: dict[str, str] = {}
 # llama.cpp's defaults, and two of those defaults matter here — `repeat_penalty
 # 1.00` and `dry_multiplier 0.00` both mean *disabled*. Without the defaults
 # below there is no repetition control anywhere in the stack, which is the
-# configuration a thinking model needs to loop freely. An instance's
+# configuration a thinking model needs to loop freely. A recipe's
 # `request_defaults` supply the missing control.
 #
 # DRY ("Don't Repeat Yourself") is the right instrument for the observed
@@ -212,7 +212,7 @@ MODEL_CACHE_TYPE_V: dict[str, str] = {}
 # exponentially in the length of the match, so a fresh sentence pays nothing
 # and the fifth re-emission of a thirty-token run pays enormously. The looping
 # fragments share a ~30-token verbatim run with one slot varying, which is
-# exactly the shape it is built to catch. The Qwen instances set it, with the
+# exactly the shape it is built to catch. The Qwen recipes set it, with the
 # per-field reasoning in llm.qwen3.8-27b.yaml.
 #
 # Two traps in llama.cpp, both verified against its source:
@@ -267,7 +267,7 @@ REASONING_STOP_MESSAGE = (
 # The loop guard watches the thinking channel on every model by default. It is
 # not a behaviour change in the way a token cap is: it cannot fire before 6,000
 # characters of thought, it needs two agreeing verdicts, and when it does fire
-# the answer still gets written. An instance sets params.loop_guard: false if
+# the answer still gets written. A recipe sets params.loop_guard: false if
 # its model turns out to think in a shape the measure reads wrong.
 DEFAULT_LOOP_GUARD = True
 MODEL_LOOP_GUARD: dict[str, bool] = {}
@@ -299,7 +299,7 @@ MODEL_LOOP_GUARD: dict[str, bool] = {}
 # speedup — at identical context, so it is not a memory-pressure effect, and
 # dropping mmproj gives back only 256 MiB. Where vision and the speedup do not
 # coexist in one process, they are served as two profiles over one file: the
-# vision instance keeps mmproj and runs no --spec-type, a `-fast` instance
+# vision recipe keeps mmproj and runs no --spec-type, a `-fast` recipe
 # points weights.path at the same GGUF, carries no mmproj, and runs
 # `draft-mtp`. They share a card, so asking for one evicts the other through
 # the ordinary warm-swap path. (The penalty did not reproduce in a later A/B at 96k on a
@@ -319,7 +319,7 @@ MODEL_LOOP_GUARD: dict[str, bool] = {}
 # from-scratch prompt above. They are worth revisiting for summarise/edit/
 # refactor work over a long document.
 #
-# No built-in instance runs a speculative profile: the registered qwen3.8-27b
+# No built-in recipe runs a speculative profile: the registered qwen3.8-27b
 # build has not been measured under draft-mtp, and a profile goes in with its
 # own measurement, not by analogy. params.spec_type sets it.
 DEFAULT_SPEC_TYPE: str | None = None
@@ -350,15 +350,15 @@ _TABLES: dict[str, dict] = {
 }
 
 
-def _refill(snapshot: instances.Snapshot) -> None:
+def _refill(snapshot: recipes.Snapshot) -> None:
     """Replace every table's contents with what ``snapshot`` declares."""
-    for name, values in tables_of(snapshot.instances.values()).items():
+    for name, values in tables_of(snapshot.recipes.values()).items():
         table = _TABLES[name]
         table.clear()
         table.update(values)
 
 
-instances.subscribe(_refill)
+recipes.subscribe(_refill)
 
 
 # --- how long giq waits on llama-server ---------------------------------------

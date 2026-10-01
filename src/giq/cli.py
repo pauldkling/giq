@@ -54,7 +54,16 @@ def init_home(home: Path) -> list[str]:
         created.append(str(config))
     reload_config()
 
-    dirs = [paths.models_dir(), paths.instances_dir(), paths.state_dir()]
+    # ADR-003 renamed the instance files recipes. Moved rather than left for
+    # the fallback in paths.recipes_dir: the systemd unit grants write access
+    # to $GIQ_HOME/recipes by name, and a home that only has instances/ would
+    # keep the service from starting.
+    old, new = home / "instances", home / "recipes"
+    if old.is_dir() and not new.exists():
+        old.rename(new)
+        created.append(f"{new}/ (was {old.name}/)")
+
+    dirs = [paths.models_dir(), paths.recipes_dir(), paths.state_dir()]
     engines, cache = paths.engines_dir(), paths.cache_dir()
     dirs += [d for d in (engines, cache) if d is not None]
     if cache is not None:
@@ -69,7 +78,7 @@ def init_home(home: Path) -> list[str]:
 def _init(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="giq init",
-        description="Create the GIQ_HOME data tree (config.yaml, models/, instances/, "
+        description="Create the GIQ_HOME data tree (config.yaml, models/, recipes/, "
         "engines/, state/, cache/). Existing files and directories are left as they are.",
     )
     parser.add_argument(
@@ -105,11 +114,14 @@ def _prepare(argv: list[str]) -> int:
         "distinct compute capability)",
     )
     parser.add_argument(
+        "--recipe",
+        # The name before ADR-003, kept so existing deploy scripts still run.
         "--instance",
+        dest="recipe",
         action="append",
         default=[],
         metavar="NAME",
-        help="also start this vllm instance once and stop it, so the compiles its first "
+        help="also start this vllm recipe once and stop it, so the compiles its first "
         "start needs (attention kernels, torch.compile, CUDA graphs) are done now; uses "
         "the GPU for a few minutes. Repeatable",
     )
@@ -132,7 +144,7 @@ def _prepare(argv: list[str]) -> int:
     if code != 0:
         print(f"giq prepare vllm: build failed (exit {code})", file=sys.stderr)
         return code
-    for name in args.instance:
+    for name in args.recipe:
         import asyncio
 
         from giq.gpus import resolve_device

@@ -10,7 +10,7 @@ code::
     $GIQ_HOME/
       config.yaml   the one config
       models/       model weights
-      instances/    operator model instances (ADR-002)
+      recipes/    operator model recipes (ADR-002)
       engines/      engine builds: engines/<engine>/bin/<binary>
       state/        stats.db, inflight.log
       cache/        huggingface, torch, triton and CUDA caches
@@ -45,12 +45,12 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODELS_DIR = "~/models"
-# ADR-002's default for operator instance files outside a GIQ_HOME.
-DEFAULT_INSTANCES_DIR = "~/.config/giq/instances"
+# ADR-002's default for operator recipe files outside a GIQ_HOME.
+DEFAULT_RECIPES_DIR = "~/.config/giq/recipes"
 LEGACY_CONFIG_FILE = "config.yaml"
 
 # Keys of config.yaml's `paths:` block, and the GIQ_HOME subdirectory of each.
-LAYOUT = ("models", "instances", "engines", "state", "cache")
+LAYOUT = ("models", "recipes", "engines", "state", "cache")
 
 
 def home() -> Path | None:
@@ -127,9 +127,46 @@ def model_path(path: str | os.PathLike[str]) -> str:
     return str(p if p.is_absolute() else models_dir() / p)
 
 
-def instances_dir() -> Path:
-    """Operator instance files (``GIQ_INSTANCES_DIR`` … ``~/.config/giq/instances``)."""
-    return _resolve("GIQ_INSTANCES_DIR", "instances") or Path(DEFAULT_INSTANCES_DIR).expanduser()
+# Before ADR-003 the recipe files were called instance files, and lived here.
+LEGACY_RECIPES_ENV = "GIQ_INSTANCES_DIR"
+LEGACY_RECIPES_DIR = "~/.config/giq/instances"
+_legacy_warned = False
+
+
+def _legacy(path: Path, what: str) -> Path:
+    global _legacy_warned
+    if not _legacy_warned:
+        _legacy_warned = True
+        logger.warning(f"paths: reading recipe files from {path} ({what}); see ADR-003")
+    return path
+
+
+def recipes_dir() -> Path:
+    """Operator recipe files (``GIQ_RECIPES_DIR`` … ``~/.config/giq/recipes``).
+
+    An operator who set the old variable, or whose files sit in the old
+    directory, keeps them: a rename must not make their recipes disappear.
+    The new name wins wherever both exist.
+    """
+    if found := _from_env("GIQ_RECIPES_DIR") or _from_config("recipes"):
+        return found
+    if old := _from_env(LEGACY_RECIPES_ENV):
+        return _legacy(old, f"{LEGACY_RECIPES_ENV} is now GIQ_RECIPES_DIR")
+    root = home()
+    default = root / "recipes" if root is not None else Path(DEFAULT_RECIPES_DIR).expanduser()
+    old = root / "instances" if root is not None else Path(LEGACY_RECIPES_DIR).expanduser()
+    # The old directory while the new one holds no recipe yet: `giq init`
+    # moves it on a GIQ_HOME, but a plain checkout's ~/.config is the
+    # operator's to rename.
+    if old.is_dir() and not _has_recipes(default) and _has_recipes(old):
+        return _legacy(old, f"rename it to {default}")
+    return default
+
+
+def _has_recipes(directory: Path) -> bool:
+    return directory.is_dir() and any(
+        p.suffix in (".yaml", ".yml") for p in directory.iterdir() if p.is_file()
+    )
 
 
 def engines_dir() -> Path | None:
@@ -265,7 +302,7 @@ def resolved() -> dict[str, str | None]:
         "home": str(root) if root is not None else None,
         "config": str(config_file().absolute()),
         "models": str(models_dir()),
-        "instances": str(instances_dir()),
+        "recipes": str(recipes_dir()),
         "engines": str(engines) if engines is not None else None,
         "state": str(state_dir()),
         "stats_db": str(stats_db()),

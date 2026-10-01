@@ -22,7 +22,7 @@ _VARS = (
     "GIQ_HOME",
     "GIQ_CONFIG",
     "GIQ_MODELS_DIR",
-    "GIQ_INSTANCES_DIR",
+    "GIQ_RECIPES_DIR",
     "GIQ_ENGINES_DIR",
     "GIQ_DATA_DIR",
     "GIQ_CACHE_DIR",
@@ -40,6 +40,7 @@ _VARS = (
     "MPLCONFIGDIR",
     "GIQ_HOST",
     "GIQ_PORT",
+    "GIQ_INSTANCES_DIR",
 )
 
 
@@ -81,7 +82,7 @@ def test_legacy_defaults_without_home(clean):
     assert paths.home() is None
     assert paths.config_file() == Path("config.yaml")
     assert paths.models_dir() == Path("~/models").expanduser()
-    assert paths.instances_dir() == Path("~/.config/giq/instances").expanduser()
+    assert paths.recipes_dir() == Path("~/.config/giq/recipes").expanduser()
     assert paths.engines_dir() is None
     assert paths.state_dir() == paths.repo_root() / "data"
     assert paths.stats_db() == paths.repo_root() / "data" / "stats.db"
@@ -96,6 +97,47 @@ def test_legacy_child_env_is_untouched(clean):
     assert env == dict(os.environ)
 
 
+# --- ADR-003: instance files became recipes; old setups keep their files --------
+
+
+def test_the_old_variable_still_finds_the_recipes(clean, tmp_path):
+    clean.setenv("GIQ_INSTANCES_DIR", str(tmp_path / "old"))
+    assert paths.recipes_dir() == tmp_path / "old"
+    clean.setenv("GIQ_RECIPES_DIR", str(tmp_path / "new"))
+    assert paths.recipes_dir() == tmp_path / "new"
+
+
+def test_an_old_directory_is_used_until_the_new_one_has_recipes(clean, tmp_path):
+    old = tmp_path / ".config" / "giq" / "instances"
+    old.mkdir(parents=True)
+    (old / "mine.yaml").write_text("name: mine\n")
+    clean.setenv("HOME", str(tmp_path))
+    assert paths.recipes_dir() == old
+    # An empty new directory does not hide the operator's files.
+    new = tmp_path / ".config" / "giq" / "recipes"
+    new.mkdir()
+    assert paths.recipes_dir() == old
+    (new / "mine.yaml").write_text("name: mine\n")
+    assert paths.recipes_dir() == new
+
+
+def test_init_moves_the_old_directory_so_the_unit_can_start(clean, tmp_path):
+    home = tmp_path / "home"
+    (home / "instances").mkdir(parents=True)
+    (home / "instances" / "mine.yaml").write_text("name: mine\n")
+    init_home(home)
+    assert (home / "recipes" / "mine.yaml").is_file()
+    assert not (home / "instances").exists()
+    assert paths.recipes_dir() == home / "recipes"
+
+
+def test_the_old_config_key_still_finds_the_recipes(clean, tmp_path):
+    cfg = _config(tmp_path, "paths:\n  instances: /srv/giq/instances\n")
+    clean.setenv("GIQ_CONFIG", str(cfg))
+    _reload()
+    assert paths.recipes_dir() == Path("/srv/giq/instances")
+
+
 # --- the GIQ_HOME layout ----------------------------------------------------------
 
 
@@ -104,7 +146,7 @@ def test_home_layout(clean, tmp_path):
     clean.setenv("GIQ_HOME", str(home))
     assert paths.config_file() == home / "config.yaml"
     assert paths.models_dir() == home / "models"
-    assert paths.instances_dir() == home / "instances"
+    assert paths.recipes_dir() == home / "recipes"
     assert paths.engines_dir() == home / "engines"
     assert paths.state_dir() == home / "state"
     assert paths.stats_db() == home / "state" / "stats.db"
@@ -132,7 +174,7 @@ def test_config_file_env_beats_home(clean, tmp_path):
     ("func", "env", "key"),
     [
         (paths.models_dir, "GIQ_MODELS_DIR", "models"),
-        (paths.instances_dir, "GIQ_INSTANCES_DIR", "instances"),
+        (paths.recipes_dir, "GIQ_RECIPES_DIR", "recipes"),
         (paths.engines_dir, "GIQ_ENGINES_DIR", "engines"),
         (paths.state_dir, "GIQ_DATA_DIR", "state"),
         (paths.cache_dir, "GIQ_CACHE_DIR", "cache"),
@@ -280,7 +322,7 @@ def test_engine_falls_back_to_path_without_a_home_build(clean, tmp_path):
 def test_init_creates_the_tree_and_is_idempotent(clean, tmp_path):
     home = tmp_path / "giq"
     created = init_home(home)
-    for sub in ("models", "instances", "engines", "state", "cache", "cache/huggingface"):
+    for sub in ("models", "recipes", "engines", "state", "cache", "cache/huggingface"):
         assert (home / sub).is_dir()
     assert (home / "config.yaml").read_text() == template_text()
     assert f"{home / 'config.yaml'}" in created

@@ -18,18 +18,18 @@
 #
 #   key        env var             under GIQ_HOME      without GIQ_HOME
 #   models     GIQ_MODELS_DIR      $GIQ_HOME/models    ~/models
-#   instances  GIQ_INSTANCES_DIR   $GIQ_HOME/instances ~/.config/giq/instances
+#   recipes    GIQ_RECIPES_DIR     $GIQ_HOME/recipes   ~/.config/giq/recipes
 #   engines    GIQ_ENGINES_DIR     $GIQ_HOME/engines   (PATH lookup)
 #   state      GIQ_DATA_DIR        $GIQ_HOME/state     <checkout>/data
 #   cache      GIQ_CACHE_DIR       $GIQ_HOME/cache     (libraries' own ~/.cache)
 #
 # Entries are absolute, or relative to GIQ_HOME (to this file's directory
 # when GIQ_HOME is unset); `~` is expanded here. A relative weights path in
-# an instance file is taken under `models`; engine builds are found under
+# a recipe file is taken under `models`; engine builds are found under
 # engines/<engine>/bin/<binary>, e.g. engines/llama.cpp/bin/llama-server.
 paths:
   # models: /srv/models
-  # instances: instances
+  # recipes: recipes
   # engines: engines
   # state: state
   # cache: cache
@@ -91,15 +91,15 @@ engines:
   # sd.cpp:
   #   binary: /path/to/stable-diffusion.cpp/build/bin/sd-server
 
-# Image models are instances like every other model: their files (diffusion
-# model, text encoder, VAE, LoRA) are the instance's `weights.parts`, under
+# Image models are recipes like every other model: their files (diffusion
+# model, text encoder, VAE, LoRA) are the recipe's `weights.parts`, under
 # `models` (docs/configuration.md, "Image models"). An `image_models:` block
-# here is still read, deprecated: its entries replace the instance's files,
-# and giq logs, once, the instance-file equivalent of each.
+# here is still read, deprecated: its entries replace the recipe's files,
+# and giq logs, once, the recipe-file equivalent of each.
 
 # Models kept loaded whenever nothing else claims the VRAM, in reload-priority
 # order. Jobs for these run on per-model lanes; everything else is "sleepy" and
-# evicts them on demand. Commented out = the instances' `residency.priority`
+# evicts them on demand. Commented out = the recipes' `residency.priority`
 # (the built-ins: gemma-4-12b, whisper-large-v3, ecapa-tdnn). This set must
 # fit the card with room for the largest
 # sleepy model you actually use, or renders will thrash reloads.

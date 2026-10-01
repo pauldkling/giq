@@ -6,7 +6,7 @@
 
 Invoked by ``MultiviewWorker`` via ``<envs/da3 python> -u -m
 giq.workers._multiview_child --model da3-base --weights <dir>`` with this
-checkout's ``src`` on ``PYTHONPATH``. Loads the local snapshot the instance
+checkout's ``src`` on ``PYTHONPATH``. Loads the local snapshot the recipe
 names, with the hub disabled before anything from the hub ecosystem is
 imported, so nothing is fetched.
 
@@ -220,7 +220,7 @@ def main() -> None:
 
     reserve_ipc_stdout()
     parser = argparse.ArgumentParser()
-    # --model names the instance for log lines; --weights is what loads.
+    # --model names the recipe for log lines; --weights is what loads.
     parser.add_argument("--model", required=True)
     parser.add_argument("--weights", required=True)
     args = parser.parse_args()

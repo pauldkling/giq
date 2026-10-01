@@ -59,7 +59,7 @@ class MultiviewWorker(SubprocessWorker):
 
     def __init__(self, config: MultiviewWorkerConfig, device: str | None = None):
         super().__init__(config, device)
-        # The instance's weights.path, under GIQ_MULTIVIEW_MODELS_DIR when
+        # The recipe's weights.path, under GIQ_MULTIVIEW_MODELS_DIR when
         # that is set. Unknown model or no weights: fail here, not at spawn.
         self.weights = require_path("multiview", config.model)
 

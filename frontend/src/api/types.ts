@@ -233,24 +233,24 @@ export interface StorageModel {
   paths: string[];
 }
 
-/** An operator instance file that is serving. */
+/** An operator recipe file that is serving. */
 export interface InstanceFile {
   file: string;
   worker: WorkerType;
   name: string;
-  /** Replaces the built-in instance of the same worker and name. */
+  /** Replaces the built-in recipe of the same worker and name. */
   replaces_builtin: boolean;
 }
 
-/** An operator instance file giq left out, and why. */
+/** An operator recipe file giq left out, and why. */
 export interface InstanceLoadError {
-  /** Null when the problem is not one file's (two files defining one instance). */
+  /** Null when the problem is not one file's (two files defining one recipe). */
   file: string | null;
   message: string;
 }
 
-/** The operator's instance files, as the running snapshot read them. */
-export interface InstancesInfo {
+/** The operator's recipe files, as the running snapshot read them. */
+export interface RecipesInfo {
   dir: string | null;
   builtin_dir: string;
   files: InstanceFile[];
@@ -262,8 +262,8 @@ export interface InstancesInfo {
 export interface StorageResponse {
   disks: Disk[];
   models: StorageModel[];
-  /** Absent from a giq older than instance files. */
-  instances?: InstancesInfo;
+  /** Absent from a giq older than recipe files. */
+  recipes?: RecipesInfo;
 }
 
 export interface DeleteWeightsResponse {

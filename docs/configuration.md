@@ -17,7 +17,7 @@ engines:
 ```
 
 What each model is — its weights, engine, parameters and VRAM figure — is not
-in `config.yaml` but in its [instance file](#instances).
+in `config.yaml` but in its [recipe file](#instances).
 
 Engines are described in [engines.md](engines.md); `access:` in
 [access-and-privacy.md](access-and-privacy.md).
@@ -31,7 +31,7 @@ Set `GIQ_HOME` and everything that is not code lives under one directory —
 $GIQ_HOME/
   config.yaml   the one config
   models/       weights
-  instances/    model instance files (ADR-002)
+  instances/    model recipe files (ADR-002)
   engines/      engine builds, e.g. engines/llama.cpp/bin/llama-server
   state/        stats.db, in-flight log
   cache/        Hugging Face and kernel caches
@@ -51,10 +51,10 @@ Environment variables:
 | `GIQ_HOME` | unset | Data root (layout above) |
 | `GIQ_HOST`, `GIQ_PORT` | `127.0.0.1`, `8084` | Bind address (command-line flags win) |
 | `GIQ_DATA_DIR` | `$GIQ_HOME/state`, else `data/` | Stats database and in-flight log |
-| `GIQ_INSTANCES_DIR` | `$GIQ_HOME/instances`, else `~/.config/giq/instances` | Instance files |
+| `GIQ_RECIPES_DIR` | `$GIQ_HOME/recipes`, else `~/.config/giq/recipes` | Recipe files |
 | `GIQ_ENGINES_DIR` | `$GIQ_HOME/engines` | Engine builds, looked up before PATH |
 | `GIQ_CACHE_DIR` | `$GIQ_HOME/cache` | Caches, exported to the workers as `HF_HOME`, `XDG_CACHE_HOME` and friends |
-| `GIQ_MODELS_DIR` | `$GIQ_HOME/models`, else `~/models` | Root of the model store; relative weight paths in instance files resolve against it |
+| `GIQ_MODELS_DIR` | `$GIQ_HOME/models`, else `~/models` | Root of the model store; relative weight paths in recipe files resolve against it |
 | `GIQ_CONFIG` | `$GIQ_HOME/config.yaml`, else `./config.yaml` | Config file |
 | `GIQ_LLAMA_BINARY` | `llama-server` on PATH | llama.cpp server binary |
 | `GIQ_SDCPP_BINARY` | `sd-server` on PATH | stable-diffusion.cpp server binary |
@@ -78,12 +78,12 @@ defaults and the VRAM figure the scheduler gates on
 ([ADR-002](ADR-002-model-instances.md)). Two places hold them:
 
 - **Built-in** — one file per model shipped in the package,
-  `src/giq/instances/<worker>.<name>.yaml`. Read them for the catalog giq
+  `src/giq/recipes/<worker>.<name>.yaml`. Read them for the catalog giq
   ships and for why each model runs with the settings it does; the reasoning
   is in their comments. Don't edit them in an installed giq.
-- **Yours** — `*.yaml` / `*.yml` directly in the instances directory
-  (`GIQ_INSTANCES_DIR`, `paths.instances`, `$GIQ_HOME/instances`, else
-  `~/.config/giq/instances`). File names are free; the contents say what the
+- **Yours** — `*.yaml` / `*.yml` directly in the recipes directory
+  (`GIQ_RECIPES_DIR`, `paths.recipes`, `$GIQ_HOME/recipes`, else
+  `~/.config/giq/recipes`). File names are free; the contents say what the
   file defines.
 
 An instance is identified by its `worker` and `name` together
@@ -95,7 +95,7 @@ you need. A file with a new name **adds** a model. The log says at INFO which
 file each of your instances came from and which built-ins they replace.
 
 ```yaml
-# ~/.config/giq/instances/qwen3.8-27b.yaml — the built-in at 196k context
+# ~/.config/giq/recipes/qwen3.8-27b.yaml — the built-in at 196k context
 name: qwen3.8-27b
 worker: llm
 engine: llama.cpp
@@ -150,7 +150,7 @@ other engines take no parameters from an instance yet.
 
 ### Weights
 
-Every worker loads the weights its instance names, so an instance file with
+Every worker loads the weights its instance names, so a recipe file with
 a new name is a new model — no table in giq's code has to know it. The main
 weights are `weights.path`; the other files a model needs are
 `weights.parts`, each a path or a mapping with its own provenance:
@@ -200,7 +200,7 @@ expect them under the models directory, one subfolder per part —
 elsewhere, override the instance with absolute paths:
 
 ```yaml
-# ~/.config/giq/instances/zimage.yaml
+# ~/.config/giq/recipes/zimage.yaml
 name: zimage
 worker: text2image
 engine: sd.cpp
@@ -232,7 +232,7 @@ profiles, `residency.gpu`, `residency.default_policy: off`) are all errors, neve
 file of yours that fails is logged as an error and left out — the built-in of
 that name, if there is one, keeps serving — and two of your files defining
 the same instance are both left out, since which one won would be an accident
-of sorting. Instance files are read at startup; restart giq after changing
+of sorting. Recipe files are read at startup; restart giq after changing
 them. `GET /storage` lists the files that were left out with the reason
 (its `instances` block), and the dashboard's Models view shows them as a
 warning above the catalog.

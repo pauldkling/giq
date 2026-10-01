@@ -6,7 +6,7 @@
 
 The child — ``_ocr_child`` for baidu/Unlimited-OCR, ``_glm_ocr_child`` for
 GLM-OCR — returns the model's raw tagged text, loading the weights the
-instance file names (``giq.weights``), which the parent passes on its
+recipe file names (``giq.weights``), which the parent passes on its
 command line. Everything that turns that into a document — dropping
 headers, footers and page numbers, re-joining a table or paragraph the page
 break cut in two, and rendering HTML — happens here in the parent through
@@ -28,7 +28,7 @@ from typing import Any, ClassVar
 from giq import ocrdoc
 from giq.models import OCRResult
 from giq.registry import vram_for
-from giq.weights import instance_of, require_path
+from giq.weights import recipe_of, require_path
 from giq.workers._subprocess import SubprocessWorker
 
 # 8266 MiB per-process peak measured on an RTX 5090 (4-page pass at 1024px);
@@ -36,11 +36,11 @@ from giq.workers._subprocess import SubprocessWorker
 # should be.
 OCR_VRAM_GB = 9.0
 
-# Which child runs an OCR instance, by its engine. giq has two OCR pipelines
+# Which child runs an OCR recipe, by its engine. giq has two OCR pipelines
 # and each child is written for one architecture: `transformers-4.57` runs
 # Unlimited-OCR's remote code (it needs that transformers, see engines.py),
 # `transformers` runs GLM-OCR behind a PP-DocLayoutV3 layout stage, which it
-# reads from weights.parts.layout. An operator's OCR instance is another
+# reads from weights.parts.layout. An operator's OCR recipe is another
 # checkpoint of one of the two, served under a name of its own.
 CHILD_OF_ENGINE: dict[str, str] = {
     "transformers-4.57": "giq.workers._ocr_child",
@@ -54,10 +54,10 @@ _GIQ_SRC = str(Path(__file__).resolve().parents[2])
 
 
 def _instance(model: str):
-    inst = instance_of("ocr", model)
-    if inst is None:
-        raise ValueError(f"unknown OCR model {model!r}: no instance file defines it")
-    return inst
+    recipe = recipe_of("ocr", model)
+    if recipe is None:
+        raise ValueError(f"unknown OCR model {model!r}: no recipe file defines it")
+    return recipe
 
 
 @dataclass
@@ -78,7 +78,7 @@ class OCRWorker(SubprocessWorker):
         # Unknown model, foreign engine or missing weights: fail here, not at spawn.
         self.engine = _instance(config.model).engine
         try:
-            # Instance attribute shadows the ClassVar: _command() reads self.child_module.
+            # Recipe attribute shadows the ClassVar: _command() reads self.child_module.
             self.child_module = CHILD_OF_ENGINE[self.engine]
         except KeyError:
             raise ValueError(

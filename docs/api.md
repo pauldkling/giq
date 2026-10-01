@@ -89,7 +89,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/stats/models` | GET | The model catalog: VRAM needs, fit per card, policy, binding |
 | `/stats/summary`, `/stats/timeline`, `/stats/usage`, `/stats/jobs` | GET | Job history (see [Privacy](access-and-privacy.md#privacy) for what is recorded) |
 | `/stats/gpus`, `/stats/vram`, `/stats/gpus/eras` | GET | GPU telemetry history and per-card job totals |
-| `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's instance files — see [Storage](#storage) |
+| `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's recipe files — see [Storage](#storage) |
 | `/storage/models/{worker}/{model}` | DELETE | Delete a model's weights |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat, streaming and tool calls included |
 | `/v1/responses` | POST | OpenAI Responses API, streaming and tool calls included — see [Responses API](#responses-api) |
@@ -105,7 +105,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 ## Workers
 
 ### LLM (`llm`)
-- Models: the models declared by `llm` instance files (`giq/instances/llm.*.yaml`
+- Models: the models declared by `llm` recipe files (`giq/recipes/llm.*.yaml`
   and your own, see [Instances](configuration.md#instances)) — GGUFs via
   llama.cpp, Hugging Face checkpoints via vllm; `/capabilities` lists them
 - Task: `{id, messages[], temperature?, max_tokens?}`
@@ -349,21 +349,21 @@ unclear is not one giq offers for commercial use.
   `on_disk` (every path present), `shared_with` (other models using the
   same files), `resident`, `last_used`.
 - `disks` — per mount: total, free, and how much of it is model weights.
-- `paths` — every data directory giq resolved (config, models, instances,
+- `paths` — every data directory giq resolved (config, models, recipes,
   engines, state, caches).
-- `instances` — the operator's [instance files](configuration.md#instances):
+- `recipes` — the operator's [recipe files](configuration.md#instances):
 
 ```json
-"instances": {
-  "dir": "/home/me/.config/giq/instances",
-  "builtin_dir": "/opt/giq/src/giq/instances",
+"recipes": {
+  "dir": "/home/me/.config/giq/recipes",
+  "builtin_dir": "/opt/giq/src/giq/recipes",
   "files": [
-    {"file": "/home/me/.config/giq/instances/gemma.yaml", "worker": "llm",
+    {"file": "/home/me/.config/giq/recipes/gemma.yaml", "worker": "llm",
      "name": "gemma-4-12b", "replaces_builtin": true}
   ],
   "overrides": ["llm/gemma-4-12b"],
   "errors": [
-    {"file": "/home/me/.config/giq/instances/broken.yaml",
+    {"file": "/home/me/.config/giq/recipes/broken.yaml",
      "message": "params.ctx: Extra inputs are not permitted"}
   ]
 }

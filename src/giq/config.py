@@ -21,21 +21,21 @@ class ImageModelConfig:
     """An image model's files, and the runtime that renders them.
 
     What ``giq.weights.image_files`` hands the image workers, built from the
-    model's instance file. As a ``config.yaml`` ``image_models`` entry it is
+    model's recipe file. As a ``config.yaml`` ``image_models`` entry it is
     deprecated (see :func:`warn_image_model`): such an entry still replaces
-    the instance's files, and its ``vram_gb``/``engine``, when given,
-    overlay the instance's.
+    the recipe's files, and its ``vram_gb``/``engine``, when given,
+    overlay the recipe's.
     """
 
     diffusion: str
     text_encoder: str
     vae: str
     lora: str | None = None
-    # None = the instance's figure.
+    # None = the recipe's figure.
     vram_gb: float | None = None
     # Which runtime renders this model: "sd.cpp" (stable-diffusion.cpp's
     # sd-server child), the only image runtime; the old "sdcpp" is read as
-    # "sd.cpp". None = the instance's engine.
+    # "sd.cpp". None = the recipe's engine.
     engine: str | None = None
 
 
@@ -43,7 +43,7 @@ _warned_image_models: set[str] = set()
 
 
 def warn_image_model(name: str, entry: ImageModelConfig) -> None:
-    """Say once per process that ``image_models.<name>`` belongs in an instance file.
+    """Say once per process that ``image_models.<name>`` belongs in a recipe file.
 
     Warned where the entry is used (the catalog, a worker being built), not
     where the config is parsed, so the children that read config.yaml for
@@ -53,11 +53,11 @@ def warn_image_model(name: str, entry: ImageModelConfig) -> None:
         return
     _warned_image_models.add(name)
     from giq.engines import ENGINE_ALIASES
-    from giq.instances import builtin
+    from giq.recipes import builtin
 
     shipped = [
-        (inst, path)
-        for (worker, model), (inst, path) in builtin().items()
+        (recipe, path)
+        for (worker, model), (recipe, path) in builtin().items()
         if model == name and worker in ("text2image", "image_edit")
     ]
     parts = {"diffusion": entry.diffusion, "text_encoder": entry.text_encoder, "vae": entry.vae}
@@ -74,12 +74,12 @@ def warn_image_model(name: str, entry: ImageModelConfig) -> None:
     where = (
         "copy " + " and ".join(str(path) for _, path in shipped)
         if shipped
-        else "write an instance file"
+        else "write a recipe file"
     )
     logger.warning(
-        f"config.yaml image_models.{name} is deprecated; it still overrides the instance's files "
-        "(and its engine and VRAM figure, where it sets them). Move it into an instance file: "
-        f"{where} to {giq_paths.instances_dir()}, set {equivalent} there, and delete the "
+        f"config.yaml image_models.{name} is deprecated; it still overrides the recipe's files "
+        "(and its engine and VRAM figure, where it sets them). Move it into a recipe file: "
+        f"{where} to {giq_paths.recipes_dir()}, set {equivalent} there, and delete the "
         "image_models entry"
     )
 
@@ -161,7 +161,7 @@ class GiqConfig:
     # Engine name -> binary path, overriding giq.engines' built-ins. One
     # declared path per runtime; without one, the binary is looked up on PATH.
     engines: dict[str, str] = field(default_factory=dict)
-    # Data directories (models, instances, engines, state, cache), overriding
+    # Data directories (models, recipes, engines, state, cache), overriding
     # the GIQ_HOME layout and overridden by their GIQ_* variables. Resolved by
     # giq.paths, which is the only reader.
     paths: dict[str, str] = field(default_factory=dict)
@@ -207,7 +207,7 @@ class GiqConfig:
                 str(name): float(gb) for name, gb in (gpu_data.get("reserve") or {}).items()
             }
 
-        # Image models (deprecated: their files belong in the instance files)
+        # Image models (deprecated: their files belong in the recipe files)
         if "image_models" in data:
             from giq.engines import canonical_engine
 
@@ -258,7 +258,13 @@ class GiqConfig:
 
         # Data directories
         if "paths" in data:
-            block = data["paths"] or {}
+            block = dict(data["paths"] or {})
+            # ADR-003 renamed the instance files recipes; an old key still
+            # points at the operator's files rather than being dropped as
+            # unknown, which would make them vanish from the catalog.
+            if "instances" in block and "recipes" not in block:
+                logger.warning("config: paths.instances is now paths.recipes (ADR-003)")
+                block["recipes"] = block.pop("instances")
             unknown = sorted(set(block) - set(giq_paths.LAYOUT))
             if unknown:
                 logger.warning(
@@ -283,7 +289,7 @@ class GiqConfig:
             )
 
 
-# Global config instance
+# Global config recipe
 _config: GiqConfig | None = None
 
 

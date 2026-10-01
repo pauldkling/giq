@@ -61,7 +61,7 @@ class ServedLLM(ABC):
     # its max_num_seqs is the number of requests the server really runs at
     # once. llama.cpp does not yet — its lane width and its -np still come
     # from two tables, and aligning them changes dispatch for every built-in
-    # model, which belongs with the move to instance files.
+    # model, which belongs with the move to recipe files.
     lanes_from_engine: ClassVar[bool] = False
 
     @property
@@ -121,11 +121,11 @@ def engine_for(model: str) -> str:
 def context_size(model: str) -> int:
     """The context window an LLM is served with, whichever engine runs it."""
     if engine_for(model) == "vllm":
-        from giq.workers.vllm import instance_for
+        from giq.workers.vllm import recipe_for
 
-        instance = instance_for(model)
-        if instance is not None:
-            return instance.params.max_model_len
+        recipe = recipe_for(model)
+        if recipe is not None:
+            return recipe.params.max_model_len
     from giq.workers.llm import DEFAULT_CTX_SIZE, MODEL_CTX_SIZE
 
     return MODEL_CTX_SIZE.get(model, DEFAULT_CTX_SIZE)

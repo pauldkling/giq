@@ -6,7 +6,7 @@
 
 Invoked by ``DepthWorker`` via ``python -u -m giq.workers._depth_child
 --model depth-anything-v2-small --weights <dir>``. Loads the local snapshot
-the instance names, with the hub disabled before transformers is imported,
+the recipe names, with the hub disabled before transformers is imported,
 so nothing is ever fetched.
 
 Per task: decode the image, run the model at its own working resolution
@@ -156,7 +156,7 @@ def main() -> None:
 
     reserve_ipc_stdout()
     parser = argparse.ArgumentParser()
-    # --model names the instance for log lines; --weights is what loads.
+    # --model names the recipe for log lines; --weights is what loads.
     parser.add_argument("--model", required=True)
     parser.add_argument("--weights", required=True)
     args = parser.parse_args()

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""The built-in instance files reproduce the catalog they replaced.
+"""The built-in recipe files reproduce the catalog they replaced.
 
 `_catalog_baseline` is the registry and the per-model llm tables exactly as
 the hand-written code defined them. Every ModelSpec field and every table
@@ -14,14 +14,14 @@ from dataclasses import asdict
 
 import pytest
 
-from giq import instances
+from giq import recipes
 from giq.registry import spec_of
 from giq.workers import llm
 from tests._catalog_baseline import BUILTIN_SPECS, LLM_DEFAULTS, LLM_TABLES
 
 
 def _builtin_instances():
-    return [inst for inst, _ in instances.builtin().values()]
+    return [recipe for recipe, _ in recipes.builtin().values()]
 
 
 def _builtin_specs() -> dict[tuple[str, str], dict]:
@@ -30,7 +30,7 @@ def _builtin_specs() -> dict[tuple[str, str], dict]:
 
 def test_every_builtin_file_is_valid():
     """A broken built-in raises here rather than at a customer's startup."""
-    assert instances.builtin()
+    assert recipes.builtin()
 
 
 def test_the_same_models_exist():
@@ -55,15 +55,15 @@ def test_the_engine_defaults_did_not_move(name):
     assert getattr(llm, name) == LLM_DEFAULTS[name]
 
 
-# --- operator instances reach the consumers -----------------------------------
+# --- operator recipes reach the consumers -----------------------------------
 
 
 @pytest.fixture
 def operator_dir(tmp_path, monkeypatch):
-    """An operator instances directory, with the catalog rebuilt around it."""
+    """An operator recipes directory, with the catalog rebuilt around it."""
     from giq.registry import reload_registry
 
-    monkeypatch.setenv("GIQ_INSTANCES_DIR", str(tmp_path))
+    monkeypatch.setenv("GIQ_RECIPES_DIR", str(tmp_path))
     yield tmp_path
     monkeypatch.undo()
     reload_registry()
@@ -152,7 +152,7 @@ async def test_storage_reports_the_operator_files_and_what_was_left_out(operator
     reload_registry()
     monkeypatch.setattr(stats_api, "storage_report", lambda: ([], []))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
-        block = (await c.get("/storage")).json()["instances"]
+        block = (await c.get("/storage")).json()["recipes"]
 
     assert block["dir"] == str(operator_dir)
     assert [(f["name"], f["replaces_builtin"]) for f in block["files"]] == [

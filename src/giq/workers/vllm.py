@@ -45,8 +45,8 @@ things about the process are not optional:
   a local service and turns that off, and runs the hub offline so a
   missing file fails instead of downloading.
 
-Parameters are declared once in the instance schema (``VllmParams``, D2),
-instances pick a profile and override values (D9), and the checkpoint is
+Parameters are declared once in the recipe schema (``VllmParams``, D2),
+recipes pick a profile and override values (D9), and the checkpoint is
 inspected for what it can do before anything starts: speculative decoding
 with MTP needs the head in the weights.
 """
@@ -68,9 +68,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import httpx
 
 from giq.gpus import compute_capability, device_env, device_port, resolve_device, server_port
-from giq.instances.schema import Instance, VllmParams, mtp_layers, read_hf_config
 from giq.models import JobResult
 from giq.paths import cache_dir, model_path, state_dir
+from giq.recipes.schema import Recipe, VllmParams, mtp_layers, read_hf_config
 from giq.registry import vram_for
 from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
@@ -92,7 +92,7 @@ STOP_GRACE_SECONDS = 30.0
 KILL_WAIT_SECONDS = 10.0
 
 # The RAM ceiling on the engine process: 2 compile jobs at up to ~15 GB each
-# plus the server itself. A machine with less RAM lowers it per instance.
+# plus the server itself. A machine with less RAM lowers it per recipe.
 DEFAULT_MEMORY_MAX = "40G"
 
 # FlashInfer's JIT parallelism, inside the ceiling above.
@@ -100,16 +100,16 @@ JIT_MAX_JOBS = 2
 
 
 class VLLMConfigError(ValueError):
-    """An instance the vllm adapter refuses: bad parameters or weights that
+    """A recipe the vllm adapter refuses: bad parameters or weights that
     cannot do what the parameters ask."""
 
 
-# --- the instance ---------------------------------------------------------------
+# --- the recipe ---------------------------------------------------------------
 #
-# Parameters, profiles and their validation live in the instance schema
-# (giq.instances.schema.VllmParams, ENGINE_PROFILES["vllm"]): an instance file
+# Parameters, profiles and their validation live in the recipe schema
+# (giq.recipes.schema.VllmParams, ENGINE_PROFILES["vllm"]): a recipe file
 # is checked when it is loaded, not when the server starts. What stays here
-# is turning a validated instance into a running server.
+# is turning a validated recipe into a running server.
 
 
 def concurrency_of(params: VllmParams) -> Concurrency:
@@ -122,24 +122,24 @@ def concurrency_of(params: VllmParams) -> Concurrency:
     )
 
 
-def instance_for(model: str) -> Instance | None:
-    """The vllm instance clients reach as ``model`` (a name or an alias)."""
-    from giq import instances
+def recipe_for(model: str) -> Recipe | None:
+    """The vllm recipe clients reach as ``model`` (a name or an alias)."""
+    from giq import recipes
     from giq.registry import get_spec
 
     spec = get_spec("llm", model)
-    inst = instances.current().get("llm", spec.model if spec else model)
-    return inst if inst is not None and inst.engine == ENGINE else None
+    recipe = recipes.current().get("llm", spec.model if spec else model)
+    return recipe if recipe is not None and recipe.engine == ENGINE else None
 
 
-def weights_dir(instance: Instance) -> str:
-    assert instance.weights is not None and instance.weights.path is not None
-    return model_path(instance.weights.path)
+def weights_dir(recipe: Recipe) -> str:
+    assert recipe.weights is not None and recipe.weights.path is not None
+    return model_path(recipe.weights.path)
 
 
 def weights_installed(model: str) -> bool:
-    inst = instance_for(model)
-    return inst is not None and (Path(weights_dir(inst)) / "config.json").is_file()
+    recipe = recipe_for(model)
+    return recipe is not None and (Path(weights_dir(recipe)) / "config.json").is_file()
 
 
 def check_checkpoint(weights: str | Path, params: VllmParams) -> dict[str, Any]:
@@ -148,7 +148,7 @@ def check_checkpoint(weights: str | Path, params: VllmParams) -> dict[str, Any]:
 
     vllm reads Hugging Face directories (safetensors, ModelOpt), not GGUF
     files (D4 ``accepts``). Speculative MTP needs the head in the weights:
-    without one vllm fails after loading them. The instance loader checks the
+    without one vllm fails after loading them. The recipe loader checks the
     same when the weights are present at load; this is the check that always
     runs.
     """
@@ -358,10 +358,10 @@ def _normalise_reasoning(message: dict) -> None:
 
 @dataclass
 class VLLMWorkerConfig:
-    """How one vllm model is started. Everything is derived from its instance."""
+    """How one vllm model is started. Everything is derived from its recipe."""
 
     model: str
-    instance: Instance | None = None
+    recipe: Recipe | None = None
     device: str | None = None
     port: int | None = None
     host: str = "127.0.0.1"
@@ -372,19 +372,19 @@ class VLLMWorkerConfig:
     # Whether the checkpoint carries a vision tower; None = read it from
     # config.json.
     multimodal: bool | None = None
-    # Seconds a start may take; None = the instance's ready_timeout. The
-    # warm-up in `giq prepare vllm --instance` waits out a first start's
+    # Seconds a start may take; None = the recipe's ready_timeout. The
+    # warm-up in `giq prepare vllm --recipe` waits out a first start's
     # compiles with a longer one.
     ready_timeout: float | None = None
 
     def __post_init__(self):
-        if self.instance is None:
-            self.instance = instance_for(self.model)
-        if self.instance is None:
-            raise VLLMConfigError(f"{self.model}: no vllm instance of that name")
-        # The name vllm serves is the instance's, even when a client asked by
+        if self.recipe is None:
+            self.recipe = recipe_for(self.model)
+        if self.recipe is None:
+            raise VLLMConfigError(f"{self.model}: no vllm recipe of that name")
+        # The name vllm serves is the recipe's, even when a client asked by
         # an alias.
-        self.model = self.instance.name
+        self.model = self.recipe.name
         if self.device is None:
             from giq.vram import device_for_model
 
@@ -403,15 +403,15 @@ class VLLMWorkerConfig:
 
     @property
     def params(self) -> VllmParams:
-        assert self.instance is not None
-        params = self.instance.params
+        assert self.recipe is not None
+        params = self.recipe.params
         assert isinstance(params, VllmParams)
         return params
 
     @property
     def weights(self) -> str:
-        assert self.instance is not None
-        return weights_dir(self.instance)
+        assert self.recipe is not None
+        return weights_dir(self.recipe)
 
 
 @dataclass
@@ -430,9 +430,9 @@ class VLLMWorker(ServedLLM):
     # --- identity -------------------------------------------------------------
 
     @property
-    def instance(self) -> Instance:
-        assert self.config.instance is not None
-        return self.config.instance
+    def recipe(self) -> Recipe:
+        assert self.config.recipe is not None
+        return self.config.recipe
 
     @property
     def is_running(self) -> bool:
@@ -452,7 +452,7 @@ class VLLMWorker(ServedLLM):
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "llm", default=self.instance.vram.gb)
+        return vram_for(self.config.model, "llm", default=self.recipe.vram.gb)
 
     @property
     def base_url(self) -> str:
@@ -503,7 +503,7 @@ class VLLMWorker(ServedLLM):
             return p.gpu_memory_utilization
         if not card_total_gb:
             return None
-        return round(min(0.98, max(0.01, self.instance.vram.gb / card_total_gb)), 3)
+        return round(min(0.98, max(0.01, self.recipe.vram.gb / card_total_gb)), 3)
 
     def build_command(self, card_total_gb: float | None = None) -> list[str]:
         """argv for ``vllm serve``, from validated parameters only (D2, D4)."""
@@ -539,7 +539,7 @@ class VLLMWorker(ServedLLM):
             cmd += ["--speculative-config", json.dumps(spec)]
         if p.enforce_eager:
             cmd += ["--enforce-eager"]
-        if self.config.multimodal and "vision" not in self.instance.capabilities:
+        if self.config.multimodal and "vision" not in self.recipe.capabilities:
             # A multimodal checkpoint served as text: the vision tower is not
             # loaded, and its memory profile does not eat into the budget.
             cmd += ["--language-model-only"]
@@ -553,7 +553,7 @@ class VLLMWorker(ServedLLM):
         return engine_env(self.config.device, self.config.python)
 
     def request_defaults(self) -> dict:
-        return dict(self.instance.request_defaults)
+        return dict(self.recipe.request_defaults)
 
     def _body(self, request_body: dict) -> dict:
         body = {**self.request_defaults(), **request_body}
@@ -1005,7 +1005,7 @@ WARMUP_TIMEOUT_SECONDS = 3600.0
 
 
 async def warm_up(model: str, device: str | None = None) -> float:
-    """Start an instance once, with time for every first-use compile, and stop
+    """Start a recipe once, with time for every first-use compile, and stop
     it. Returns the seconds the start took. Nothing is served meanwhile."""
     worker = VLLMWorker(
         VLLMWorkerConfig(model=model, device=device, ready_timeout=WARMUP_TIMEOUT_SECONDS)

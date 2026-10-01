@@ -12,7 +12,7 @@
 # worker.
 #
 # Licences differ by size: Small is Apache-2.0; Base and Large are
-# CC-BY-NC-4.0 (non-commercial) and have no instance, so the catalog only
+# CC-BY-NC-4.0 (non-commercial) and have no recipe, so the catalog only
 # offers what may be run commercially.
 name: depth-anything-v2-small
 label: Depth Anything V2 Small

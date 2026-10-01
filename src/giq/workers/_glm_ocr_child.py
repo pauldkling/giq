@@ -14,7 +14,7 @@ furniture (running headers, footers, page numbers, margin notes) are never
 read at all: they cost nothing and cannot leak into the document.
 
 Neither model carries remote code; both load from local snapshots pinned to
-reviewed revisions — the parent passes the instance's ``weights.path`` as
+reviewed revisions — the parent passes the recipe's ``weights.path`` as
 ``--weights`` and its ``weights.parts.layout`` as ``--layout`` — with the hub
 disabled before transformers is imported.
 zai-org's own ``glmocr`` SDK is deliberately not used: it defaults to

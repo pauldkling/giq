@@ -85,12 +85,12 @@ def test_hydrate_keeps_the_error_envelope():
 
 @pytest.fixture
 def second_model(tmp_path, monkeypatch):
-    """A second depth instance with its own snapshot. The public catalog
+    """A second depth recipe with its own snapshot. The public catalog
     carries only Small (Base and Large are non-commercial), so the
-    non-default paths are exercised with an operator instance."""
+    non-default paths are exercised with an operator recipe."""
     from giq.registry import reload_registry
 
-    monkeypatch.setenv("GIQ_INSTANCES_DIR", str(tmp_path))
+    monkeypatch.setenv("GIQ_RECIPES_DIR", str(tmp_path))
     (tmp_path / "large.yaml").write_text(
         "name: depth-test-large\nworker: depth\nengine: transformers\n"
         "weights: {path: depth-test-large-hf}\nvram: {gb: 4.0}\n"

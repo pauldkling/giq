@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Workers load the weights their instance names.
+"""Workers load the weights their recipe names.
 
-The failure this guards against is an instance file that adds a model to
+The failure this guards against is a recipe file that adds a model to
 the catalog which its worker then cannot load, because the worker looked its
 weights up in a table of its own keyed by the built-in names.
 """
@@ -12,18 +12,18 @@ weights up in a table of its own keyed by the built-in names.
 import pytest
 
 from giq import weights
-from giq.instances import InstanceError, load_file
 from giq.paths import models_dir
+from giq.recipes import RecipeError, load_file
 
 
 @pytest.fixture
 def operator_dir(tmp_path, monkeypatch):
-    """An operator instances directory, with the catalog rebuilt around it."""
+    """An operator recipes directory, with the catalog rebuilt around it."""
     from giq.registry import reload_registry
 
-    directory = tmp_path / "instances"
+    directory = tmp_path / "recipes"
     directory.mkdir()
-    monkeypatch.setenv("GIQ_INSTANCES_DIR", str(directory))
+    monkeypatch.setenv("GIQ_RECIPES_DIR", str(directory))
     reload_registry()
     yield directory
     monkeypatch.undo()
@@ -131,7 +131,7 @@ def test_speech_models_load_the_repository_their_instance_names(operator_dir, mo
         "weights: {path: /srv/ct2/whisper-de}\nvram: {gb: 3.0}\n",
     )
     assert model_ref("whisper-de") == "/srv/ct2/whisper-de"
-    # No instance: faster-whisper's own size names still work.
+    # No recipe: faster-whisper's own size names still work.
     assert model_ref("distil-large-v3") == "distil-large-v3"
 
     monkeypatch.delenv("GIQ_AUDIO_WHISPER_MODEL", raising=False)
@@ -176,7 +176,7 @@ def test_image_models_take_their_files_from_the_instance():
 
 
 class _LegacyCfg:
-    """config.yaml with an image_models entry, as before instance files."""
+    """config.yaml with an image_models entry, as before recipe files."""
 
     def __init__(self, **entry):
         from giq.config import ImageModelConfig
@@ -217,7 +217,7 @@ def test_a_config_image_model_still_overrides_with_one_warning(legacy_config, ca
     warnings = [r for r in caplog.records if "image_models.zimage is deprecated" in r.message]
     assert len(warnings) == 1
     assert "diffusion: /old/z.safetensors" in warnings[0].message
-    # Keys the entry leaves out keep the instance's values.
+    # Keys the entry leaves out keep the recipe's values.
     spec = get_spec("text2image", "zimage")
     assert (spec.vram_gb, spec.backend, spec.measured) == (13.0, "sd.cpp", True)
 
@@ -261,7 +261,7 @@ def test_env_outranks_the_instance_and_roots_apply_to_relative_paths(monkeypatch
 def test_unknown_models_and_parts_resolve_to_nothing():
     assert weights.path_of("ocr", "no-such-ocr") is None
     assert weights.path_of("ocr", "unlimited-ocr", "layout") is None
-    with pytest.raises(ValueError, match="no instance file"):
+    with pytest.raises(ValueError, match="no recipe file"):
         weights.require_path("ocr", "no-such-ocr")
 
 
@@ -283,15 +283,15 @@ def _load(tmp_path, worker, engine, weights_yaml):
 
 
 def test_a_part_may_be_a_bare_path_or_carry_provenance(tmp_path):
-    inst = _load(
+    recipe = _load(
         tmp_path,
         "text2image",
         "sd.cpp",
         "  parts:\n    diffusion: a.gguf\n"
         "    vae: {path: vae.safetensors, source: 'hf:org/klein', licence: apache-2.0}\n",
     )
-    assert inst.weights.parts["diffusion"].path == "a.gguf"
-    assert inst.weights.parts["vae"].licence == "apache-2.0"
+    assert recipe.weights.parts["diffusion"].path == "a.gguf"
+    assert recipe.weights.parts["vae"].licence == "apache-2.0"
 
 
 @pytest.mark.parametrize(
@@ -304,7 +304,7 @@ def test_a_part_may_be_a_bare_path_or_carry_provenance(tmp_path):
     ],
 )
 def test_parts_a_worker_does_not_read_are_refused(tmp_path, worker, engine, parts, complaint):
-    with pytest.raises(InstanceError, match=complaint):
+    with pytest.raises(RecipeError, match=complaint):
         _load(tmp_path, worker, engine, f"  parts: {parts}\n")
 
 
@@ -315,10 +315,10 @@ def test_the_old_sdcpp_spelling_is_read_as_sd_cpp_with_a_warning(tmp_path, caplo
     from giq import engines
 
     monkeypatch.setattr(engines, "_warned_aliases", set())
-    inst = _load(
+    recipe = _load(
         tmp_path, "text2image", "sdcpp", "  parts: {diffusion: d, text_encoder: t, vae: v}\n"
     )
-    assert inst.engine == "sd.cpp"
+    assert recipe.engine == "sd.cpp"
     assert any("'sdcpp' is deprecated, write 'sd.cpp'" in r.message for r in caplog.records)
 
 
