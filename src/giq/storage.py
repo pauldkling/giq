@@ -20,10 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from giq.config import get_config
-from giq.paths import hf_home, model_path
+from giq.paths import hf_home
 from giq.registry import all_specs
 from giq.weights import Location, locations
-from giq.workers.llm import MODEL_PATHS
 
 # GGUF shard names: model-00001-of-00004.gguf → glob the whole set.
 _SHARD_RE = re.compile(r"^(.*)-\d{5}-of-(\d{5})$")
@@ -56,7 +55,14 @@ def _on_disk(loc: Location, hub: Path) -> Path:
 
 
 def _expand_gguf(path: Path) -> list[Path]:
-    """A sharded GGUF's siblings count as part of the model."""
+    """A sharded GGUF's siblings count as part of the model; anything else is itself.
+
+    A checkpoint directory is counted whole already, and its own
+    ``model-00001-of-00003.safetensors`` shards are not the GGUF set this
+    globs for.
+    """
+    if path.suffix != ".gguf":
+        return [path]
     m = _SHARD_RE.match(path.stem)
     if not m:
         return [path]
@@ -75,19 +81,20 @@ def resolve_model_paths() -> dict[tuple[str, str], list[Path]]:
     out: dict[tuple[str, str], list[Path]] = {}
     for worker, model in (s.key for s in all_specs()):
         paths: list[Path] = []
-        if worker == "llm":
-            if raw := MODEL_PATHS.get(model):
-                paths = _expand_gguf(Path(model_path(raw)))
-        elif worker in ("text2image", "image_edit") and (im := cfg.image_models.get(model)):
+        if worker in ("text2image", "image_edit") and (im := cfg.image_models.get(model)):
             # A deprecated config.yaml entry still decides which files render.
             paths = [Path(p) for p in (im.diffusion, im.text_encoder, im.vae, im.lora) if p]
         elif found := locations(worker, model):
             # What the instance names (with the workers' env overrides): local
-            # snapshot directories for the models loaded by path — the hub is
-            # never consulted for those — and HF-cache repos for the models
-            # loaded by repository. faster-whisper large-v3 appears twice on
-            # purpose: stt/large-v3 and the audio resident load one snapshot.
-            paths = [_on_disk(loc, hub) for loc in found]
+            # files and snapshot directories for the models loaded by path —
+            # the hub is never consulted for those — and HF-cache repos for
+            # the models loaded by repository. faster-whisper large-v3 appears
+            # twice on purpose: stt/large-v3 and the audio resident load one
+            # snapshot. LLMs come through here too, whatever their format: a
+            # llama.cpp GGUF (its shards expanded) and a vllm checkpoint
+            # directory are both just the instance's weights.path. Asking the
+            # llama.cpp tables instead left every vllm model with no files.
+            paths = [p for loc in found for p in _expand_gguf(_on_disk(loc, hub))]
         # resolve() unifies symlinked routes (e.g. a symlinked home dir) so
         # sharing detection compares real locations.
         out[(worker, model)] = [p.expanduser().resolve() for p in paths]

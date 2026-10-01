@@ -11,6 +11,7 @@ import pytest
 from giq import storage
 from giq.registry import ModelSpec, all_specs
 from giq.storage import StorageError, delete_model, resolve_model_paths, storage_report
+from giq.weights import Location
 
 
 @pytest.fixture
@@ -37,7 +38,33 @@ def fake_layout(tmp_path, monkeypatch):
     (whisper / "snapshots" / "w.bin").write_bytes(b"w" * 700)
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(hub))
 
-    monkeypatch.setattr(storage, "MODEL_PATHS", {"model-a": str(gguf_a), "model-b": str(gguf_b)})
+    # A vllm checkpoint is a directory, served by two instances; its own
+    # safetensors shards are not a GGUF shard set.
+    ckpt = tmp_path / "ckpt"
+    ckpt.mkdir()
+    (ckpt / "config.json").write_bytes(b"{}")
+    (ckpt / "model-00001-of-00002.safetensors").write_bytes(b"s" * 3000)
+    (ckpt / "model-00002-of-00002.safetensors").write_bytes(b"s" * 1000)
+    # A GGUF split in two: the instance names the first shard.
+    for i in (1, 2):
+        (tmp_path / "ggufs" / f"big-0000{i}-of-00002.gguf").write_bytes(b"g" * 600)
+
+    llm_paths = {
+        "model-a": gguf_a,
+        "model-b": gguf_b,
+        "model-big": tmp_path / "ggufs" / "big-00001-of-00002.gguf",
+        "model-vllm": ckpt,
+        "model-vllm-chat": ckpt,
+    }
+    real_locations = storage.locations
+
+    def locations(worker, model):
+        if worker == "llm":
+            path = llm_paths.get(model)
+            return [Location(None, path=str(path))] if path else []
+        return real_locations(worker, model)
+
+    monkeypatch.setattr(storage, "locations", locations)
 
     class _Im:
         def __init__(self, diffusion):
@@ -54,6 +81,9 @@ def fake_layout(tmp_path, monkeypatch):
         ModelSpec("llm", "model-a", 5.0, "llama.cpp"),
         ModelSpec("llm", "model-b", 6.0, "llama.cpp"),
         ModelSpec("llm", "model-missing", 7.0, "llama.cpp"),
+        ModelSpec("llm", "model-big", 7.0, "llama.cpp"),
+        ModelSpec("llm", "model-vllm", 23.0, "vllm"),
+        ModelSpec("llm", "model-vllm-chat", 23.0, "vllm"),
         ModelSpec("text2image", "img1", 8.0, "sd.cpp"),
         ModelSpec("text2image", "img2", 9.0, "sd.cpp"),
         ModelSpec("stt", "large-v3", 3.0, "faster-whisper"),
@@ -75,9 +105,21 @@ def test_resolution_and_sizes(fake_layout):
     assert by_key[("stt", "large-v3")].size_bytes == 700
     # disk totals count the shared encoder and vae once
     assert len(disks) == 1
-    expected = 1000 + 2000 + 500 + 300 + 400 + 100 + 700
+    expected = 1000 + 2000 + 500 + 300 + 400 + 100 + 700 + 1200 + 4002
     assert disks[0]["models_bytes"] == expected
     assert disks[0]["other_bytes"] >= 0
+
+
+def test_llm_weights_of_every_format_are_found(fake_layout):
+    """An LLM's weights are whatever its instance names: a GGUF (every shard
+    of a split one) for llama.cpp, a checkpoint directory for vllm."""
+    models, _ = storage_report()
+    by_key = {(m.worker, m.model): m for m in models}
+    assert by_key[("llm", "model-big")].size_bytes == 1200
+    vllm = by_key[("llm", "model-vllm")]
+    assert vllm.on_disk and vllm.size_bytes == 4002
+    assert vllm.shared_with == ["llm/model-vllm-chat"]
+    assert resolve_model_paths()[("llm", "model-vllm")] == [(fake_layout / "ckpt").resolve()]
 
 
 def test_shared_detection(fake_layout):
