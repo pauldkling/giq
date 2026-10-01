@@ -121,7 +121,17 @@ is a translation rather than a proxy: `input` (a string or a list of
 fold into a chat message list, `max_output_tokens` maps to `max_tokens`,
 `tools` are renested, and `text.format` carries a JSON schema through to the
 engine. Tool calls, reasoning and images work as they do on
-`/v1/chat/completions`.
+`/v1/chat/completions`. A `developer` message joins the system prompt, which
+is what the chat templates behind giq call it.
+
+Thinking is controlled as on the chat path: `chat_template_kwargs` passes
+through, and `reasoning.effort: "none"` or `"minimal"` turns thinking off
+(the engines switch thinking rather than grade it, so the other levels leave
+the model's default). The top-level `reasoning_budget_tokens` caps the
+thought. The model's thinking comes back as a `reasoning` item whose
+`content` holds the raw thought as `reasoning_text` — streamed as
+`response.reasoning_text.delta` — rather than as a `summary`, which giq has
+none of.
 
 giq keeps no server-side conversation store, so `previous_response_id` and
 stored responses are unavailable. A request that sets `previous_response_id`

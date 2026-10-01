@@ -183,6 +183,40 @@ def test_input_image_detail_is_preserved():
     ]
 
 
+def test_developer_role_joins_the_system_prompt():
+    """Responses clients send standing instructions as `developer`; the chat
+    templates know only a system prompt, and only as the first message."""
+    from giq.api.openai_responses import responses_input_to_messages
+
+    msgs = responses_input_to_messages(
+        [
+            {"type": "message", "role": "developer", "content": "use metric units"},
+            {"type": "message", "role": "user", "content": "weather?"},
+        ],
+        "be brief",
+    )
+    assert [(m.role, m.content) for m in msgs] == [
+        ("system", "be brief\n\nuse metric units"),
+        ("user", "weather?"),
+    ]
+
+
+def test_tool_output_parts_reach_the_model_as_text():
+    from giq.api.openai_responses import responses_input_to_messages
+
+    msgs = responses_input_to_messages(
+        [
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": [{"type": "input_text", "text": "14 C, overcast"}],
+            }
+        ],
+        None,
+    )
+    assert msgs[0].role == "tool" and msgs[0].content == "14 C, overcast"
+
+
 def test_tool_definition_is_renested_for_the_engine():
     """Responses flattens the function onto the tool; the engine wants it under
     `function`."""
@@ -484,6 +518,38 @@ async def test_text_format_json_schema_reaches_the_engine(client: AsyncClient, r
     rf = responds["request"].chat_request["response_format"]
     assert rf["type"] == "json_schema"
     assert rf["json_schema"]["schema"] == schema
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_none_turns_thinking_off(client: AsyncClient, responds):
+    await client.post(
+        "/v1/responses", json={"model": "m", "input": "hi", "reasoning": {"effort": "none"}}
+    )
+    assert responds["request"].chat_request["chat_template_kwargs"] == {"enable_thinking": False}
+
+    # An explicit chat_template_kwargs is the caller's last word.
+    await client.post(
+        "/v1/responses",
+        json={
+            "model": "m",
+            "input": "hi",
+            "reasoning": {"effort": "minimal"},
+            "chat_template_kwargs": {"enable_thinking": True},
+        },
+    )
+    assert responds["request"].chat_request["chat_template_kwargs"] == {"enable_thinking": True}
+
+    await client.post(
+        "/v1/responses", json={"model": "m", "input": "hi", "reasoning": {"effort": "high"}}
+    )
+    assert "chat_template_kwargs" not in responds["request"].chat_request
+
+
+@pytest.mark.asyncio
+async def test_model_is_echoed_as_the_caller_sent_it(client: AsyncClient, responds):
+    r = await client.post("/v1/responses", json={"model": "giq/qwen3.8-27b", "input": "hi"})
+    assert r.json()["model"] == "giq/qwen3.8-27b"
+    assert responds["request"].model == "qwen3.8-27b"
 
 
 @pytest.mark.asyncio

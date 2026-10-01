@@ -12,9 +12,11 @@ either as one `response` object (non-streaming) or as the typed `response.*`
 SSE event sequence a Responses SDK expects (streaming).
 
 The whole cost of the feature lives here. The queue, residency, eviction,
-timeout and accounting are the chat path's, untouched; `format_messages`,
-`is_multimodal` and the structured-output threading are reused from
-`openai_compat` rather than reimplemented.
+timeout and accounting are the chat path's, untouched, and so are the
+message helpers (`format_messages`, `is_multimodal`) from `openai_compat`.
+What the chat path reads off its own request model — structured output, the
+reasoning budget, the loop guard — is read here off the Responses body,
+because Responses spells most of it differently.
 
 giq is stateless: there is no server-side conversation store, so
 `previous_response_id` and `store` cannot be honoured. A request that sets
@@ -41,6 +43,7 @@ from giq.api.dependencies import get_orchestrator
 from giq.api.openai_compat import (
     SSE_KEEPALIVE_SECONDS,
     ChatMessage,
+    extract_text_content,
     format_messages,
     is_multimodal,
 )
@@ -280,10 +283,17 @@ def responses_input_to_messages(
         flush_calls()
         if itype == "function_call_output":
             output = item.get("output", "")
+            # Responses lets a tool return content parts as well as a string;
+            # those translate like a message's, rather than reaching the model
+            # as the JSON text of the parts.
+            if isinstance(output, list):
+                output = _content_parts_to_chat(output)
+            elif not isinstance(output, str):
+                output = json.dumps(output)
             messages.append(
                 ChatMessage(
                     role="tool",
-                    content=output if isinstance(output, str) else json.dumps(output),
+                    content=output,
                     tool_call_id=item.get("call_id") or item.get("id"),
                 )
             )
@@ -291,11 +301,34 @@ def responses_input_to_messages(
             content = item.get("content")
             if isinstance(content, list):
                 content = _content_parts_to_chat(content)
-            messages.append(ChatMessage(role=item.get("role", "user"), content=content))
+            role = item.get("role", "user")
+            # Responses clients send their standing instructions as
+            # `developer`, a role the chat templates behind llama-server don't
+            # know; to them it is the system prompt.
+            if role == "developer":
+                role = "system"
+            messages.append(ChatMessage(role=role, content=content))
         # Items with no role and an unknown type (e.g. a bare reasoning item
         # echoed back) carry nothing the engine needs; skipping them is safe.
     flush_calls()
-    return messages
+    return _merge_leading_system(messages)
+
+
+def _merge_leading_system(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Fold the system messages that open a conversation into one.
+
+    `instructions` plus a `developer` item is two system messages in a row,
+    and chat templates commonly accept a system prompt only as the first
+    message — a second one is a template error inside the engine. Joined, the
+    model reads both, in order.
+    """
+    lead = 0
+    while lead < len(messages) and messages[lead].role == "system":
+        lead += 1
+    if lead < 2:
+        return messages
+    text = "\n\n".join(extract_text_content(m.content) for m in messages[:lead])
+    return [ChatMessage(role="system", content=text), *messages[lead:]]
 
 
 def _build_chat_request(request: ResponsesRequest, body: dict) -> tuple[str, dict]:
@@ -353,13 +386,19 @@ def _build_chat_request(request: ResponsesRequest, body: dict) -> tuple[str, dic
     elif isinstance(body.get("response_format"), dict):
         chat["response_format"] = body["response_format"]
 
-    # Reasoning budget: Responses nests it under `reasoning`, giq's chat path
-    # takes `reasoning_budget_tokens` at the top level.
+    # Thinking on or off. The chat path's own knob is passed through as it is
+    # there; Responses' portable spelling is `reasoning.effort`, and of its
+    # levels only "turn it off" has an engine equivalent — the chat templates
+    # switch thinking, they don't grade it. An explicit enable_thinking wins.
+    ctk = body.get("chat_template_kwargs")
+    ctk = dict(ctk) if isinstance(ctk, dict) else {}
     reasoning = body.get("reasoning")
-    if isinstance(reasoning, dict):
-        budget = reasoning.get("budget_tokens") or reasoning.get("max_tokens")
-        if isinstance(budget, int):
-            chat["reasoning_budget_tokens"] = budget
+    if isinstance(reasoning, dict) and reasoning.get("effort") in ("none", "minimal"):
+        ctk.setdefault("enable_thinking", False)
+    if ctk:
+        chat["chat_template_kwargs"] = ctk
+    # The deadline on the thought, under the same top-level names the chat
+    # path takes; Responses has no field of its own for it.
     for key in ("reasoning_budget_tokens", "thinking_budget_tokens"):
         if isinstance(body.get(key), int):
             chat["reasoning_budget_tokens"] = body[key]
@@ -438,13 +477,14 @@ class _ResponseMeta(NamedTuple):
     tool_choice: str | dict
 
 
-def _response_meta(response_id: str, model: str, request: ResponsesRequest) -> _ResponseMeta:
+def _response_meta(response_id: str, request: ResponsesRequest) -> _ResponseMeta:
     return _ResponseMeta(
         id=response_id,
-        model=model,
-        created_at=int(time.time()),
         # Echoed as the caller sent them, not as the engine received them: the
-        # client reads this back as its own request.
+        # client reads this back as its own request. The model keeps any
+        # provider prefix it came with, as /v1/chat/completions echoes it.
+        model=request.model,
+        created_at=int(time.time()),
         tools=request.tools or [],
         tool_choice=request.tool_choice if request.tool_choice is not None else "auto",
     )
@@ -563,7 +603,7 @@ async def create_response(
         )
 
     model, chat = _build_chat_request(request, body)
-    meta = _response_meta(f"resp_{uuid.uuid4().hex[:24]}", model, request)
+    meta = _response_meta(f"resp_{uuid.uuid4().hex[:24]}", request)
 
     if request.stream:
         job_id, _, stream = await orch.submit_streaming_job(
