@@ -379,9 +379,10 @@ def _build_chat_request(request: ResponsesRequest, body: dict) -> tuple[str, dic
 def _message_to_output(message: dict, status: str = "completed") -> list[dict]:
     """A chat assistant message as Responses `output` items.
 
-    Reasoning becomes a `reasoning` item (summary text), the answer a `message`
-    item with an `output_text` part, and each tool call its own `function_call`
-    item — the order a Responses client reads them back in.
+    Reasoning becomes a `reasoning` item carrying the raw thought as a
+    `reasoning_text` part (not a summary, which it isn't — see _TEXT_PART), the
+    answer a `message` item with an `output_text` part, and each tool call its
+    own `function_call` item — the order a Responses client reads them back in.
     """
     output: list[dict] = []
     reasoning = message.get("reasoning_content")
@@ -390,7 +391,9 @@ def _message_to_output(message: dict, status: str = "completed") -> list[dict]:
             {
                 "type": "reasoning",
                 "id": f"rs_{uuid.uuid4().hex[:24]}",
-                "summary": [{"type": "summary_text", "text": reasoning}],
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": reasoning}],
+                "status": status,
             }
         )
     content = message.get("content")
@@ -611,30 +614,255 @@ def _event(seq: int, event_type: str, payload: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
+# The two text-bearing item types differ only in names: reasoning streams its
+# raw thought as a `reasoning_text` content part, the answer as `output_text`.
+# A summary is a different thing from the thought — OpenAI writes one *about*
+# a thought it keeps hidden — so the engine's full reasoning goes out under
+# the raw-reasoning names, as vllm's own Responses server sends it.
+_TEXT_PART = {"reasoning": "reasoning_text", "message": "output_text"}
+_TEXT_EVENT = {"reasoning": "response.reasoning_text", "message": "response.output_text"}
+
+
+class _OutputItems:
+    """The output items of one streamed response, and the events that build them.
+
+    A Responses client assembles its output from the event stream, and OpenAI's
+    own streams finish each item before the next one's `output_item.added`. So
+    exactly one item is open at a time: opening the next one closes the
+    current one first, whatever its type. The engine's chat deltas don't
+    promise that order — reasoning can resume after the answer has begun, an
+    answer can precede a tool call — and each such switch simply becomes a new
+    item, which is also what the Responses model of interleaved output is.
+
+    Every method returns the SSE events it produced; the relay yields them.
+    An async generator cannot delegate to a helper generator, so lists it is.
+    """
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self.current: dict[str, Any] | None = None
+        self.tool_calls: dict[int, dict[str, Any]] = {}
+        self._seq = 0
+
+    def ev(self, event_type: str, payload: dict) -> str:
+        out = _event(self._seq, event_type, payload)
+        self._seq += 1
+        return out
+
+    @staticmethod
+    def item(record: dict[str, Any], status: str | None = None) -> dict:
+        """A record as the Responses output item it stands for.
+
+        `status` overrides the record's own: an item still open when the stream
+        ends takes the response's ending, the ones closed before it completed.
+        """
+        status = status or record["status"]
+        kind = record["type"]
+        if kind == "function_call":
+            return {
+                "type": "function_call",
+                "id": record["id"],
+                "call_id": record["call_id"],
+                "name": record["name"],
+                "arguments": "".join(record["arguments"]),
+                "status": status,
+            }
+        part = _OutputItems.part(record)
+        if kind == "reasoning":
+            return {
+                "type": "reasoning",
+                "id": record["id"],
+                "summary": [],
+                "content": [part],
+                "status": status,
+            }
+        return {
+            "type": "message",
+            "id": record["id"],
+            "status": status,
+            "role": "assistant",
+            "content": [part],
+        }
+
+    @staticmethod
+    def part(record: dict[str, Any], text: str | None = None) -> dict:
+        part = {
+            "type": _TEXT_PART[record["type"]],
+            "text": "".join(record["text"]) if text is None else text,
+        }
+        if record["type"] == "message":
+            part["annotations"] = []
+        return part
+
+    def output(self, open_status: str) -> list[dict]:
+        """Every item so far, the still-open one reported as `open_status`."""
+        return [
+            self.item(r, None if r["status"] != "in_progress" else open_status)
+            for r in self.records
+        ]
+
+    def _open(self, record: dict[str, Any]) -> list[str]:
+        events = self.close()
+        record["output_index"] = len(self.records)
+        record["status"] = "in_progress"
+        self.records.append(record)
+        self.current = record
+        # Opened empty: the deltas that follow are what fills it.
+        added = self.item(record)
+        if record["type"] == "function_call":
+            added["arguments"] = ""
+        else:
+            added["content"] = []
+        events.append(
+            self.ev(
+                "response.output_item.added",
+                {"output_index": record["output_index"], "item": added},
+            )
+        )
+        if record["type"] != "function_call":
+            events.append(
+                self.ev(
+                    "response.content_part.added",
+                    {
+                        "item_id": record["id"],
+                        "output_index": record["output_index"],
+                        "content_index": 0,
+                        "part": self.part(record, text=""),
+                    },
+                )
+            )
+        return events
+
+    def close(self, status: str = "completed") -> list[str]:
+        """Finish the open item: its text or arguments, its part, then the item."""
+        record = self.current
+        if record is None:
+            return []
+        self.current = None
+        record["status"] = status
+        located = {"item_id": record["id"], "output_index": record["output_index"]}
+        item = self.item(record)
+        if record["type"] == "function_call":
+            events = [
+                self.ev(
+                    "response.function_call_arguments.done",
+                    {**located, "arguments": item["arguments"]},
+                )
+            ]
+        else:
+            part = item["content"][0]
+            events = [
+                self.ev(
+                    f"{_TEXT_EVENT[record['type']]}.done",
+                    {**located, "content_index": 0, "text": part["text"]},
+                ),
+                self.ev(
+                    "response.content_part.done", {**located, "content_index": 0, "part": part}
+                ),
+            ]
+        events.append(
+            self.ev(
+                "response.output_item.done", {"output_index": record["output_index"], "item": item}
+            )
+        )
+        return events
+
+    def text(self, kind: str, fragment: str) -> list[str]:
+        """A reasoning or answer fragment, into the open item of its kind or a new one."""
+        events: list[str] = []
+        record: dict[str, Any] | None = self.current
+        if record is None or record["type"] != kind:
+            record = {
+                "type": kind,
+                "id": f"{'rs' if kind == 'reasoning' else 'msg'}_{uuid.uuid4().hex[:24]}",
+                "text": [],
+            }
+            events += self._open(record)
+        record["text"].append(fragment)
+        events.append(
+            self.ev(
+                f"{_TEXT_EVENT[kind]}.delta",
+                {
+                    "item_id": record["id"],
+                    "output_index": record["output_index"],
+                    "content_index": 0,
+                    "delta": fragment,
+                },
+            )
+        )
+        return events
+
+    def tool_call(self, call: dict) -> list[str]:
+        """One chat tool-call fragment, folded into the call at its index.
+
+        A function_call item has no event that backfills `call_id` or `name`,
+        so the item is not announced until both exist; argument fragments that
+        arrive first wait in `pending` rather than stream into a blank. The
+        engines finish one call before starting the next, so a fragment for a
+        call that is no longer open is not expected — if one comes anyway it
+        still lands in the call's arguments, and the terminal response carries
+        them whole even though no delta announced them.
+        """
+        idx = call.get("index", 0)
+        record: dict[str, Any] | None = self.tool_calls.get(idx)
+        if record is None:
+            record = self.tool_calls[idx] = {
+                "type": "function_call",
+                "id": f"fc_{uuid.uuid4().hex[:24]}",
+                "call_id": "",
+                "name": "",
+                "arguments": [],
+                "pending": [],
+                "output_index": None,
+            }
+        fn = call.get("function") or {}
+        if call.get("id"):
+            record["call_id"] = call["id"]
+        if fn.get("name"):
+            record["name"] = fn["name"]
+        if fn.get("arguments"):
+            record["arguments"].append(fn["arguments"])
+            record["pending"].append(fn["arguments"])
+
+        events: list[str] = []
+        if record["output_index"] is None and record["call_id"] and record["name"]:
+            events += self._open(record)
+        if record is self.current:
+            events += [
+                self.ev(
+                    "response.function_call_arguments.delta",
+                    {
+                        "item_id": record["id"],
+                        "output_index": record["output_index"],
+                        "delta": frag,
+                    },
+                )
+                for frag in record["pending"]
+            ]
+            record["pending"].clear()
+        return events
+
+    @property
+    def unannounced_calls(self) -> bool:
+        return any(r["output_index"] is None for r in self.tool_calls.values())
+
+
 async def _relay_responses_stream(orch: Orchestrator, job_id: str, stream, meta: _ResponseMeta):
     """Translate a chat job's delta chunks into the Responses event sequence.
 
     The queue carries llama-server's raw Chat Completions chunks
     (`choices[].delta.{content,reasoning_content,tool_calls}`, a trailing
     usage-only chunk). This consumes them and emits the typed `response.*`
-    events a Responses SDK expects, opening and closing each output item and
-    content part around the deltas:
+    events a Responses SDK expects:
 
       response.created / response.in_progress
-      → response.output_item.added (reasoning), reasoning_summary_part.added,
-        reasoning_summary_text.delta…, .done, reasoning_summary_part.done,
-        response.output_item.done
-      → response.output_item.added (message), content_part.added,
-        output_text.delta…, output_text.done, content_part.done
-      → response.output_item.added (function_call),
-        function_call_arguments.delta…, .done
-      → response.output_item.done per item
-      → response.completed  (or response.failed on a job error)
-
-    An item is opened, streamed and closed before the next one opens, and a
-    function call is not announced until its `call_id` and name exist — a
-    client that builds its objects from the `*.added` events gets something it
-    can act on rather than a blank it must wait to see corrected.
+      → per item, one at a time (see _OutputItems):
+          output_item.added,
+          content_part.added, reasoning_text / output_text .delta…, .done,
+          content_part.done                      (reasoning and message items)
+          function_call_arguments.delta…, .done  (function_call items)
+        output_item.done
+      → response.completed / .incomplete / .failed
 
     It keeps `_relay_stream`'s discipline: an SSE keepalive while the job is
     cold or queued, and a finally-block that drains and cancels the job the
@@ -642,113 +870,13 @@ async def _relay_responses_stream(orch: Orchestrator, job_id: str, stream, meta:
     """
     from giq.models import JobStatus
 
-    seq = 0
-
-    def ev(event_type: str, payload: dict) -> str:
-        nonlocal seq
-        out = _event(seq, event_type, payload)
-        seq += 1
-        return out
-
-    # Every item reserves its identity and position when opened. Later deltas,
-    # done events and the terminal response all refer to this same record.
-    items: list[dict] = []
-    reasoning_item: dict | None = None
-    message_item: dict | None = None
-    tool_calls: dict[int, dict[str, Any]] = {}
+    items = _OutputItems()
+    ev = items.ev
     usage: dict | None = None
     finish_reason: str | None = None
 
-    def final_output(status: str) -> list[dict]:
-        output: list[dict] = []
-        for record in items:
-            if record["type"] == "reasoning":
-                output.append(
-                    {
-                        "type": "reasoning",
-                        "id": record["id"],
-                        "summary": [{"type": "summary_text", "text": "".join(record["text"])}],
-                    }
-                )
-            elif record["type"] == "message":
-                text = "".join(record["text"])
-                output.append(
-                    {
-                        "type": "message",
-                        "id": record["id"],
-                        "status": status,
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text, "annotations": []}],
-                    }
-                )
-            else:
-                output.append(
-                    {
-                        "type": "function_call",
-                        "id": record["id"],
-                        "call_id": record["call_id"],
-                        "name": record["name"],
-                        "arguments": "".join(record["arguments"]),
-                        "status": status,
-                    }
-                )
-        return output
-
-    def close_reasoning() -> list[str]:
-        """Shut an open reasoning item: text, then summary part, then the item.
-
-        Responses treats the summary text and the summary *part* that holds it
-        as separately completed things, and the part has to be closed before
-        the item. Returned as a list because an async generator cannot delegate
-        to another generator, and both close sites — a later item opening and
-        the end of the stream — need the same three events in the same order.
-        """
-        if reasoning_item is None or reasoning_item["closed"]:
-            return []
-        text = "".join(reasoning_item["text"])
-        part = {"type": "summary_text", "text": text}
-        located = {
-            "item_id": reasoning_item["id"],
-            "output_index": reasoning_item["output_index"],
-            "summary_index": 0,
-        }
-        reasoning_item["closed"] = True
-        return [
-            ev("response.reasoning_summary_text.done", {**located, "text": text}),
-            ev("response.reasoning_summary_part.done", {**located, "part": part}),
-            ev(
-                "response.output_item.done",
-                {
-                    "output_index": reasoning_item["output_index"],
-                    "item": {
-                        "type": "reasoning",
-                        "id": reasoning_item["id"],
-                        "summary": [part],
-                    },
-                },
-            ),
-        ]
-
     def in_progress() -> dict:
         return {"response": _response_object(meta, "in_progress", [])}
-
-    def new_tool_call() -> dict[str, Any]:
-        """A function call being assembled from the engine's fragments.
-
-        `pending` holds argument fragments that arrived before the call could
-        be announced: a Responses function_call item has no event that
-        backfills `call_id` or `name`, so the item waits for both and the
-        arguments wait for the item rather than streaming into a blank.
-        """
-        return {
-            "type": "function_call",
-            "id": f"fc_{uuid.uuid4().hex[:24]}",
-            "call_id": "",
-            "name": "",
-            "arguments": [],
-            "pending": [],
-            "output_index": None,
-        }
 
     try:
         yield ev("response.created", in_progress())
@@ -768,144 +896,16 @@ async def _relay_responses_stream(orch: Orchestrator, job_id: str, stream, meta:
                 delta = choice.get("delta") or {}
                 if choice.get("finish_reason") is not None:
                     finish_reason = choice["finish_reason"]
-
-                rc = delta.get("reasoning_content")
-                if rc:
-                    if reasoning_item is None:
-                        reasoning_item = {
-                            "type": "reasoning",
-                            "id": f"rs_{uuid.uuid4().hex[:24]}",
-                            "output_index": len(items),
-                            "text": [],
-                            "closed": False,
-                        }
-                        items.append(reasoning_item)
-                        yield ev(
-                            "response.output_item.added",
-                            {
-                                "output_index": reasoning_item["output_index"],
-                                "item": {
-                                    "type": "reasoning",
-                                    "id": reasoning_item["id"],
-                                    "summary": [],
-                                },
-                            },
-                        )
-                        # The summary part the deltas below belong to. Without
-                        # it a client has no part to attach them to: the item
-                        # opened with an empty summary.
-                        yield ev(
-                            "response.reasoning_summary_part.added",
-                            {
-                                "item_id": reasoning_item["id"],
-                                "output_index": reasoning_item["output_index"],
-                                "summary_index": 0,
-                                "part": {"type": "summary_text", "text": ""},
-                            },
-                        )
-                    reasoning_item["text"].append(rc)
-                    yield ev(
-                        "response.reasoning_summary_text.delta",
-                        {
-                            "item_id": reasoning_item["id"],
-                            "output_index": reasoning_item["output_index"],
-                            "summary_index": 0,
-                            "delta": rc,
-                        },
-                    )
-
-                content = delta.get("content")
-                if content:
-                    # The thought ends where the answer begins.
-                    for event in close_reasoning():
+                if delta.get("reasoning_content"):
+                    for event in items.text("reasoning", delta["reasoning_content"]):
                         yield event
-                    if message_item is None:
-                        message_item = {
-                            "type": "message",
-                            "id": f"msg_{uuid.uuid4().hex[:24]}",
-                            "output_index": len(items),
-                            "text": [],
-                        }
-                        items.append(message_item)
-                        yield ev(
-                            "response.output_item.added",
-                            {
-                                "output_index": message_item["output_index"],
-                                "item": {
-                                    "type": "message",
-                                    "id": message_item["id"],
-                                    "status": "in_progress",
-                                    "role": "assistant",
-                                    "content": [],
-                                },
-                            },
-                        )
-                        yield ev(
-                            "response.content_part.added",
-                            {
-                                "item_id": message_item["id"],
-                                "output_index": message_item["output_index"],
-                                "content_index": 0,
-                                "part": {"type": "output_text", "text": "", "annotations": []},
-                            },
-                        )
-                    message_item["text"].append(content)
-                    yield ev(
-                        "response.output_text.delta",
-                        {
-                            "item_id": message_item["id"],
-                            "output_index": message_item["output_index"],
-                            "content_index": 0,
-                            "delta": content,
-                        },
-                    )
-
+                if delta.get("content"):
+                    for event in items.text("message", delta["content"]):
+                        yield event
                 for call in delta.get("tool_calls") or []:
-                    if not isinstance(call, dict):
-                        continue
-                    idx = call.get("index", 0)
-                    record = tool_calls.get(idx)
-                    if record is None:
-                        record = tool_calls[idx] = new_tool_call()
-                    fn = call.get("function") or {}
-                    if call.get("id"):
-                        record["call_id"] = call["id"]
-                    if fn.get("name"):
-                        record["name"] = fn["name"]
-                    frag = fn.get("arguments")
-                    if frag:
-                        record["arguments"].append(frag)
-                        record["pending"].append(frag)
-                    if record["output_index"] is None and record["call_id"] and record["name"]:
-                        for event in close_reasoning():
+                    if isinstance(call, dict):
+                        for event in items.tool_call(call):
                             yield event
-                        record["output_index"] = len(items)
-                        items.append(record)
-                        yield ev(
-                            "response.output_item.added",
-                            {
-                                "output_index": record["output_index"],
-                                "item": {
-                                    "type": "function_call",
-                                    "id": record["id"],
-                                    "call_id": record["call_id"],
-                                    "name": record["name"],
-                                    "arguments": "",
-                                    "status": "in_progress",
-                                },
-                            },
-                        )
-                    if record["output_index"] is not None and record["pending"]:
-                        for buffered in record["pending"]:
-                            yield ev(
-                                "response.function_call_arguments.delta",
-                                {
-                                    "item_id": record["id"],
-                                    "output_index": record["output_index"],
-                                    "delta": buffered,
-                                },
-                            )
-                        record["pending"].clear()
 
         # The stored result is the authority on how the generation ended: a
         # cancelled one stops without a terminal chunk, so the reason exists
@@ -919,97 +919,55 @@ async def _relay_responses_stream(orch: Orchestrator, job_id: str, stream, meta:
             if usage is None and isinstance(stored.get("usage"), dict):
                 usage = stored["usage"]
 
-        def failure(code: str, message: str) -> dict:
-            """A terminal response.failed payload with whatever was produced."""
-            return {
-                "response": _response_object(
-                    meta,
-                    "failed",
-                    final_output("incomplete"),
-                    usage or {},
-                    error={"code": code, "message": message},
-                )
-            }
+        def failure(code: str, message: str) -> str:
+            """A terminal response.failed with whatever was produced.
+
+            The open item is reported inside it as incomplete and deliberately
+            not closed with output_item.done: it did not finish. Items closed
+            before the failure did, and stay completed.
+            """
+            response = _response_object(
+                meta,
+                "failed",
+                items.output("incomplete"),
+                usage or {},
+                error={"code": code, "message": message},
+            )
+            return ev("response.failed", {"response": response})
 
         # A failure after the first event cannot become an HTTP status, so it
         # rides the stream as response.failed rather than a silent truncation.
-        # Partial items are reported inside that response and deliberately not
-        # closed with output_item.done: they did not finish.
         if job is not None and job.status == JobStatus.failed:
-            yield ev("response.failed", failure("giq_job_failed", job.error or "Job failed"))
+            yield failure("giq_job_failed", job.error or "Job failed")
             return
 
         if finish_reason == CANCELLED_FINISH_REASON or stream.is_cancelled:
             # Generation was cut short — the buffer stalled, or the job was
             # cancelled. Calling that "completed" would hand the caller a
             # truncated answer labelled as the whole one.
-            yield ev(
-                "response.failed",
-                failure(
-                    "giq_stream_cancelled",
-                    "Generation was cancelled before the model finished.",
-                ),
+            yield failure(
+                "giq_stream_cancelled", "Generation was cancelled before the model finished."
             )
             return
 
-        unannounced = [r for r in tool_calls.values() if r["output_index"] is None]
-        if unannounced:
+        if items.unannounced_calls:
             # Arguments arrived for a call the engine never identified. A
             # function_call item without call_id and name is unusable, so this
             # ends as a failure rather than as a call the client cannot make.
-            yield ev(
-                "response.failed",
-                failure(
-                    "giq_incomplete_tool_call",
-                    "The engine streamed tool-call arguments without a call id and name.",
-                ),
+            yield failure(
+                "giq_incomplete_tool_call",
+                "The engine streamed tool-call arguments without a call id and name.",
             )
             return
 
+        # Only the last item can have been cut off by max_output_tokens; the
+        # ones before it finished when the next began.
         status, incomplete_reason = _completion_status(finish_reason)
-        output = final_output(status)
-        for record, item in zip(items, output, strict=True):
-            if record["type"] == "reasoning":
-                # Reasoning that ran to the end of the stream closes the same
-                # way it would have closed had an answer followed it.
-                for event in close_reasoning():
-                    yield event
-                continue
-            if record["type"] == "message":
-                text = item["content"][0]["text"]
-                yield ev(
-                    "response.output_text.done",
-                    {
-                        "item_id": record["id"],
-                        "output_index": record["output_index"],
-                        "content_index": 0,
-                        "text": text,
-                    },
-                )
-                yield ev(
-                    "response.content_part.done",
-                    {
-                        "item_id": record["id"],
-                        "output_index": record["output_index"],
-                        "content_index": 0,
-                        "part": item["content"][0],
-                    },
-                )
-            else:
-                yield ev(
-                    "response.function_call_arguments.done",
-                    {
-                        "item_id": record["id"],
-                        "output_index": record["output_index"],
-                        "arguments": item["arguments"],
-                    },
-                )
-            yield ev(
-                "response.output_item.done",
-                {"output_index": record["output_index"], "item": item},
-            )
-
-        response = _response_object(meta, status, output, usage or {}, incomplete_reason)
+        for event in items.close(status):
+            yield event
+        response = _response_object(
+            meta, status, items.output(status), usage or {}, incomplete_reason
+        )
         yield ev(f"response.{status}", {"response": response})
     finally:
         stream.cancel()

@@ -306,7 +306,8 @@ def test_reasoning_and_tool_calls_become_their_own_items():
     )
     types = [item["type"] for item in output]
     assert types == ["reasoning", "message", "function_call"]
-    assert output[0]["summary"][0]["text"] == "thinking"
+    assert output[0]["content"] == [{"type": "reasoning_text", "text": "thinking"}]
+    assert output[0]["summary"] == []
     assert output[2]["call_id"] == "c1" and output[2]["name"] == "f"
 
 
@@ -636,19 +637,18 @@ async def test_stream_separates_reasoning_from_the_answer():
 
     evs = events(await collect(FakeOrch(job), stream))
     types = [e["type"] for e in evs]
-    assert "response.reasoning_summary_text.delta" in types
+    assert "response.reasoning_text.delta" in types
     # The reasoning item is done before the message's text starts.
-    assert types.index("response.reasoning_summary_text.done") < types.index(
-        "response.output_text.delta"
-    )
-    rdeltas = [e["delta"] for e in evs if e["type"] == "response.reasoning_summary_text.delta"]
+    assert types.index("response.reasoning_text.done") < types.index("response.output_text.delta")
+    rdeltas = [e["delta"] for e in evs if e["type"] == "response.reasoning_text.delta"]
     assert "".join(rdeltas) == "let me think"
 
 
 @pytest.mark.asyncio
-async def test_reasoning_summary_part_has_a_full_lifecycle():
-    """A Responses client builds the summary from the part events, so the part
-    is opened before the text flows and closed before the item does."""
+async def test_reasoning_part_has_a_full_lifecycle():
+    """A Responses client builds each item from the part events, so the part is
+    opened before the text flows and closed before the item does — the raw
+    thought as a reasoning_text part, the same way the answer is built."""
     job = _job()
     job.status = JobStatus.completed
     stream = JobStream()
@@ -661,10 +661,10 @@ async def test_reasoning_summary_part_has_a_full_lifecycle():
         "response.created",
         "response.in_progress",
         "response.output_item.added",
-        "response.reasoning_summary_part.added",
-        "response.reasoning_summary_text.delta",
-        "response.reasoning_summary_text.done",
-        "response.reasoning_summary_part.done",
+        "response.content_part.added",
+        "response.reasoning_text.delta",
+        "response.reasoning_text.done",
+        "response.content_part.done",
         "response.output_item.done",
         "response.output_item.added",
         "response.content_part.added",
@@ -693,7 +693,7 @@ async def test_reasoning_closes_before_a_tool_call_opens():
     closed = types.index("response.output_item.done")
     opened_call = [i for i, t in enumerate(types) if t == "response.output_item.added"][1]
     assert closed < opened_call
-    assert types.index("response.reasoning_summary_part.done") < closed
+    assert types.index("response.content_part.done") < closed
 
 
 @pytest.mark.asyncio
@@ -706,9 +706,74 @@ async def test_reasoning_only_stream_closes_its_item():
 
     evs = events(await collect(FakeOrch(job), stream))
     types = [e["type"] for e in evs]
-    assert "response.reasoning_summary_text.done" in types
+    assert "response.reasoning_text.done" in types
     assert "response.output_item.done" in types
     assert types[-1] == "response.completed"
+
+
+@pytest.mark.asyncio
+async def test_answer_closes_before_a_tool_call_opens():
+    """One item at a time, whatever the order: text before a tool call is a
+    finished message by the time the function_call is announced."""
+    job = _job()
+    job.status = JobStatus.completed
+    stream = JobStream()
+    stream.queue.put_nowait(delta(content="Let me check."))
+    stream.queue.put_nowait(
+        delta(tool_calls=[{"index": 0, "id": "c1", "function": {"name": "f", "arguments": "{}"}}])
+    )
+    await stream.close()
+
+    evs = events(await collect(FakeOrch(job), stream))
+    shape = [(e["type"], e.get("output_index")) for e in evs]
+    assert shape.index(("response.output_item.done", 0)) < shape.index(
+        ("response.output_item.added", 1)
+    )
+    completed = evs[-1]["response"]
+    assert [i["status"] for i in completed["output"]] == ["completed", "completed"]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_after_the_answer_is_a_new_item():
+    """A thought that resumes after the answer began cannot stream into the
+    reasoning item already closed; it opens its own."""
+    job = _job()
+    job.status = JobStatus.completed
+    stream = JobStream()
+    stream.queue.put_nowait(delta(reasoning_content="first"))
+    stream.queue.put_nowait(delta(content="answer"))
+    stream.queue.put_nowait(delta(reasoning_content="second"))
+    await stream.close()
+
+    evs = events(await collect(FakeOrch(job), stream))
+    added = [e["item"]["type"] for e in evs if e["type"] == "response.output_item.added"]
+    assert added == ["reasoning", "message", "reasoning"]
+    # Every delta lands in an item that is still open.
+    open_items: set[int] = set()
+    for e in evs:
+        if e["type"] == "response.output_item.added":
+            open_items.add(e["output_index"])
+        elif e["type"] == "response.output_item.done":
+            open_items.discard(e["output_index"])
+        elif e["type"].endswith(".delta"):
+            assert e["output_index"] in open_items, e
+    output = evs[-1]["response"]["output"]
+    assert [i["content"][0]["text"] for i in output] == ["first", "answer", "second"]
+
+
+@pytest.mark.asyncio
+async def test_only_the_last_item_is_incomplete_on_length():
+    job = _job()
+    job.status = JobStatus.completed
+    stream = JobStream()
+    stream.queue.put_nowait(delta(reasoning_content="thinking"))
+    stream.queue.put_nowait(delta(content="partial"))
+    stream.queue.put_nowait({"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}]})
+    await stream.close()
+
+    evs = events(await collect(FakeOrch(job), stream))
+    assert evs[-1]["type"] == "response.incomplete"
+    assert [i["status"] for i in evs[-1]["response"]["output"]] == ["completed", "incomplete"]
 
 
 @pytest.mark.asyncio
