@@ -210,6 +210,10 @@ class LlamaCppParams(EngineParams):
     alias: Arg | None = None
     # giq's in-flight loop guard on the thinking channel.
     loop_guard: bool | None = None
+    # Seconds a start may take before it is abandoned; unset = the engine's
+    # default (workers/llm.py DEFAULT_READY_TIMEOUT). A big GGUF on a slow
+    # disk is the reason to raise it.
+    ready_timeout: float | None = Field(default=None, ge=10, le=3600)
 
     @model_validator(mode="after")
     def _kv_pair(self) -> LlamaCppParams:

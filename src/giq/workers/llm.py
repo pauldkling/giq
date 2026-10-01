@@ -7,6 +7,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -21,8 +22,9 @@ from giq.instances.schema import Instance, LlamaCppParams
 from giq.loopguard import LoopGuard
 from giq.models import JobResult
 from giq.paths import model_path as resolve_path
+from giq.paths import state_dir
 from giq.registry import vram_for
-from giq.workers.engine import Concurrency, ServedLLM
+from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
 if TYPE_CHECKING:
     from giq.queue import JobStream
@@ -92,6 +94,7 @@ def tables_of(declared: Iterable[Instance]) -> dict[str, dict]:
         "MODEL_PARALLEL": given("parallel"),
         "MODEL_LOOP_GUARD": given("loop_guard"),
         "MODEL_ALIAS": given("alias"),
+        "MODEL_READY_TIMEOUT": given("ready_timeout"),
     }
 
 
@@ -322,6 +325,15 @@ MODEL_LOOP_GUARD: dict[str, bool] = {}
 DEFAULT_SPEC_TYPE: str | None = None
 MODEL_SPEC_TYPE: dict[str, str] = {}
 
+# params.ready_timeout: seconds a llama-server start may take. Mapping a GGUF
+# from page cache takes seconds and from an NVMe a 22 GB one takes about ten;
+# a spinning disk or a network share takes minutes. The wait used to be a
+# fixed 30 s, which a cold load on slow storage could not meet. A start that
+# fails outright is caught when the process exits, not at the deadline, so
+# a generous ceiling costs nothing in the common failure.
+DEFAULT_READY_TIMEOUT = 300.0
+MODEL_READY_TIMEOUT: dict[str, float] = {}
+
 _TABLES: dict[str, dict] = {
     "MODEL_PATHS": MODEL_PATHS,
     "MODEL_CTX_SIZE": MODEL_CTX_SIZE,
@@ -334,6 +346,7 @@ _TABLES: dict[str, dict] = {
     "MODEL_PARALLEL": MODEL_PARALLEL,
     "MODEL_LOOP_GUARD": MODEL_LOOP_GUARD,
     "MODEL_ALIAS": MODEL_ALIAS,
+    "MODEL_READY_TIMEOUT": MODEL_READY_TIMEOUT,
 }
 
 
@@ -387,6 +400,11 @@ class LLMWorkerConfig:
     binary: str | None = None
     parallel: int | None = None
     alias: str | None = None
+    # Seconds a start may take; None = MODEL_READY_TIMEOUT/DEFAULT_READY_TIMEOUT.
+    ready_timeout: float | None = None
+    # Where llama-server's own output goes. A start that fails is otherwise
+    # silent: its reason is on stderr.
+    log_path: str | None = None
     n_gpu_layers: int = -1  # All layers on GPU
     host: str = "127.0.0.1"
     # GPU UUID this server runs on. None = the model's binding, or giq's
@@ -439,6 +457,10 @@ class LLMWorkerConfig:
             self.parallel = MODEL_PARALLEL.get(self.model, DEFAULT_PARALLEL)
         if self.alias is None:
             self.alias = MODEL_ALIAS.get(self.model)
+        if self.ready_timeout is None:
+            self.ready_timeout = MODEL_READY_TIMEOUT.get(self.model, DEFAULT_READY_TIMEOUT)
+        if self.log_path is None:
+            self.log_path = str(state_dir() / "logs" / f"llama-{self.model}.log")
 
 
 @dataclass
@@ -615,17 +637,20 @@ class LLMWorker(ServedLLM):
         # Pinned to giq's card. llama.cpp's default -sm layer would otherwise
         # spread layers and KV across every visible GPU, putting part of the
         # model on a card the VRAM gate isn't even reading.
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=device_env(self.config.device),
-        )
+        log_path = Path(self.config.log_path or os.devnull)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8") as log:
+            self._process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=log,
+                stderr=asyncio.subprocess.STDOUT,
+                env=device_env(self.config.device),
+            )
 
         # Wait for server to be ready
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.http_timeout())
         try:
-            await self._wait_for_ready()
+            await self._wait_for_ready(self.config.ready_timeout or DEFAULT_READY_TIMEOUT)
             self._ready = True
         except BaseException:
             # BaseException so CancelledError also reaps the subprocess
@@ -656,18 +681,39 @@ class LLMWorker(ServedLLM):
         except (httpx.HTTPError, ValueError):
             return None
 
-    async def _wait_for_ready(self, max_attempts: int = 60) -> None:
-        """Wait for llama-server to be ready."""
-        for _attempt in range(max_attempts):
+    def _log_tail(self, lines: int = 20) -> str:
+        try:
+            with open(self.config.log_path or os.devnull, encoding="utf-8", errors="replace") as f:
+                return "".join(f.readlines()[-lines:])
+        except OSError:
+            return ""
+
+    async def _wait_for_ready(self, timeout: float, poll: float = 0.5) -> None:
+        """Wait until /health answers, or fail with llama-server's last words.
+
+        A process that exits during the start — a build that cannot read the
+        model, a port already taken — fails at once rather than at the
+        deadline, which is what lets the deadline be generous.
+        """
+        assert self._client is not None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._process is not None and self._process.returncode is not None:
+                raise WorkerStartError(
+                    f"llama-server exited with {self._process.returncode} while starting "
+                    f"{self.config.model}:\n{self._log_tail()}"
+                )
             try:
-                response = await self._client.get("/health")
+                response = await self._client.get("/health", timeout=5.0)
                 if response.status_code == 200:
                     return
-            except httpx.ConnectError:
+            except httpx.HTTPError:
                 pass
-            await asyncio.sleep(0.5)
-
-        raise TimeoutError(f"llama-server failed to start after {max_attempts} attempts")
+            await asyncio.sleep(poll)
+        raise WorkerStartError(
+            f"llama-server did not become ready within {timeout:.0f}s for "
+            f"{self.config.model}:\n{self._log_tail()}"
+        )
 
     async def stop(self) -> None:
         """Stop the llama-server process."""

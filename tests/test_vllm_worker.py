@@ -16,7 +16,7 @@ from giq.instances.schema import Instance
 from giq.models import WorkerType
 from giq.queue import JobQueue, JobStream
 from giq.workers import vllm
-from giq.workers.engine import ServedLLM
+from giq.workers.engine import ServedLLM, WorkerStartError
 from giq.workers.vllm import (
     VLLMConfigError,
     VLLMWorker,
@@ -613,7 +613,8 @@ async def test_ready_times_out(tmp_path):
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(lambda r: httpx.Response(503))
     )
-    with pytest.raises(TimeoutError):
+    # A start that outlasts its budget is a failed start, not a job timeout.
+    with pytest.raises(WorkerStartError, match="did not become ready"):
         await worker._wait_for_ready(timeout=0.05, poll=0.01)
 
 

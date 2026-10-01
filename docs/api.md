@@ -105,11 +105,17 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 ## Workers
 
 ### LLM (`llm`)
-- Models: the GGUFs declared by `llm` instance files (`giq/instances/llm.*.yaml`
-  and your own, see [Instances](configuration.md#instances); e.g.
-  `gemma-3-27b-it-qat`), via llama.cpp — `/capabilities` lists them
+- Models: the models declared by `llm` instance files (`giq/instances/llm.*.yaml`
+  and your own, see [Instances](configuration.md#instances)) — GGUFs via
+  llama.cpp, Hugging Face checkpoints via vllm; `/capabilities` lists them
 - Task: `{id, messages[], temperature?, max_tokens?}`
 - Result: `{id, text}`
+
+A non-streaming request waits for its model to start and then for its answer:
+the model's start budget (its instance's `ready_timeout`, or the engine's
+default — minutes for vllm) plus the job's time limit. A cold model therefore
+answers late rather than with a 504. Streaming requests send keepalives while
+the model loads.
 
 #### Responses API
 

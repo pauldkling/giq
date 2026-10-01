@@ -179,6 +179,52 @@ def _job_timeout(worker_type: WorkerType, job: "Job | None" = None) -> float:
     return max(base, float(budget) / FLOOR_TOKENS_PER_SECOND)
 
 
+# Seconds a worker without an engine-specific start budget may take to load:
+# the in-process and child workers (whisper, kokoro, the OCR and depth
+# children) load in seconds to a minute.
+DEFAULT_START_BUDGET_SECONDS = 300.0
+
+
+def start_budget(worker_type: WorkerType, model: str) -> float:
+    """How long ``worker_type/model`` may take to start, from its engine or instance.
+
+    A start is not part of a job's run time — ``_job_timeout`` only begins
+    once the worker is up — but a caller waiting on the job sits through it.
+    vllm needs minutes (192 s cold on an RTX 5090, CUDA graph capture
+    included), llama.cpp seconds to minutes depending on the disk; each
+    engine says so, and an instance file can say more.
+    """
+    if worker_type == WorkerType.llm:
+        if engine_for(model) == "vllm":
+            from giq.workers.vllm import instance_for
+
+            inst = instance_for(model)
+            if inst is not None:
+                return float(inst.params.ready_timeout)
+        from giq.workers.llm import DEFAULT_READY_TIMEOUT, MODEL_READY_TIMEOUT
+
+        return float(MODEL_READY_TIMEOUT.get(model, DEFAULT_READY_TIMEOUT))
+    if worker_type in (WorkerType.text2image, WorkerType.image_edit):
+        from giq.workers.sdcpp import READY_TIMEOUT_SECONDS
+
+        return READY_TIMEOUT_SECONDS
+    return DEFAULT_START_BUDGET_SECONDS
+
+
+def wait_budget(job: Job) -> float:
+    """How long a caller should wait for ``job``: a start of its model, then its run.
+
+    The flat 120 s the API used to wait could not cover a cold vllm start
+    alone, so a non-streaming request that triggered one got a 504 while the
+    job went on loading and generating for no one. The start is counted even
+    when the model is already up: a resident can be evicted while the job
+    waits in the queue, and an over-generous wait costs a caller nothing that
+    a too-short one doesn't cost more.
+    """
+    worker_type = WorkerType(job.request.worker)
+    return start_budget(worker_type, job.request.model) + _job_timeout(worker_type, job)
+
+
 def _context_budget(request: JobRequest) -> int | None:
     """The most an LLM job could generate: its model's context window.
 

@@ -72,7 +72,7 @@ from giq.instances.schema import Instance, VllmParams, mtp_layers, read_hf_confi
 from giq.models import JobResult
 from giq.paths import cache_dir, model_path, state_dir
 from giq.registry import vram_for
-from giq.workers.engine import Concurrency, ServedLLM
+from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
 if TYPE_CHECKING:
     from giq.queue import JobStream
@@ -635,7 +635,7 @@ class VLLMWorker(ServedLLM):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._process is not None and self._process.returncode is not None:
-                raise RuntimeError(
+                raise WorkerStartError(
                     f"vllm exited with {self._process.returncode} while starting "
                     f"{self.config.model}:\n{self._log_tail()}"
                 )
@@ -650,7 +650,7 @@ class VLLMWorker(ServedLLM):
             except (httpx.HTTPError, ValueError):
                 pass
             await asyncio.sleep(poll)
-        raise TimeoutError(
+        raise WorkerStartError(
             f"vllm did not become ready within {timeout:.0f}s for {self.config.model}:\n"
             f"{self._log_tail()}"
         )

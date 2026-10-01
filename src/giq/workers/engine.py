@@ -25,6 +25,16 @@ if TYPE_CHECKING:
     from giq.queue import JobStream
 
 
+class WorkerStartError(RuntimeError):
+    """A server giq spawned did not come up: it exited, or outlasted its start budget.
+
+    Deliberately not a ``TimeoutError``. The runner reads ``TimeoutError`` as
+    a *job* that ran past its limit and words the failure that way, so a
+    llama-server that died at spawn was reported as "Job timed out after
+    300s" thirty seconds in. A start that fails says what failed.
+    """
+
+
 @dataclass(frozen=True)
 class Concurrency:
     """How many requests an engine serves at once, derived from its parameters (D8).

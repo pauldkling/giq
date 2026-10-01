@@ -28,6 +28,7 @@ from giq.gpus import device_env, device_port
 from giq.models import ImageResult
 from giq.provenance import stamp_results
 from giq.registry import vram_for
+from giq.workers.engine import WorkerStartError
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ class SdCppWorker:
         deadline = asyncio.get_event_loop().time() + READY_TIMEOUT_SECONDS
         while asyncio.get_event_loop().time() < deadline:
             if self._process and self._process.returncode is not None:
-                raise RuntimeError(
+                raise WorkerStartError(
                     f"sd-server exited during startup (code {self._process.returncode})"
                 )
             try:
@@ -195,7 +196,7 @@ class SdCppWorker:
             except httpx.HTTPError:
                 pass
             await asyncio.sleep(1.0)
-        raise TimeoutError(f"sd-server not ready after {READY_TIMEOUT_SECONDS}s")
+        raise WorkerStartError(f"sd-server not ready after {READY_TIMEOUT_SECONDS:.0f}s")
 
     async def stop(self) -> None:
         try:

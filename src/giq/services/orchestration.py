@@ -95,14 +95,23 @@ class Orchestrator:
         position = await self.queue.add(job)
         return job_id, position, stream
 
-    async def wait_for_job(self, job_id: str, timeout: float = 120.0) -> Job:
-        """Wait for job completion, polling queue."""
+    async def wait_for_job(self, job_id: str, timeout: float | None = None) -> Job:
+        """Wait for job completion, polling queue.
+
+        ``timeout`` None waits as long as the job may take: a start of its
+        model plus its run (``giq.runner.wait_budget``), so a cold start is
+        not cut off by a constant chosen for warm ones.
+        """
         start = asyncio.get_event_loop().time()
 
         while True:
             job = await self.queue.get(job_id)
             if not job:
                 raise HTTPException(status_code=404, detail="Job disappeared")
+            if timeout is None:
+                from giq.runner import wait_budget
+
+                timeout = wait_budget(job)
 
             if job.status == JobStatus.completed:
                 return job
