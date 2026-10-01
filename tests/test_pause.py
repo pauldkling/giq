@@ -82,6 +82,24 @@ async def test_pause_fails_queued_jobs(queue: JobQueue):
 
 
 @pytest.mark.asyncio
+async def test_pause_closes_the_streams_of_queued_jobs(queue: JobQueue):
+    """A streaming caller is not polling the job: it waits on the stream's end
+    sentinel, which only the run paths send. A job failed before it ever ran
+    never reaches them, so pause has to close the stream itself."""
+    from giq.queue import JobStream
+
+    runner = Runner(queue, residents=RESIDENTS)
+    job = make_job("j1")
+    job.stream = JobStream()
+    await queue.add(job)
+
+    await runner.pause()
+
+    assert job.status == JobStatus.failed
+    assert job.stream.queue.get_nowait() is None
+
+
+@pytest.mark.asyncio
 async def test_pause_is_idempotent(queue: JobQueue):
     runner = Runner(queue)
     await runner.pause(reason="first")

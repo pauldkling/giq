@@ -712,12 +712,20 @@ class Runner:
             await asyncio.sleep(0.5)
 
     async def _fail_pending_jobs(self, error: str) -> int:
-        """Fail every queued-but-unstarted job so waiters get an answer now."""
+        """Fail every queued-but-unstarted job so waiters get an answer now.
+
+        A streaming waiter is not polling the job: it is blocked on the stream's
+        end sentinel, which only the run paths send. A job failed before it ever
+        ran never reaches them, so the sentinel has to come from here or the
+        client hangs on an open SSE response until it gives up.
+        """
         count = 0
         for job in await self._queue.get_pending():
             job.status = JobStatus.failed
             job.error = error
             job.completed_at = datetime.now()
+            if job.stream is not None:
+                await job.stream.close()
             count += 1
         return count
 

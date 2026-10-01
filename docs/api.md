@@ -92,6 +92,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's instance files — see [Storage](#storage) |
 | `/storage/models/{worker}/{model}` | DELETE | Delete a model's weights |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat, streaming and tool calls included |
+| `/v1/responses` | POST | OpenAI Responses API, streaming and tool calls included — see [Responses API](#responses-api) |
 | `/v1/models` | GET | The chat models whose weights are on disk |
 | `/v1/audio/transcriptions` | POST | Speech to text with speaker diarization (faster-whisper + pyannote; `?diarize=false` skips it) |
 | `/v1/audio/speech` | POST | Text to speech (Kokoro) |
@@ -109,6 +110,39 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
   `gemma-3-27b-it-qat`), via llama.cpp — `/capabilities` lists them
 - Task: `{id, messages[], temperature?, max_tokens?}`
 - Result: `{id, text}`
+
+#### Responses API
+
+`/v1/responses` speaks the OpenAI Responses interface — `input` plus
+`instructions` in, a `response` object out, or the typed `response.*` SSE
+event stream when `stream: true`. giq's engines speak Chat Completions, so this
+is a translation rather than a proxy: `input` (a string or a list of
+`message` / `function_call` / `function_call_output` items) and `instructions`
+fold into a chat message list, `max_output_tokens` maps to `max_tokens`,
+`tools` are renested, and `text.format` carries a JSON schema through to the
+engine. Tool calls, reasoning and images work as they do on
+`/v1/chat/completions`.
+
+giq keeps no server-side conversation store, so `previous_response_id` and
+stored responses are unavailable. A request that sets `previous_response_id`
+or `store: true` is refused with 400; omitted `store` and `store: false` run
+statelessly. Resend the prior turns in `input` to continue a conversation.
+For the same reason there is no file store: an `input_image` that names a
+`file_id`, or an `input_file` of any kind, is refused with 400 rather than
+dropped — send the image inline as an `image_url` data URI. Only your own
+function tools run: the tools OpenAI hosts (web search, file search, code
+interpreter, MCP, image generation, computer use) are refused with 400 instead
+of being accepted and never used. `tool_choice` takes the modes, a forced
+function, or `allowed_tools` over those functions.
+
+Responses streams end with their typed `response.completed`,
+`response.incomplete`, or `response.failed` event, without the Chat Completions
+`[DONE]` sentinel. A generation stopped by `max_output_tokens` returns
+`status: incomplete` and `incomplete_details.reason: max_output_tokens`. A
+generation cut short — the client stopped reading, or the job was cancelled —
+ends as `response.failed` with error code `giq_stream_cancelled`, carrying
+whatever was produced as incomplete items; a job that failed before or during
+generation ends as `response.failed` with `giq_job_failed`.
 
 ### Text2Image (`text2image`)
 - Models: `flux_klein` (FLUX.2 klein 4B, sd.cpp), `zimage` (Z-Image-Turbo,
@@ -348,7 +382,8 @@ engine, and takes one of them per request:
 
 - `response_format` — the OpenAI spelling, `{"type": "json_object"}` or
   `{"type": "json_schema", "json_schema": {...}}`. Honoured by llama.cpp
-  (GBNF) and vllm alike, and the portable choice.
+  (GBNF) and vllm alike, and the portable choice. On `/v1/responses` the same
+  thing arrives as `text.format`.
 - `structured_outputs` — vllm's native knob (`json`, `regex`, `choice`,
   `grammar`), enforced at decode time. llama-server ignores it.
 

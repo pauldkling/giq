@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from giq import __version__
 from giq.api import access
 from giq.api.openai_compat import router as openai_router
+from giq.api.openai_responses import router as responses_router
 from giq.api.router import router as giq_router
 from giq.api.stats_api import router as stats_router
 from giq.core.lifecycle import lifespan
@@ -29,6 +30,7 @@ app = FastAPI(
 
 app.include_router(giq_router)
 app.include_router(openai_router)
+app.include_router(responses_router)
 app.include_router(stats_router)
 
 # Outermost layer: nothing reaches a route without passing the Host/Origin
