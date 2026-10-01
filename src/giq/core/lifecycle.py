@@ -68,25 +68,27 @@ async def _kill_stale_servers(port: int = INTERNAL_LLM_PORT):
     people's processes: a hand-started llama-server, or another tool's, killed
     for the crime of sharing a program name.
 
-    One port per card since bindings landed: a run that ended with servers on
-    both cards leaves two of each, and sweeping only the first card's port
-    would leave the second holding VRAM with nothing tracking it.
+    A block of ports per card since bindings landed (giq.gpus.server_port):
+    a run that ended with servers on both cards leaves servers on both, and a
+    second server of an engine on one card sits on a spare port of that
+    card's block. Every engine's pattern is swept over every block port, or
+    those would be left holding VRAM with nothing tracking them.
     """
-    from giq.gpus import device_port, get_gpus
-    from giq.workers.sdcpp import INTERNAL_SD_PORT
-    from giq.workers.vllm import INTERNAL_VLLM_PORT, scope_unit, stop_scope
+    from giq.gpus import device_port, device_ports, get_gpus
+    from giq.workers.vllm import scope_unit, stop_scope
 
-    ports = {port} | {device_port(INTERNAL_LLM_PORT, gpu) for gpu in get_gpus()}
-    sd_ports = {INTERNAL_SD_PORT} | {device_port(INTERNAL_SD_PORT, gpu) for gpu in get_gpus()}
-    vllm_ports = {INTERNAL_VLLM_PORT} | {device_port(INTERNAL_VLLM_PORT, gpu) for gpu in get_gpus()}
+    gpus = [None, *get_gpus()]
+    blocks = {p for gpu in gpus for p in device_ports(gpu)}
+    ports = sd_ports = vllm_ports = blocks
     # A vllm server runs in a transient systemd scope, which outlives a giq
     # that died without stopping it; the scope takes its engine core down
     # with it, which a pattern on the API server's command line would miss.
     for p in sorted(vllm_ports):
         await asyncio.to_thread(stop_scope, scope_unit(p))
-    patterns = [rf"llama-server .*--port {p}" for p in sorted(ports)]
-    patterns += [rf"sd-server .*--listen-port {p}" for p in sorted(sd_ports)]
-    patterns += [rf"vllm serve .*--port {p}" for p in sorted(vllm_ports)]
+    # \b: --port 8089 must not also match --port 80891.
+    patterns = [rf"llama-server .*--port {p}\b" for p in sorted(ports)]
+    patterns += [rf"sd-server .*--listen-port {p}\b" for p in sorted(sd_ports)]
+    patterns += [rf"vllm serve .*--port {p}\b" for p in sorted(vllm_ports)]
     # SIGTERM everything matching llama-server
     for pattern in patterns:
         proc = await asyncio.create_subprocess_exec(
@@ -113,8 +115,11 @@ async def _kill_stale_servers(port: int = INTERNAL_LLM_PORT):
         )
         await proc.wait()
 
-    # Belt-and-braces: free the ports too (catches anything else holding them)
-    for p in sorted(ports):
+    # Belt-and-braces: free llama's own ports too (catches anything else
+    # holding them). Not the whole block: fuser kills whatever owns a port,
+    # and the spares are only giq's while a giq server sits on one — the
+    # engine-qualified patterns above are what sweep those.
+    for p in sorted({port} | {device_port(INTERNAL_LLM_PORT, gpu) for gpu in gpus}):
         proc = await asyncio.create_subprocess_exec(
             "fuser",
             "-k",

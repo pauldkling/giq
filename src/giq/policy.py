@@ -305,11 +305,12 @@ class PolicyStore:
     ) -> tuple[str, str] | None:
         """The pinned LLM on one card, if any. At most one may be pinned there.
 
-        Every llama-server giq spawns binds that card's internal port, and
-        ``Runner.llm_base_url_for`` resolves a model to its server — so two
-        pinned LLMs on the SAME card would collide on the port. On different
-        cards they get different ports and coexist, which is the point of
-        binding.
+        The rule dates from when every LLM server on a card bound that card's
+        one port, so two pinned there collided. Servers now take a free port
+        of their card's block (``giq.gpus.server_port``) and an on-demand LLM
+        can share a card with the pinned one; two *pinned* LLMs on one card
+        stay refused until that pairing is exercised under the residents
+        loop. On different cards they coexist, which is the point of binding.
         """
         for key in self.residents():
             if key[0] != "llm" or key == exclude:

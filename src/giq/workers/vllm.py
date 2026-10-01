@@ -67,7 +67,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
-from giq.gpus import compute_capability, device_env, device_port, resolve_device
+from giq.gpus import compute_capability, device_env, device_port, resolve_device, server_port
 from giq.instances.schema import Instance, VllmParams, mtp_layers, read_hf_config
 from giq.models import JobResult
 from giq.paths import cache_dir, model_path, state_dir
@@ -591,6 +591,13 @@ class VLLMWorker(ServedLLM):
             )
 
         gpu = await asyncio.to_thread(resolve_device, self.config.device)
+        # Before the scope: its name follows the port, and a second vllm on
+        # this card must neither bind the first one's port nor stop its scope
+        # as if it were left over from a crashed run.
+        if self.config.port == device_port(INTERNAL_VLLM_PORT, self.config.device):
+            self.config.port = await asyncio.to_thread(
+                server_port, self.config.port, self.config.device
+            )
         cmd = self.build_command(gpu.vram_total_gb if gpu is not None else None)
         env = self.build_env()
         await asyncio.to_thread(stop_scope, self.scope)  # a stale one from a crashed run

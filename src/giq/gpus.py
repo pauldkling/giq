@@ -424,6 +424,51 @@ def reset_selected_device() -> None:
 DEVICE_PORT_STRIDE = 10
 
 
+# Where each card's block of internal server ports begins: llama-server's
+# historical port. A card owns DEVICE_PORT_STRIDE ports from here (8086-8095
+# on the first): each engine's own port, and spares for a second server of
+# the same engine on that card.
+SERVER_PORT_BLOCK = 8086
+
+
+def device_ports(device: GpuTelemetry | str | int | None = None) -> range:
+    """Every internal server port of one card's block."""
+    start = device_port(SERVER_PORT_BLOCK, device)
+    return range(start, start + DEVICE_PORT_STRIDE)
+
+
+def _bindable(port: int, host: str = "127.0.0.1") -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def server_port(preferred: int, device: GpuTelemetry | str | int | None = None) -> int:
+    """The port a server about to start on ``device`` should bind.
+
+    ``preferred`` — its engine's port on that card — when it is free, so a
+    lone server keeps the address it always had. Otherwise the card holds a
+    second server of the same engine (a pinned model and an on-demand one,
+    or two models a big card fits at once), and it takes a free port of the
+    card's block: the spares from the top down first, another engine's own
+    port last. A fixed port per engine and card used to make the second
+    server fail to bind, and a second vllm stopped the first one's scope.
+    Starts are serialized, so the port found free here is still free when
+    the server binds it.
+    """
+    if _bindable(preferred):
+        return preferred
+    for port in reversed(device_ports(device)):
+        if port != preferred and _bindable(port):
+            return port
+    raise RuntimeError(f"no free internal port left on this card ({device_ports(device)})")
+
+
 def device_port(base: int, device: GpuTelemetry | str | int | None = None) -> int:
     """The port a backend's server uses for one card.
 

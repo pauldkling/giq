@@ -409,3 +409,80 @@ def test_vision_models_declare_a_projector_requirement():
     assert seers, "expected at least one vision-capable model in the registry"
     for spec in seers:
         assert spec.worker == "llm", "vision is a capability of an LLM, not a worker type"
+
+
+# --- a second server of one engine on a card ---------------------------------------
+
+
+def _taken(monkeypatch, *ports: int) -> None:
+    """Ports some live server holds, as giq.gpus._bindable sees them."""
+    monkeypatch.setattr(gpus, "_bindable", lambda port, host="127.0.0.1": port not in ports)
+
+
+def test_a_server_keeps_its_engines_port_while_it_is_free(two_cards, monkeypatch):
+    _taken(monkeypatch)
+    with two_cards():
+        assert gpus.server_port(8096, SMALL) == 8096
+
+
+def test_a_second_server_on_a_card_takes_a_spare_port_of_that_card(two_cards, monkeypatch):
+    """A pinned model and an on-demand one of the same engine used to share
+    the card's port: the second could not bind it (and a second vllm stopped
+    the first's scope, which is named after the port)."""
+    with two_cards():
+        _taken(monkeypatch, 8096)
+        assert gpus.server_port(8096, SMALL) == 8105
+        _taken(monkeypatch, 8096, 8105)
+        assert gpus.server_port(8096, SMALL) == 8104
+        # Never a port of another card's block.
+        _taken(monkeypatch, *range(8096, 8106))
+        with pytest.raises(RuntimeError, match="no free internal port"):
+            gpus.server_port(8096, SMALL)
+
+
+@pytest.mark.asyncio
+async def test_llama_moves_off_a_held_port_at_start(two_cards, store, monkeypatch):
+    from giq.workers.llm import LLMWorker, LLMWorkerConfig
+
+    with two_cards():
+        store.set_device("llm", "gemma-4-12b", "1")
+        worker = LLMWorker(config=LLMWorkerConfig(model="gemma-4-12b"))
+        _taken(monkeypatch, 8096)
+        await worker._claim_port()
+    assert worker.config.port == 8105
+    assert worker.base_url.endswith(":8105")
+
+
+@pytest.mark.asyncio
+async def test_the_stale_sweep_covers_every_port_of_every_card(two_cards, monkeypatch):
+    from giq.core import lifecycle
+    from giq.workers import vllm
+
+    calls: list[tuple[str, ...]] = []
+
+    class _Done:
+        async def wait(self):
+            return 0
+
+    async def spawn(*argv, **_kw):
+        calls.append(argv)
+        return _Done()
+
+    async def no_sleep(_s):
+        return None
+
+    stopped: list[str] = []
+    monkeypatch.setattr(lifecycle.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(lifecycle.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(vllm, "stop_scope", stopped.append)
+    with two_cards():
+        await lifecycle._kill_stale_servers()
+
+    patterns = {argv[3] for argv in calls if argv[0] == "pkill"}
+    for p in (*range(8086, 8096), *range(8096, 8106)):
+        assert rf"llama-server .*--port {p}\b" in patterns
+        assert rf"vllm serve .*--port {p}\b" in patterns
+        assert f"giq-vllm-{p}" in stopped
+    # fuser kills whatever holds a port, so it stays off the spares.
+    fused = {argv[2] for argv in calls if argv[0] == "fuser"}
+    assert fused == {"8086/tcp", "8096/tcp"}

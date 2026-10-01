@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from giq import instances
-from giq.gpus import device_env, device_port
+from giq.gpus import device_env, device_port, server_port
 from giq.instances.schema import Instance, LlamaCppParams
 from giq.loopguard import LoopGuard
 from giq.models import JobResult
@@ -629,6 +629,7 @@ class LLMWorker(ServedLLM):
 
         require_binary("llama.cpp")
 
+        await self._claim_port()
         cmd = self.build_command()
 
         logger.info(f"Starting LLM worker: {self.config.model}")
@@ -680,6 +681,13 @@ class LLMWorker(ServedLLM):
             )
         except (httpx.HTTPError, ValueError):
             return None
+
+    async def _claim_port(self) -> None:
+        """Move off the card's llama port when another llama-server holds it."""
+        if self.config.port == device_port(INTERNAL_LLM_PORT, self.config.device):
+            self.config.port = await asyncio.to_thread(
+                server_port, self.config.port, self.config.device
+            )
 
     def _log_tail(self, lines: int = 20) -> str:
         try:

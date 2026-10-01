@@ -87,6 +87,39 @@ async def test_start_checks_the_weights_before_spawning(tmp_path, monkeypatch):
         await worker.start()
 
 
+@pytest.mark.asyncio
+async def test_a_second_vllm_on_a_card_moves_port_before_touching_a_scope(tmp_path, monkeypatch):
+    """The scope is named after the port, and start() stops a scope of that
+    name as left over from a crashed run. With the card's port held by a
+    running vllm, the second must move first — or it stops the first."""
+    worker = worker_for(instance(make_checkpoint(tmp_path)), log_path=str(tmp_path / "v.log"))
+    held = worker.config.port
+    stopped: list[str] = []
+    spawned: list[tuple] = []
+
+    class Spawned(Exception):
+        pass
+
+    async def spawn(*argv, **kw):
+        spawned.append(argv)
+        raise Spawned
+
+    monkeypatch.setattr(vllm, "device_port", lambda base, device=None: held)
+    monkeypatch.setattr(vllm, "server_port", lambda port, device=None: 8095)
+    monkeypatch.setattr(vllm, "stop_scope", stopped.append)
+    monkeypatch.setattr(vllm, "memory_cap_prefix", lambda unit, cap: [])
+    monkeypatch.setattr(vllm, "resolve_device", lambda device: None)
+    monkeypatch.setattr("giq.engines.require_binary", lambda engine: "/bin/true")
+    monkeypatch.setattr(vllm.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+
+    with pytest.raises(Spawned):
+        await worker.start()
+    assert stopped and all(unit == "giq-vllm-8095" for unit in stopped)
+    assert f"giq-vllm-{held}" not in stopped
+    assert argv_value(list(spawned[0]), "--port") == "8095"
+
+
 # --- the command line ----------------------------------------------------------------
 
 

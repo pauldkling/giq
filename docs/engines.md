@@ -134,8 +134,10 @@ the `sm_100` modules. The kernels land in `$GIQ_HOME/cache/.cache/flashinfer`
 ### How giq runs it
 
 Per instance, giq spawns `vllm serve <weights> --served-model-name <name>` on
-a loopback port (8088, +10 per card index) with the card's
-`CUDA_VISIBLE_DEVICES`, and proxies it like llama-server. The process runs:
+a loopback port (8088, +10 per card index; a second vllm on the same card
+takes a free port of that card's block, 8086-8095 on the first) with the
+card's `CUDA_VISIBLE_DEVICES`, and proxies it like llama-server. The process
+runs:
 
 - **under a RAM ceiling** — `systemd-run --user --scope -p MemoryMax=<memory_max>
   -p MemorySwapMax=0`, so if anything balloons (a kernel compile the prepare

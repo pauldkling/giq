@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from giq.gpus import device_env, device_port
+from giq.gpus import device_env, device_port, server_port
 from giq.models import ImageResult
 from giq.provenance import stamp_results
 from giq.registry import vram_for
@@ -126,6 +126,11 @@ class SdCppWorker:
 
         from giq.engines import require_binary
 
+        # A second render model on this card cannot take the first one's port.
+        if self.config.port == device_port(INTERNAL_SD_PORT, self.config.device):
+            self.config.port = await asyncio.to_thread(
+                server_port, self.config.port, self.config.device
+            )
         cmd = [
             require_binary("sd.cpp"),
             "--diffusion-model",
