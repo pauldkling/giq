@@ -577,6 +577,24 @@ class Runner:
             out[f"{key[0]}/{key[1]}"] = bool(res and res.worker.is_ready)
         return out
 
+    def loaded_keys(self) -> set[tuple[str, str]]:
+        """(worker, model) of every ready worker, resident or on a card's slot.
+
+        A job for one of these needs no VRAM to start, which is what tells a
+        job that is waiting its turn from one that is waiting for room.
+        """
+        keys = {
+            (str(k[0]), k[1])
+            for k, res in self._residents.items()
+            if getattr(res.worker, "is_ready", False)
+        }
+        keys |= {
+            (str(s.worker_type), s.model)
+            for s in self._slots.values()
+            if getattr(s.worker, "is_ready", False)
+        }
+        return keys
+
     @property
     def owned_pids(self) -> dict[int, str]:
         """{pid: worker/model} for every process giq is holding VRAM through.

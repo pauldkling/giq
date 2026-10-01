@@ -36,4 +36,13 @@ describe("stateMessage", () => {
       params: { count: 2, free: 1.5 },
     });
   });
+
+  it("quotes the free VRAM of the card the blocked job waits on", () => {
+    const gpus = [
+      { uuid: "big", vram_free_gb: 27.1 },
+      { uuid: "small", vram_free_gb: 3.2 },
+    ] as Status["gpus"];
+    const s = status({ jobs_pending: ["x"], vram_ok: false, vram_free_gb: 27.1, vram_blocked_gpu: "small", gpus });
+    expect(stateMessage(s)).toEqual({ key: "blocked", params: { count: 1, free: 3.2 } });
+  });
 });

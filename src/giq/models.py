@@ -259,10 +259,11 @@ class ServiceStatus(BaseModel):
     active_model: str | None = None
     active: list[dict[str, Any]] = []
 
-    # VRAM status. Describes ONE card — the device giq loads models on, named
-    # in `gpu` below. On a multi-card rig the machine total is not this, and
-    # reading it as such is how the two numbers drifted apart in the first
-    # place; /gpus has the per-card breakdown.
+    # VRAM status. These scalars describe ONE card — the default device,
+    # named in `gpu` below — and stay for the clients that read them. On a
+    # multi-card rig the machine total is not this, and reading it as such is
+    # how the two numbers drifted apart in the first place; `gpus` below has
+    # every card.
     gpu: dict[str, Any] | None = None
     vram_used_gb: float
     vram_total_gb: float
@@ -271,8 +272,16 @@ class ServiceStatus(BaseModel):
     # the card (desktop, other CUDA apps). None when it can't be measured.
     vram_giq_gb: float | None = None
     vram_other_gb: float | None = None
-    vram_ok: bool  # True if enough VRAM for typical workload
+    # False while a pending job waits for room on its own card — judged per
+    # job and per card, since a job only ever waits on the card it is bound
+    # to; `vram_blocked_gpu` names that card (a `gpus` uuid).
+    vram_ok: bool
     vram_message: str | None = None  # Explanation if not OK
+    vram_blocked_gpu: str | None = None
+    # Every card, in the terms of the one-card fields above (`selected` marks
+    # that one): uuid, index, name, vram_used/total/free_gb, vram_giq_gb,
+    # vram_other_gb. /gpus adds temperature, power and the per-process split.
+    gpus: list[dict[str, Any]] = []
 
     # Queue info
     queue_depth: int

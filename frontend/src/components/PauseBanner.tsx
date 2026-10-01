@@ -22,11 +22,18 @@ export function PauseBanner() {
   // A graceful pause reports paused the moment it starts draining; say so
   // rather than claiming the VRAM is already back.
   const draining = !!data.active_worker || data.jobs_running.length > 0;
+  // A pause unloads every card, so what it frees is the machine's, not the
+  // default card's.
+  const cards = data.gpus?.length ? data.gpus : [data];
+  const freed = {
+    free: cards.reduce((a, g) => a + g.vram_free_gb, 0),
+    total: cards.reduce((a, g) => a + g.vram_total_gb, 0),
+  };
   const parts = [
     since != null && !Number.isNaN(since) ? t("pause.bannerSince", { time: f.time(since) }) : null,
     draining
       ? t("pause.bannerDraining")
-      : t("pause.bannerFreed", { free: f.gb(data.vram_free_gb), total: f.gb(data.vram_total_gb) }),
+      : t("pause.bannerFreed", { free: f.gb(freed.free), total: f.gb(freed.total) }),
     t("pause.banner503"),
     data.pause_reason,
   ].filter(Boolean);

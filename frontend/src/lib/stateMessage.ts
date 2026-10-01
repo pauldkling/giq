@@ -27,7 +27,16 @@ export function stateMessage(s: Status): StateMessage {
   if (s.jobs_pending.length) {
     return s.vram_ok
       ? { key: "queued", params: { count: s.jobs_pending.length } }
-      : { key: "blocked", params: { count: s.jobs_pending.length, free: s.vram_free_gb } };
+      : { key: "blocked", params: { count: s.jobs_pending.length, free: blockedFree(s) } };
   }
   return { key: "idle", params: {} };
+}
+
+/* Free VRAM on the card the blocked job waits on. The one-card vram_free_gb
+   is the default card's, which on a two-card machine can be the card with
+   plenty of room — "waiting for VRAM (20 GB free)" for a job bound to the
+   other one. */
+function blockedFree(s: Status): number {
+  const card = s.gpus?.find((g) => g.uuid === s.vram_blocked_gpu);
+  return card ? card.vram_free_gb : s.vram_free_gb;
 }

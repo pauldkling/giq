@@ -38,7 +38,15 @@ from giq.queue import get_queue
 from giq.registry import all_specs, get_spec
 from giq.runner import get_runner
 from giq.services.orchestration import Orchestrator
-from giq.vram import can_load_model, get_vram_status
+from giq.vram import (
+    can_load_model,
+    device_for_model,
+    get_free_vram,
+    get_vram_requirement,
+    get_vram_status,
+    margin_for,
+    reserve_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -404,9 +412,9 @@ async def get_service_status() -> ServiceStatus:
     runner = get_runner()
     vram = get_vram_status()
     device = selected_device()
-    mine = (await asyncio.to_thread(attribute_vram, runner.owned_pids) if device else {}).get(
-        device.uuid if device else "", {}
-    )
+    cards = await asyncio.to_thread(get_gpus)
+    attribution = await asyncio.to_thread(attribute_vram, runner.owned_pids, cards)
+    mine = attribution.get(device.uuid, {}) if device else {}
 
     all_jobs = await queue.get_all()
     pending = [j for j in all_jobs if j.status == JobStatus.pending]
@@ -417,14 +425,48 @@ async def get_service_status() -> ServiceStatus:
 
     pause = runner.pause_state
 
+    gpus = [
+        {
+            "uuid": g.uuid,
+            "index": g.index,
+            "name": g.name,
+            "selected": device is not None and g.uuid == device.uuid,
+            "vram_used_gb": g.vram_used_gb,
+            "vram_total_gb": g.vram_total_gb,
+            "vram_free_gb": g.vram_free_gb,
+            "vram_giq_gb": attribution.get(g.uuid, {}).get("giq_gb"),
+            "vram_other_gb": attribution.get(g.uuid, {}).get("other_gb"),
+        }
+        for g in cards
+    ]
+
+    # Blocked is a fact about a job and its card, not about the default card:
+    # a job bound to the second card waits on that card's VRAM however empty
+    # the first is, and a job for a model already loaded waits on nothing.
     vram_ok = True
     vram_message = None
-    if not pause["paused"] and vram.free_gb < 10:
-        vram_ok = False
-        vram_message = (
-            f"Low VRAM: {vram.free_gb:.1f}GB free — jobs for the resident LLM "
-            f"still run; other models wait for eviction (image models need 10GB+)"
-        )
+    vram_blocked_gpu = None
+    if not pause["paused"]:
+        loaded = runner.loaded_keys()
+        for job in pending:
+            worker, model = str(job.request.worker), job.request.model
+            if (worker, model) in loaded:
+                continue
+            on = device_for_model(worker, model)
+            need = get_vram_requirement(worker, model)
+            need += margin_for(need) + reserve_for(on)
+            free = get_free_vram(on)
+            if free >= need:
+                continue
+            card = resolve_device(on)
+            vram_ok = False
+            vram_blocked_gpu = card.uuid if card else None
+            where = f"GPU {card.index} ({card.name})" if card else "the GPU"
+            vram_message = (
+                f"{worker}/{model} needs {need:.1f}GB on {where}, {free:.1f}GB free — "
+                "waiting for residents there to be evicted"
+            )
+            break
 
     state = ServiceState.idle
     state_message = None
@@ -447,7 +489,7 @@ async def get_service_status() -> ServiceStatus:
             state_message = f"{len(pending)} jobs queued, will process shortly"
         else:
             state = ServiceState.blocked
-            state_message = f"{len(pending)} jobs waiting for VRAM ({vram.free_gb:.1f}GB free)"
+            state_message = f"{len(pending)} jobs waiting for VRAM: {vram_message}"
     else:
         state = ServiceState.idle
         state_message = "No jobs, no worker loaded"
@@ -466,6 +508,8 @@ async def get_service_status() -> ServiceStatus:
         vram_other_gb=mine.get("other_gb"),
         vram_ok=vram_ok,
         vram_message=vram_message,
+        vram_blocked_gpu=vram_blocked_gpu,
+        gpus=gpus,
         queue_depth=len(pending_ids),
         jobs_pending=pending_ids,
         jobs_running=running_ids,

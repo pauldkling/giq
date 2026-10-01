@@ -287,9 +287,12 @@ a model with one click. A checked-in default
 lives under `gpu.bind` in `config.yaml`, and `gpu.reserve` leaves headroom on
 a card shared with a desktop.
 
-Every VRAM figure in the API describes one card: `/status.gpu` names the
-default, each model's `device_name` in `/stats/models` names its own, and
-`/gpus` has the per-card breakdown of the machine.
+Every VRAM figure in the API describes one card. `/status`'s `vram_*`
+scalars are the default card's, named in `/status.gpu`; `/status.gpus` lists
+every card in the same terms, and a job waiting for room is judged on the
+card it is bound to (`vram_blocked_gpu`). Each model's `device_name` in
+`/stats/models` names its own card, and `/gpus` adds temperature, power and
+the per-process split.
 
 Used VRAM is reported split two ways — `vram_giq_gb` (models giq is holding,
 with a per-process `giq[]` breakdown) and `vram_other_gb` (the desktop, other

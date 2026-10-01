@@ -57,6 +57,18 @@ export interface ActiveSlot {
   ready: boolean;
 }
 
+export interface StatusGpu {
+  uuid: string;
+  index: number;
+  name: string;
+  selected: boolean;
+  vram_used_gb: number;
+  vram_total_gb: number;
+  vram_free_gb: number;
+  vram_giq_gb: number | null;
+  vram_other_gb: number | null;
+}
+
 export interface Status {
   state: ServiceState;
   state_message: string | null;
@@ -70,8 +82,13 @@ export interface Status {
   vram_free_gb: number;
   vram_giq_gb: number | null;
   vram_other_gb: number | null;
+  /** False while a pending job waits for room on its own card. */
   vram_ok: boolean;
   vram_message: string | null;
+  /** The card (a `gpus` uuid) a blocked job is waiting on. */
+  vram_blocked_gpu: string | null;
+  /** Every card, in the terms of the one-card vram_* fields above. */
+  gpus: StatusGpu[];
   queue_depth: number;
   /** Job ids, queue order. */
   jobs_pending: string[];

@@ -77,7 +77,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/run` | POST | Submit a job (`?wait=true` blocks until it finishes) |
 | `/jobs/{id}` | GET | Get job status and results |
 | `/jobs/{id}` | DELETE | Cancel a pending job |
-| `/status` | GET | Active worker, VRAM usage, queue depth, pause state, access posture |
+| `/status` | GET | Active worker, VRAM per card (`gpus`; the `vram_*` scalars are the default card's), queue depth, pause state, access posture |
 | `/gpus` | GET | Per-card telemetry; `selected` marks the default card |
 | `/engines` | GET | Declared inference engines and the build each one reports |
 | `/capabilities` | GET | Available workers and models |

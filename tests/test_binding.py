@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from giq import gpus
-from giq.models import WorkerType
+from giq.models import JobRequest, WorkerType
 from giq.policy import reset_policy_store
 from giq.queue import JobQueue
 from giq.runner import Runner, _Resident
@@ -486,3 +486,68 @@ async def test_the_stale_sweep_covers_every_port_of_every_card(two_cards, monkey
     # fuser kills whatever holds a port, so it stays off the spares.
     fused = {argv[2] for argv in calls if argv[0] == "fuser"}
     assert fused == {"8086/tcp", "8096/tcp"}
+
+
+# --- /status on a machine with two cards -----------------------------------------
+
+
+async def _status(monkeypatch, *jobs, loaded=()):
+    from giq.api import router as api
+    from giq.queue import Job
+
+    queued = [
+        Job(job_id=f"j{i}", request=JobRequest(worker=w, model=m, chat_request={}))
+        for i, (w, m) in enumerate(jobs)
+    ]
+    queue = SimpleNamespace(get_all=AsyncMock(return_value=queued))
+    runner = SimpleNamespace(
+        owned_pids={},
+        pause_state={"paused": False, "since": None, "reason": None},
+        active_worker=None,
+        active_model=None,
+        active_slots=[],
+        loaded_keys=lambda: set(loaded),
+    )
+    monkeypatch.setattr(api, "get_queue", lambda: queue)
+    monkeypatch.setattr(api, "get_runner", lambda: runner)
+    monkeypatch.setattr(api, "attribute_vram", lambda owned, gpus=None: {})
+    monkeypatch.setattr(api, "access_posture", lambda: {})
+    return await api.get_service_status()
+
+
+@pytest.mark.asyncio
+async def test_status_reports_every_card(two_cards, monkeypatch):
+    with two_cards():
+        status = await _status(monkeypatch)
+    assert [(g["uuid"], g["selected"]) for g in status.gpus] == [(BIG, True), (SMALL, False)]
+    small = status.gpus[1]
+    assert small["vram_total_gb"] == pytest.approx(16311 / 1024, abs=0.01)
+    # The one-card fields still describe the default card.
+    assert status.gpu["uuid"] == BIG
+    assert status.vram_total_gb == pytest.approx(32607 / 1024, abs=0.01)
+    assert status.vram_ok
+
+
+@pytest.mark.asyncio
+async def test_a_job_waits_on_its_own_cards_vram(two_cards, store, monkeypatch):
+    """22 GB bound to a 16 GB card is blocked there, however empty the
+    default card is; the default card's free figure would say otherwise."""
+    with two_cards():
+        store.set_device("llm", "qwen3.8-27b", "1")
+        status = await _status(monkeypatch, ("llm", "qwen3.8-27b"))
+    assert not status.vram_ok
+    assert status.vram_blocked_gpu == SMALL
+    assert "GPU 1" in status.vram_message
+    assert status.vram_free_gb > 22  # the default card has the room — the wrong card
+    assert status.state == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_fits_its_card_or_is_loaded_is_not_blocked(two_cards, store, monkeypatch):
+    with two_cards():
+        store.set_device("llm", "gemma-4-12b", "1")
+        fits = await _status(monkeypatch, ("llm", "gemma-4-12b"))
+        store.set_device("llm", "qwen3.8-27b", "1")
+        loaded = await _status(monkeypatch, ("llm", "qwen3.8-27b"), loaded={("llm", "qwen3.8-27b")})
+    assert fits.vram_ok and fits.vram_blocked_gpu is None
+    assert loaded.vram_ok
