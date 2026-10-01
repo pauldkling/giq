@@ -720,3 +720,207 @@ async def test_multiview_options_and_refusals(
     assert r.status_code == 400
     r = await client.post("/multiview", files={"file": ("a.png", PNG, "image/png")})
     assert r.status_code == 400
+
+
+# --- structured output forwarding --------------------------------------------
+#
+# giq used to drop `response_format` and `structured_outputs` at the API edge
+# (extra="ignore"), so a client asking for schema-constrained JSON got
+# free-form text. These assert both knobs are declared on the request model,
+# forwarded unchanged to the engine request in every branch, and refused when
+# a caller sends the pair vllm cannot satisfy.
+
+_CAR_SCHEMA = {
+    "type": "object",
+    "properties": {"brand": {"type": "string"}, "year": {"type": "integer"}},
+    "required": ["brand", "year"],
+    "additionalProperties": False,
+}
+
+
+def test_structured_output_fields_survive_parsing():
+    """response_format and structured_outputs are first-class, not dropped."""
+    from giq.api.openai_compat import ChatCompletionRequest
+
+    msgs = [{"role": "user", "content": "hi"}]
+    native = ChatCompletionRequest.model_validate(
+        {"model": "m", "messages": msgs, "response_format": {"type": "json_object"}}
+    )
+    assert native.response_format == {"type": "json_object"}
+    assert native.structured_outputs is None
+    vllm = ChatCompletionRequest.model_validate(
+        {"model": "m", "messages": msgs, "structured_outputs": {"json": _CAR_SCHEMA}}
+    )
+    assert vllm.structured_outputs == {"json": _CAR_SCHEMA}
+    assert vllm.response_format is None
+    # Absent by default — a plain request stays plain.
+    plain = ChatCompletionRequest.model_validate({"model": "m", "messages": msgs})
+    assert plain.response_format is None and plain.structured_outputs is None
+
+
+def test_structured_output_knobs_are_mutually_exclusive():
+    """Both at once is a caller error, not something to pass to the engine.
+
+    vllm merges response_format into its structured-output constraints and
+    rejects the merged pair, so forwarding both would surface as an opaque
+    engine failure long after the request was accepted.
+    """
+    from pydantic import ValidationError
+
+    from giq.api.openai_compat import ChatCompletionRequest
+
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        ChatCompletionRequest.model_validate(
+            {
+                "model": "m",
+                "messages": [{"role": "user", "content": "hi"}],
+                "response_format": {"type": "json_object"},
+                "structured_outputs": {"json": _CAR_SCHEMA},
+            }
+        )
+
+
+@pytest.fixture
+def chat_completes(monkeypatch):
+    """Capture the JobRequest a /v1/chat/completions call submits."""
+    from giq.queue import Job
+    from giq.services.orchestration import Orchestrator
+
+    seen: dict = {}
+
+    async def submit(self, request):
+        seen["request"] = request
+        return "job-xyz", 0
+
+    async def wait(self, job_id, timeout=None):
+        job = Job(
+            job_id=job_id,
+            request=JobRequest(worker=WorkerType.llm, model="m", tasks=[]),
+        )
+        job.status = JobStatus.completed
+        job.results = [{"id": "chat-0", "output": "ok", "tokens_in": 1, "tokens_out": 1}]
+        return job
+
+    monkeypatch.setattr(Orchestrator, "submit_job", submit)
+    monkeypatch.setattr(Orchestrator, "wait_for_job", wait)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_plain_path_forwards_structured_output(client: AsyncClient, chat_completes):
+    """The plain (non-tool, non-stream) path threads either knob into params.
+
+    This is the path our extraction pipeline uses: one system+user message, no
+    tools. The key must reach the worker via JobRequest.params so the engine
+    sees it.
+    """
+    base = {
+        "model": "qwen3.8-27b-nvfp4-chat",
+        "messages": [
+            {"role": "system", "content": "Extract car info."},
+            {"role": "user", "content": "Mazda MX-5, 1990."},
+        ],
+    }
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "response_format": {"type": "json_object"}}
+    )
+    assert r.status_code == 200, r.text
+    params = chat_completes["request"].params
+    assert params["response_format"] == {"type": "json_object"}
+    assert "structured_outputs" not in params
+
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "structured_outputs": {"json": _CAR_SCHEMA}}
+    )
+    assert r.status_code == 200, r.text
+    params = chat_completes["request"].params
+    assert params["structured_outputs"] == {"json": _CAR_SCHEMA}
+    assert "response_format" not in params
+
+
+@pytest.mark.asyncio
+async def test_tool_path_forwards_structured_output(client: AsyncClient, chat_completes):
+    """The tool path threads either knob into chat_request (parity with plain)."""
+    base = {
+        "model": "qwen3.8-27b-nvfp4-chat",
+        "messages": [{"role": "user", "content": "pick a tool"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "f", "parameters": {"type": "object"}},
+            }
+        ],
+    }
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "response_format": {"type": "json_object"}}
+    )
+    assert r.status_code == 200, r.text
+    chat_request = chat_completes["request"].chat_request
+    assert chat_request["response_format"] == {"type": "json_object"}
+    assert "structured_outputs" not in chat_request
+
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "structured_outputs": {"json": _CAR_SCHEMA}}
+    )
+    assert r.status_code == 200, r.text
+    chat_request = chat_completes["request"].chat_request
+    assert chat_request["structured_outputs"] == {"json": _CAR_SCHEMA}
+    assert "response_format" not in chat_request
+
+
+@pytest.mark.asyncio
+async def test_stream_path_forwards_structured_output(client: AsyncClient, monkeypatch):
+    """Streaming uses chat_request too and must carry the decoding constraint."""
+    from giq.queue import JobStream
+    from giq.services.orchestration import Orchestrator
+
+    seen = {}
+
+    async def submit(self, request):
+        seen["request"] = request
+        stream = JobStream()
+        stream.queue.put_nowait(
+            {
+                "id": "c1",
+                "choices": [{"index": 0, "delta": {"content": "{}"}, "finish_reason": "stop"}],
+            }
+        )
+        await stream.close()
+        return "job-xyz", 0, stream
+
+    monkeypatch.setattr(Orchestrator, "submit_streaming_job", submit)
+    base = {
+        "model": "qwen3.8-27b-nvfp4-chat",
+        "messages": [{"role": "user", "content": "extract"}],
+        "stream": True,
+    }
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "response_format": {"type": "json_object"}}
+    )
+    assert r.status_code == 200, r.text
+    assert seen["request"].chat_request["response_format"] == {"type": "json_object"}
+
+    r = await client.post(
+        "/v1/chat/completions", json={**base, "structured_outputs": {"json": _CAR_SCHEMA}}
+    )
+    assert r.status_code == 200, r.text
+    chat_request = seen["request"].chat_request
+    assert chat_request["structured_outputs"] == {"json": _CAR_SCHEMA}
+    assert "response_format" not in chat_request
+
+
+@pytest.mark.asyncio
+async def test_both_structured_output_knobs_are_rejected(client: AsyncClient, chat_completes):
+    """The conflict is reported as a 400 instead of reaching the engine."""
+    r = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen3.8-27b-nvfp4-chat",
+            "messages": [{"role": "user", "content": "extract"}],
+            "response_format": {"type": "json_object"},
+            "structured_outputs": {"json": _CAR_SCHEMA},
+        },
+    )
+    assert r.status_code == 400
+    assert "mutually exclusive" in r.json()["detail"]
+    assert "request" not in chat_completes

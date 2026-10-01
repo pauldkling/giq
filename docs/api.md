@@ -340,3 +340,19 @@ llama.cpp's `--mmproj` projector. Send OpenAI-style content parts to
 Requests carrying images are forwarded to llama-server intact. Aiming one at a
 model without vision returns 400 rather than silently dropping the image. The
 dashboard's sandbox has an **image + question** panel for it.
+
+## Structured output
+
+`/v1/chat/completions` forwards two constrained-decoding controls to the
+engine, and takes one of them per request:
+
+- `response_format` — the OpenAI spelling, `{"type": "json_object"}` or
+  `{"type": "json_schema", "json_schema": {...}}`. Honoured by llama.cpp
+  (GBNF) and vllm alike, and the portable choice.
+- `structured_outputs` — vllm's native knob (`json`, `regex`, `choice`,
+  `grammar`), enforced at decode time. llama-server ignores it.
+
+Sending both in one request is refused with 400: vllm folds `response_format`
+into its own constraint set and then rejects the merged pair as mutually
+exclusive, so the conflict is reported at the API edge instead of surfacing as
+an opaque engine error.

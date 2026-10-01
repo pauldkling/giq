@@ -12,7 +12,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from giq.api.dependencies import get_audio_cache, get_orchestrator
 from giq.models import JobRequest
@@ -178,6 +178,42 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = Field(default=False, description="Stream response")
     tools: list[dict] | None = Field(default=None, description="Tool definitions")
     tool_choice: str | dict | None = Field(default=None, description="Tool choice mode")
+    # Structured output. Without these, extra="ignore" dropped them in silence
+    # and the engine only ever saw a free-form request, so a client asking for
+    # schema-constrained JSON got best-effort prose. Whichever one is set is
+    # forwarded to the engine verbatim in every request branch below (the
+    # workers relay the body as-is); setting both is a 400, see the validator:
+    # * `response_format` — the OpenAI-native spec, {"type":"json_object"} or
+    #   {"type":"json_schema","json_schema":{...}}. Honoured by both llama.cpp
+    #   (GBNF) and vllm.
+    # * `structured_outputs` — vllm's native constrained-decoding knob
+    #   ({"json": <schema>} / regex / choice / grammar; xgrammar/guidance).
+    #   vllm enforces it at decode time; llama-server ignores the unknown key.
+    response_format: dict | None = Field(
+        default=None, description="OpenAI structured-output spec (json_object/json_schema)"
+    )
+    structured_outputs: dict | None = Field(
+        default=None, description="vllm native structured outputs (json/regex/choice/grammar)"
+    )
+
+    @model_validator(mode="after")
+    def _one_structured_output_knob(self) -> "ChatCompletionRequest":
+        """Refuse both structured-output knobs at once.
+
+        vllm folds `response_format` into its own structured-output constraints
+        and then rejects the merged set as mutually exclusive, so forwarding
+        both turns a plausible-looking request into an engine-side 4xx the
+        caller cannot read. Saying so here keeps the failure at the API edge
+        and keeps the two knobs independent everywhere else.
+        """
+        if self.response_format is not None and self.structured_outputs is not None:
+            raise ValueError(
+                "response_format and structured_outputs are mutually exclusive: "
+                "vllm merges them into one constraint set and rejects the result. "
+                "Send response_format for portable requests, structured_outputs "
+                "for vllm-native regex/choice/grammar."
+            )
+        return self
 
 
 class TTSRequest(BaseModel):
@@ -198,6 +234,21 @@ class RenderResponse(BaseModel):
     file_id: str
     size_bytes: int
     expires_in: int
+
+
+def _apply_structured_output(target: dict, request: "ChatCompletionRequest") -> None:
+    """Copy structured-output fields onto an engine request, if set.
+
+    The one place the two knobs are threaded through, called from each of the
+    three request branches (streaming, tool/multimodal, plain) so a client gets
+    the same enforcement regardless of which path its request takes. The
+    workers relay the body to the engine verbatim, so a key placed here reaches
+    llama-server / vllm unchanged.
+    """
+    if request.response_format is not None:
+        target["response_format"] = request.response_format
+    if request.structured_outputs is not None:
+        target["structured_outputs"] = request.structured_outputs
 
 
 @router.post("/chat/completions", response_model=None)
@@ -252,6 +303,7 @@ async def create_chat_completion(
         ctk = body.get("chat_template_kwargs")
         if ctk:
             stream_request["chat_template_kwargs"] = ctk
+        _apply_structured_output(stream_request, request)
         # Deadline on the *thought*, separate from max_tokens' ceiling on the
         # whole response; llama.cpp closes the thinking block when it is spent
         # rather than truncating, so the answer is written from the reasoning
@@ -304,6 +356,7 @@ async def create_chat_completion(
         ctk = body.get("chat_template_kwargs")
         if ctk:
             llm_request["chat_template_kwargs"] = ctk
+        _apply_structured_output(llm_request, request)
         for key in ("reasoning_budget_tokens", "thinking_budget_tokens"):
             if isinstance(body.get(key), int):
                 llm_request["reasoning_budget_tokens"] = body[key]
@@ -349,6 +402,7 @@ async def create_chat_completion(
     ctk = body.get("chat_template_kwargs")
     if ctk:
         params["chat_template_kwargs"] = ctk
+    _apply_structured_output(params, request)
 
     job_id, _ = await orch.submit_job(
         JobRequest(
