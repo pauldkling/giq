@@ -10,7 +10,7 @@ One term per concept, used the same way in every view. Add a term here before
 using it in a second place. German UI text is neutral and imperative, with no
 "Sie" ("Modell entladen", not "Entladen Sie das Modell"). Technical terms that
 German developers use as-is stay English: Token, Prompt, Sandbox, Thinking,
-Engine, Job, Worker, Seed, Scheduler, LLM, VRAM, GPU.
+Engine, Job, Seed, Scheduler, LLM, VRAM, GPU.
 
 ## Hardware
 
@@ -30,12 +30,19 @@ Engine, Job, Worker, Seed, Scheduler, LLM, VRAM, GPU.
 | free | frei | "12,3 GB frei" |
 | in use | belegt | "VRAM belegt" |
 
-## Models and residency
+## Domain and residency
+
+The six domain terms are ADR-003's; use them in no other sense.
 
 | English | German | Notes |
 | --- | --- | --- |
-| model | Modell | plural "Modelle" |
-| weights | Gewichte | "Gewichte löschen" (delete weights) |
+| engine | Engine | plural "Engines"; a runtime build: llama.cpp, vllm, sd.cpp |
+| weights | Gewichte | one checkpoint on disk or in the HF cache; "Gewichte löschen" |
+| recipe | Rezept | weights + engine + params; plural "Rezepte"; its name is what a client sends as `model` |
+| recipe file | Rezeptdatei | plural "Rezeptdateien" |
+| instance | Instanz | a recipe running on a card; plural "Instanzen" — never the file |
+| inventory | Bestand | the weights and engines on this machine |
+| model | Modell | only the name a client asks for (`model`, `/v1/models`) — a recipe, seen from outside |
 | resident (adj.) | vorgehalten | a model kept loaded; "3 vorgehaltene Modelle" |
 | residents (n.) | vorgehaltene Modelle | never "Residenten" |
 | residency | Vorhaltung | the policy row/column heading |
@@ -55,14 +62,12 @@ Engine, Job, Worker, Seed, Scheduler, LLM, VRAM, GPU.
 | won't fit now | passt gerade nicht | |
 | never fits | passt nie | |
 | measured / estimate | gemessen / geschätzt | VRAM figures |
-| engine | Engine | plural "Engines"; the binary running a model |
-| modality | Modalität | chat, image, speech… |
-| instance | Instanz | one servable model as a file declares it (ADR-002) |
-| instance file | Instanzdatei | plural "Instanzdateien" |
-| built-in (model, instance) | mitgeliefert | "mitgeliefertes Modell" |
+| modality | Modalität | the kind of job: chat, image, speech… |
+| params | Parameter | an engine's settings in a recipe |
+| built-in (recipe) | mitgeliefert | "mitgeliefertes Rezept" |
 | left out (a file giq could not use) | ausgelassen | |
 
-## Workers (modalities)
+## Modalities
 
 | English | German |
 | --- | --- |
