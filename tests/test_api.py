@@ -925,3 +925,22 @@ async def test_both_structured_output_knobs_are_rejected(client: AsyncClient, ch
     assert r.status_code == 400
     assert "mutually exclusive" in r.json()["detail"]
     assert "request" not in chat_completes
+
+
+@pytest.mark.asyncio
+async def test_storage_marks_residents_by_recipe(client: AsyncClient, monkeypatch):
+    """Residents are recipe names (ADR-003); comparing (worker, model) pairs
+    against them marked every recipe as not resident."""
+    from pathlib import Path
+
+    from giq.api import stats_api
+    from giq.storage import ModelStorage
+
+    rows = [
+        ModelStorage("llm", "gemma-4-12b", [Path("/m/g.gguf")], True, 1),
+        ModelStorage("llm", "qwen3.8-27b", [Path("/m/q.gguf")], True, 1),
+    ]
+    monkeypatch.setattr(stats_api, "storage_report", lambda: (rows, []))
+    models = {m["model"]: m for m in (await client.get("/storage")).json()["models"]}
+    assert models["gemma-4-12b"]["resident"] is True
+    assert models["qwen3.8-27b"]["resident"] is False

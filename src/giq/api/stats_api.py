@@ -612,13 +612,13 @@ async def storage() -> dict:
     question.
     """
     models, disks = await asyncio.to_thread(storage_report)
-    last_used = {
-        (w, m): ts
-        for w, m, ts in await get_stats().fetch(
-            "SELECT worker, model, MAX(ts) FROM jobs WHERE status='completed' "
-            "GROUP BY worker, model"
+    # By recipe, across every modality it serves: flux_klein's last use is its
+    # last render or edit, whichever came later.
+    last_used = dict(
+        await get_stats().fetch(
+            "SELECT model, MAX(ts) FROM jobs WHERE status='completed' GROUP BY model"
         )
-    }
+    )
     resident_keys = set(get_policy_store().residents())
     return {
         "paths": giq_paths.resolved(),
@@ -631,8 +631,8 @@ async def storage() -> dict:
                 "size_bytes": ms.size_bytes,
                 "on_disk": ms.on_disk,
                 "shared_with": ms.shared_with,
-                "resident": (ms.worker, ms.model) in resident_keys,
-                "last_used": last_used.get((ms.worker, ms.model)),
+                "resident": ms.model in resident_keys,
+                "last_used": last_used.get(ms.model),
                 "paths": [str(p) for p in ms.paths],
             }
             for ms in models
