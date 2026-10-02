@@ -31,8 +31,10 @@ reads it, and the storage catalog finds the download in the HF cache by it.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from giq import recipes
 from giq.paths import model_path
@@ -187,3 +189,127 @@ def locations(name: str) -> list[Location]:
         elif repo := hub_repo(source):
             out.append(Location(part, repo=repo))
     return out
+
+
+# --- the inventory (ADR-003) ---------------------------------------------------
+#
+# Weights are a thing of their own: one checkpoint, however many recipes use
+# it. Recipes still write their weights inline — one file per new model — and
+# the inventory is built from them, keyed by where the files are. A recipe's
+# parts (an image model's diffusion model, text encoder and VAE) are weights
+# too, so an encoder two recipes share is one item, deleted once.
+
+_PROVENANCE = ("format", "source", "revision", "licence")
+
+
+@dataclass(frozen=True)
+class WeightsItem:
+    """One checkpoint on this machine (or that should be), and who uses it."""
+
+    # A short, stable hash of the location: URL-safe, and the same across
+    # restarts as long as the files stay where they are.
+    id: str
+    # Exactly one of these: an absolute path (a file or a directory), or the
+    # ``org/repo`` whose download lives in the HF cache.
+    path: str | None
+    repo: str | None
+    format: str | None = None
+    source: str | None = None
+    revision: str | None = None
+    licence: str | None = None
+    # "recipe" for main weights, "recipe:part" for a part, by name.
+    used_by: tuple[str, ...] = ()
+
+    @property
+    def recipes(self) -> tuple[str, ...]:
+        """The recipes that load these weights, each once."""
+        return tuple(dict.fromkeys(u.partition(":")[0] for u in self.used_by))
+
+
+def weights_id(location: Location) -> str:
+    import hashlib
+
+    key = f"path:{location.path}" if location.path else f"repo:{location.repo}"
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+def _declared(recipe: Recipe) -> list[tuple[str | None, Any]]:
+    """(part, its weights block) for the main weights and every part."""
+    if recipe.weights is None:
+        return []
+    main = [(None, recipe.weights)] if recipe.weights.path or recipe.weights.source else []
+    return main + list(recipe.weights.parts.items())
+
+
+def _provenance(block: Any, main: Any = None) -> dict[str, str]:
+    """What a weights block says its files are.
+
+    A part that states no licence of its own is under the recipe's: flux_klein
+    declares apache-2.0 once over all three files and names the VAE's source
+    only because it differs. Format, source and revision describe one
+    download and are not inherited.
+    """
+    own = {k: v for k in _PROVENANCE if (v := getattr(block, k, None)) is not None}
+    if main is not None and main is not block and "licence" not in own and main.licence:
+        own["licence"] = main.licence
+    return own
+
+
+def inventory() -> list[WeightsItem]:
+    """Every checkpoint the current recipes name, each once, by location."""
+    found: dict[str, dict[str, Any]] = {}
+    for recipe in sorted(recipes.current().recipes.values(), key=lambda r: r.name):
+        declared = dict(_declared(recipe))
+        for loc in locations(recipe.name):
+            item = found.setdefault(
+                weights_id(loc), {"location": loc, "provenance": {}, "used_by": []}
+            )
+            block = declared.get(loc.part)
+            for key, value in _provenance(block, recipe.weights).items():
+                item["provenance"].setdefault(key, value)
+            item["used_by"].append(recipe.name if loc.part is None else f"{recipe.name}:{loc.part}")
+    return [
+        WeightsItem(
+            id=wid,
+            path=item["location"].path,
+            repo=item["location"].repo,
+            used_by=tuple(item["used_by"]),
+            **item["provenance"],
+        )
+        for wid, item in found.items()
+    ]
+
+
+def provenance_conflicts(candidates: Iterable[Recipe]) -> list[str]:
+    """Recipes that describe one checkpoint differently.
+
+    Two recipes over the same files must agree on what the files are; which
+    file's licence the catalog showed would otherwise be an accident of load
+    order. Keyed by the declared location — environment overrides redirect
+    one recipe's files at run time and are not a statement about the files.
+    A value one recipe leaves out is not a disagreement.
+    """
+    seen: dict[str, tuple[str, dict[str, str]]] = {}
+    problems = []
+    for recipe in candidates:
+        for part, block in _declared(recipe):
+            if block.path:
+                key = f"path:{resolve_path(recipe.modality, block.path)}"
+            elif repo := hub_repo(block.source):
+                key = f"repo:{repo}"
+            else:
+                continue
+            who = recipe.name if part is None else f"{recipe.name}:{part}"
+            mine = _provenance(block, recipe.weights)
+            if key not in seen:
+                seen[key] = (who, mine)
+                continue
+            other, theirs = seen[key]
+            for field in sorted(set(mine) & set(theirs)):
+                if mine[field] != theirs[field]:
+                    problems.append(
+                        f"{who} and {other} use the same weights but disagree on {field} "
+                        f"({mine[field]!r} vs {theirs[field]!r})"
+                    )
+            seen[key] = (other, {**mine, **theirs})
+    return problems

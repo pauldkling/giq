@@ -22,7 +22,7 @@ from pathlib import Path
 
 from giq.paths import hf_home
 from giq.registry import all_recipes, get_recipe
-from giq.weights import Location, locations
+from giq.weights import Location, WeightsItem, inventory, locations
 
 # GGUF shard names: model-00001-of-00004.gguf → glob the whole set.
 _SHARD_RE = re.compile(r"^(.*)-\d{5}-of-(\d{5})$")
@@ -233,6 +233,95 @@ def delete_model(
         "model": model,
         "deleted": deleted,
         "skipped_shared": skipped_shared,
+        "missing": missing,
+        "freed_bytes": freed,
+    }
+
+
+# --- per weights (ADR-003) -----------------------------------------------------
+
+
+def _item_paths(item: WeightsItem, hub: Path) -> list[Path]:
+    """Every file or directory a weights item is on disk, shards included."""
+    loc = Location(None, path=item.path, repo=item.repo)
+    return [p.expanduser().resolve() for p in _expand_gguf(_on_disk(loc, hub))]
+
+
+def weights_report() -> list[dict]:
+    """Every checkpoint the recipes name, with its size, presence and users.
+
+    The per-recipe view above counts a checkpoint once for every recipe that
+    loads it; here each is counted once, and deleting it is one act whatever
+    uses it.
+    """
+    hub = hf_cache_dir()
+    out = []
+    for item in sorted(inventory(), key=lambda i: i.repo or i.path or ""):
+        paths = _item_paths(item, hub)
+        existing = [p for p in paths if p.exists()]
+        out.append(
+            {
+                "id": item.id,
+                "path": item.path,
+                "repo": item.repo,
+                "format": item.format,
+                "source": item.source,
+                "revision": item.revision,
+                "licence": item.licence,
+                "recipes": list(item.recipes),
+                "used_by": list(item.used_by),
+                "on_disk": bool(paths) and len(existing) == len(paths),
+                "size_bytes": sum(_path_size(p) for p in existing),
+                "mount": str(_mount_point(existing[0])) if existing else None,
+            }
+        )
+    return out
+
+
+def delete_weights(weights_id: str, *, busy: set[str]) -> dict:
+    """Delete one checkpoint from disk; returns what happened per path.
+
+    Refused while any recipe that uses it is in ``busy`` (resident or loaded):
+    evicting is scheduler policy, not a disk operation, and a resident would
+    only fail to reload. Recipes that used it stay in the catalog, uninstalled.
+    """
+    item = next((i for i in inventory() if i.id == weights_id), None)
+    if item is None:
+        raise StorageError(f"no weights {weights_id}", status=404)
+    if blocking := sorted(set(item.recipes) & busy):
+        raise StorageError(
+            f"{', '.join(blocking)} {'uses' if len(blocking) == 1 else 'use'} these weights "
+            "and is resident or loaded — set it to on-demand or off first",
+            status=409,
+        )
+    deleted, missing = [], []
+    freed = 0
+    for p in _item_paths(item, hf_cache_dir()):
+        if not p.exists():
+            missing.append(str(p))
+            continue
+        size = _path_size(p)
+        try:
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+        except OSError as e:
+            # A hardened service mounts the model store read-only (the systemd
+            # unit's ProtectSystem=strict); weights are the operator's to
+            # delete, and a 500 would read like a giq bug.
+            raise StorageError(
+                f"cannot delete {p}: {e.strerror or e}. The model store is read-only "
+                "for the service; delete the files as the operator"
+                + (f" (already deleted: {', '.join(deleted)})" if deleted else ""),
+                status=409,
+            ) from e
+        freed += size
+        deleted.append(str(p))
+    return {
+        "id": item.id,
+        "recipes": list(item.recipes),
+        "deleted": deleted,
         "missing": missing,
         "freed_bytes": freed,
     }

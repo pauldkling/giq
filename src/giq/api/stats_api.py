@@ -32,7 +32,13 @@ from giq.registry import all_recipes, get_recipe, resident_defaults
 from giq.runner import get_runner
 from giq.services.orchestration import Orchestrator
 from giq.stats import get_stats
-from giq.storage import StorageError, delete_model, storage_report
+from giq.storage import (
+    StorageError,
+    delete_model,
+    delete_weights,
+    storage_report,
+    weights_report,
+)
 from giq.vram import get_vram_status, margin_for, reserve_for
 
 logger = logging.getLogger(__name__)
@@ -632,6 +638,38 @@ async def storage() -> dict:
             for ms in models
         ],
     }
+
+
+@router.get("/weights")
+async def list_weights() -> dict:
+    """Every checkpoint the recipes name, once each (ADR-003).
+
+    Where it is (a path, or an HF repository in the cache), what it is
+    (format, source, revision, licence), which recipes load it, and whether
+    it is on disk and how big. One checkpoint serving two recipes is one
+    entry here; ``GET /storage`` still reports per recipe and per mount.
+    """
+    return {"weights": await asyncio.to_thread(weights_report)}
+
+
+@router.delete("/weights/{weights_id}")
+async def delete_weights_by_id(weights_id: str) -> dict:
+    """Remove one checkpoint from disk. The recipes that used it stay, uninstalled.
+
+    Refused (409) while a recipe that uses it is resident or loaded.
+    """
+    busy = set(get_policy_store().residents()) | get_runner().loaded_keys()
+    try:
+        result = await asyncio.to_thread(delete_weights, weights_id, busy=busy)
+    except StorageError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
+    if result["deleted"]:
+        await get_stats().record_event(
+            "delete_weights",
+            f"{weights_id} ({', '.join(result['recipes'])}) freed {result['freed_bytes']} bytes",
+        )
+        logger.info("deleted weights %s: %s", weights_id, result["deleted"])
+    return result
 
 
 @router.delete("/storage/models/{worker}/{model}")

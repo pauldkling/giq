@@ -94,6 +94,8 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/stats/gpus`, `/stats/vram`, `/stats/gpus/eras` | GET | GPU telemetry history and per-card job totals |
 | `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's recipe files — see [Storage](#storage) |
 | `/storage/models/{worker}/{model}` | DELETE | Delete a model's weights |
+| `/weights` | GET | Every checkpoint the recipes name, once each: location, provenance, the recipes that load it, size — see [Weights](#weights) |
+| `/weights/{id}` | DELETE | Delete one checkpoint; the recipes using it stay, uninstalled |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat, streaming and tool calls included |
 | `/v1/responses` | POST | OpenAI Responses API, streaming and tool calls included — see [Responses API](#responses-api) |
 | `/v1/models` | GET | The chat models whose weights are on disk |
@@ -343,6 +345,31 @@ The Giant models need xformers and are not registered. Licences: Base is
 Apache-2.0. Large-1.1 is not registered: its model card says Apache-2.0
 while the repository README lists Large as CC BY-NC 4.0, and a licence that
 unclear is not one giq offers for commercial use.
+
+## Weights
+
+`GET /weights` lists every checkpoint the recipes name — a file or
+directory on disk, or a Hugging Face repository in the cache — once, however
+many recipes load it ([ADR-003](ADR-003-domain.md)). A recipe's parts (an
+image model's diffusion model, text encoder and VAE) are checkpoints too.
+
+```json
+{"weights": [
+  {"id": "07bc6fc2f4f1", "path": null, "repo": "Systran/faster-whisper-large-v3",
+   "format": null, "source": "hf:Systran/faster-whisper-large-v3", "revision": null,
+   "licence": null, "recipes": ["faster-whisper-large-v3", "whisper-large-v3"],
+   "used_by": ["faster-whisper-large-v3", "whisper-large-v3:asr"],
+   "on_disk": true, "size_bytes": 6181672394, "mount": "/"}
+]}
+```
+
+`id` is a hash of the location: stable while the files stay where they are.
+A part with no licence of its own carries its recipe's. `DELETE
+/weights/{id}` removes the files and is refused with 409 while a recipe that
+uses them is resident or loaded; the recipes stay in the catalog, not
+installed. Two recipes that name the same files must agree on their format,
+source, revision and licence — a recipe file that contradicts another is
+left out, like any other broken one.
 
 ## Storage
 

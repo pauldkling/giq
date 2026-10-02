@@ -149,6 +149,10 @@ def builtin() -> Mapping[Key, tuple[Recipe, Path]]:
         found[recipe.name] = (recipe, path)
     if clashes := _alias_clashes(recipe for recipe, _ in found.values()):
         raise RecipeError(f"built-in recipes: {'; '.join(clashes)}")
+    from giq.weights import provenance_conflicts
+
+    if conflicts := provenance_conflicts(recipe for recipe, _ in found.values()):
+        raise RecipeError(f"built-in recipes: {'; '.join(conflicts)}")
     return MappingProxyType(found)
 
 
@@ -214,12 +218,17 @@ def load(operator_dir: Path | None = None) -> Snapshot:
         from giq.paths import recipes_dir
 
         operator_dir = recipes_dir()
+    from giq.weights import provenance_conflicts
+
     merged = dict(builtin())
     errors: list[LoadError] = []
     for key, (recipe, path) in sorted(_operator(operator_dir, errors).items()):
         candidate = {**{k: i for k, (i, _) in merged.items()}, key: recipe}
         if clashes := _alias_clashes(candidate.values()):
             errors.append(LoadError(str(path), "; ".join(clashes)))
+            continue
+        if conflicts := provenance_conflicts(candidate.values()):
+            errors.append(LoadError(str(path), "; ".join(conflicts)))
             continue
         if key in merged:
             logger.info(f"recipes: {recipe.name} from {path} replaces the built-in")
