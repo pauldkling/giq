@@ -43,14 +43,14 @@ The six domain terms are ADR-003's; use them in no other sense.
 | instance | Instanz | a recipe running on a card; plural "Instanzen" — never the file |
 | inventory | Bestand | the weights and engines on this machine |
 | model | Modell | only the name a client asks for (`model`, `/v1/models`) — a recipe, seen from outside |
-| resident (adj.) | vorgehalten | a model kept loaded; "3 vorgehaltene Modelle" |
-| residents (n.) | vorgehaltene Modelle | never "Residenten" |
+| resident (adj.) | vorgehalten | an instance kept loaded by policy; "3 vorgehaltene Instanzen" |
+| residents (n.) | vorgehaltene Instanzen | never "Residenten" |
 | residency | Vorhaltung | the policy row/column heading |
 | keep warm (policy `pinned`) | warm halten | the label shown for pinned |
 | on demand (policy `auto`) | bei Bedarf | |
 | off (policy `off`) | aus | |
 | pin / pinned | warm halten / warm gehalten | the verb behind "keep warm": "Trotzdem warm halten?" |
-| pinned set | warm gehaltene Modelle | |
+| pinned set | warm gehaltene Rezepte | |
 | revert (to default) | zurücksetzen | "Auf Standard zurücksetzen" |
 | load | laden | |
 | loaded | geladen | |

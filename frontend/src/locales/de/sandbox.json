@@ -51,7 +51,7 @@
     "tools": "Ausführen",
     "running": "Läuft…",
     "t2i": "Generieren",
-    "generatingImage": "Generiere… (kann vorgehaltene Modelle verdrängen)",
+    "generatingImage": "Generiere… (kann vorgehaltene Instanzen verdrängen)",
     "edit": "Bearbeiten",
     "editing": "Bearbeite…",
     "vision": "Fragen",
@@ -87,9 +87,9 @@
   "chat": {
     "defaultPrompt": "Erkläre in zwei Sätzen, warum der Himmel blau ist.",
     "load": {
-      "off": "<b>{{model}} ist ausgeschaltet</b> — es lehnt Jobs ab und kann nicht laden. Zuerst unter <link>Modelle</link> auf „bei Bedarf“ oder „warm halten“ stellen.",
+      "off": "<b>{{model}} ist ausgeschaltet</b> — es lehnt Jobs ab und kann nicht laden. Zuerst unter <link>Rezepte</link> auf „bei Bedarf“ oder „warm halten“ stellen.",
       "loaded": "{{model}} ist geladen — antwortet in etwa einer Sekunde.",
-      "evicts": "{{model}} ist nicht geladen; Ausführen verdrängt vorgehaltene Modelle, um Platz zu schaffen, die erste Antwort dauert also eine Weile.",
+      "evicts": "{{model}} ist nicht geladen; Ausführen verdrängt vorgehaltene Instanzen, um Platz zu schaffen, die erste Antwort dauert also eine Weile.",
       "loads": "{{model}} ist nicht geladen — die erste Antwort wartet, bis es geladen ist."
     },
     "think": {
@@ -111,13 +111,13 @@
   "t2i": {
     "defaultPrompt": "Eine gemütliche Kleinstadt am Fluss in der Abenddämmerung, warm leuchtende Fenster, im Stil einer Graphic Novel",
     "none": "Kein Text-zu-Bild-Modell passt auf diese Karten.",
-    "evicts": "Generieren verdrängt die vorgehaltenen Modelle — das erste Bild dauert Minuten, danach laden sie neu."
+    "evicts": "Generieren verdrängt die vorgehaltenen Instanzen — das erste Bild dauert Minuten, danach laden sie neu."
   },
   "edit": {
     "defaultPrompt": "Verwandle dieses Foto in eine Aquarell-Illustration",
     "needImage": "Zuerst ein Referenzbild wählen.",
     "none": "Kein Bildbearbeitungsmodell passt auf diese Karten — Bereich deaktiviert.",
-    "evicts": "Bearbeiten kann vorgehaltene Modelle verdrängen — das kann ein paar Minuten dauern."
+    "evicts": "Bearbeiten kann vorgehaltene Instanzen verdrängen — das kann ein paar Minuten dauern."
   },
   "vision": {
     "defaultPrompt": "Was ist auf diesem Bild zu sehen?",
@@ -147,7 +147,7 @@
   "tts": {
     "defaultText": "Die GPU gehört allen — dreißig Sekunden am Stück.",
     "defaultVoice": "{{voice}} (Standard)",
-    "hint": "{{model}} ({{size}}) lädt bei Bedarf, ohne vorgehaltene Modelle zu verdrängen."
+    "hint": "{{model}} ({{size}}) lädt bei Bedarf, ohne vorgehaltene Instanzen zu verdrängen."
   },
   "voice": {
     "clipA": "Stimmprobe A",

@@ -11,8 +11,8 @@ const status = (over: Partial<Status>): Status =>
     paused: false,
     jobs_running: [],
     jobs_pending: [],
-    active_worker: null,
-    active_model: null,
+    active_modality: null,
+    active_recipe: null,
     vram_ok: true,
     vram_free_gb: 20,
     ...over,
@@ -28,7 +28,7 @@ describe("stateMessage", () => {
     });
     expect(stateMessage(status({ active_modality: "llm", active_recipe: "m", jobs_pending: ["x"] }))).toEqual({
       key: "loaded",
-      params: { worker: "llm", model: "m" },
+      params: { modality: "llm", recipe: "m" },
     });
     expect(stateMessage(status({ jobs_pending: ["x"] }))).toEqual({ key: "queued", params: { count: 1 } });
     expect(stateMessage(status({ jobs_pending: ["x", "y"], vram_ok: false, vram_free_gb: 1.5 }))).toEqual({

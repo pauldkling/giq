@@ -51,7 +51,7 @@
     "tools": "Run",
     "running": "Running…",
     "t2i": "Generate",
-    "generatingImage": "Generating… (may evict resident models)",
+    "generatingImage": "Generating… (may evict resident instances)",
     "edit": "Edit",
     "editing": "Editing…",
     "vision": "Ask",
@@ -87,9 +87,9 @@
   "chat": {
     "defaultPrompt": "Explain in two sentences why the sky is blue.",
     "load": {
-      "off": "<b>{{model}} is switched off</b> — it refuses jobs and cannot load. Set it to on demand or keep warm under <link>Models</link> first.",
+      "off": "<b>{{model}} is switched off</b> — it refuses jobs and cannot load. Set it to on demand or keep warm under <link>Recipes</link> first.",
       "loaded": "{{model}} is loaded — answers in about a second.",
-      "evicts": "{{model}} is not loaded; running evicts resident models to make room, so the first answer takes a while.",
+      "evicts": "{{model}} is not loaded; running evicts resident instances to make room, so the first answer takes a while.",
       "loads": "{{model}} is not loaded — the first answer waits for it to load."
     },
     "think": {
@@ -111,13 +111,13 @@
   "t2i": {
     "defaultPrompt": "A cozy riverside town at dusk, warm windows glowing, graphic novel style",
     "none": "No text-to-image model fits on these cards.",
-    "evicts": "Generating evicts the resident models — the first image takes minutes, then they reload."
+    "evicts": "Generating evicts the resident instances — the first image takes minutes, then they reload."
   },
   "edit": {
     "defaultPrompt": "Transform this photo into a watercolor illustration",
     "needImage": "Pick a reference image first.",
     "none": "No image-edit model fits on these cards — panel disabled.",
-    "evicts": "Editing may evict resident models — it can take a couple of minutes."
+    "evicts": "Editing may evict resident instances — it can take a couple of minutes."
   },
   "vision": {
     "defaultPrompt": "What is in this image?",
@@ -147,7 +147,7 @@
   "tts": {
     "defaultText": "The GPU belongs to everyone — thirty seconds at a time.",
     "defaultVoice": "{{voice}} (default)",
-    "hint": "{{model}} ({{size}}) loads on demand without evicting resident models."
+    "hint": "{{model}} ({{size}}) loads on demand without evicting resident instances."
   },
   "voice": {
     "clipA": "Voice clip A",

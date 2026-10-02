@@ -23,7 +23,7 @@ export function LiveStatus() {
   const p = msg.params;
   const text = t(`stateMessage.${msg.key}`, {
     ...p,
-    worker: typeof p.worker === "string" ? t(`worker.${p.worker}`, { defaultValue: p.worker }) : undefined,
+    modality: typeof p.modality === "string" ? t(`worker.${p.modality}`, { defaultValue: p.modality }) : undefined,
     free: typeof p.free === "number" ? f.gb(p.free) : undefined,
   });
   return (

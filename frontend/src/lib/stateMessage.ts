@@ -23,7 +23,7 @@ export interface StateMessage {
 export function stateMessage(s: Status): StateMessage {
   if (s.paused) return { key: "paused", params: {} };
   if (s.jobs_running.length) return { key: "running", params: { count: s.jobs_running.length } };
-  if (s.active_modality) return { key: "loaded", params: { worker: s.active_modality, model: s.active_recipe ?? "" } };
+  if (s.active_modality) return { key: "loaded", params: { modality: s.active_modality, recipe: s.active_recipe ?? "" } };
   if (s.jobs_pending.length) {
     return s.vram_ok
       ? { key: "queued", params: { count: s.jobs_pending.length } }

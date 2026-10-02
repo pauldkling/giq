@@ -31,15 +31,15 @@
     "unreachable": "unreachable"
   },
   "stateMessage": {
-    "paused": "serving paused — models unloaded, GPU free; requests get 503",
+    "paused": "serving paused — instances stopped, GPUs free; requests get 503",
     "running_one": "{{count}} job running",
     "running_other": "{{count}} jobs running",
-    "loaded": "{{worker}} · {{model}} loaded, waiting",
+    "loaded": "{{modality}} · {{recipe}} loaded, waiting",
     "queued_one": "{{count}} job queued, starting shortly",
     "queued_other": "{{count}} jobs queued, starting shortly",
     "blocked_one": "{{count}} job waiting for VRAM ({{free}} free)",
     "blocked_other": "{{count}} jobs waiting for VRAM ({{free}} free)",
-    "idle": "no jobs, no model loaded"
+    "idle": "no jobs, nothing loaded"
   },
   "theme": {
     "label": "Theme",
@@ -67,16 +67,16 @@
     "resuming": "Resuming…",
     "unloading": "Unloading…",
     "draining": "Draining…",
-    "pauseTitle": "Unload every model and hand the GPU back",
+    "pauseTitle": "Stop every instance and hand the GPUs back",
     "resumeTitle": "Resume serving — residents reload within a few seconds",
     "menuLabel": "How to pause",
     "graceful": "Pause when idle",
     "gracefulHelp": "Waits up to 60 s for in-flight jobs and live chat sessions to finish, then unloads.",
     "force": "Force pause now",
-    "forceHelp": "Tears workers down immediately — anything mid-generation fails.",
-    "hint": "Either way: every model unloads, the card goes idle, and API calls get 503 until you resume. Nothing queues up meanwhile.",
+    "forceHelp": "Stops every instance immediately — anything mid-generation fails.",
+    "hint": "Either way: every instance stops, the cards go idle, and API calls get 503 until you resume. Nothing queues up meanwhile.",
     "forceConfirmTitle": "Force pause?",
-    "forceConfirmBody": "Force pause kills the workers immediately — anything mid-generation fails.",
+    "forceConfirmBody": "Force pause stops every instance on the spot — anything mid-generation fails.",
     "forceConfirm": "Force pause",
     "warningsTitle": "Paused, with warnings",
     "pauseFailed": "Pause failed",
@@ -84,7 +84,7 @@
     "bannerTitle": "Serving paused",
     "bannerSince": "since {{time}}",
     "bannerDraining": "finishing in-flight work, then unloading",
-    "bannerFreed": "{{free}} of {{total}} free · all models unloaded",
+    "bannerFreed": "{{free}} of {{total}} free · every instance stopped",
     "banner503": "requests get 503"
   },
   "worker": {
@@ -127,7 +127,7 @@
     "fan": "Fan",
     "giq": "giq",
     "other": "other",
-    "giqTitle": "held by giq's models",
+    "giqTitle": "held by giq's instances",
     "otherTitle": "desktop, other CUDA apps — giq cannot free this"
   },
   "actions": {

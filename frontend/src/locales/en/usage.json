@@ -24,7 +24,7 @@
   },
   "chart": {
     "kicker": "Tokens over time",
-    "aria": "Tokens per bucket, stacked by model",
+    "aria": "Tokens per bucket, stacked by recipe",
     "empty": "No token usage in this window",
     "hint": "Some calls in this window predate token accounting — they count as calls but contribute no tokens.",
     "bucketNote": {
@@ -54,10 +54,10 @@
     "empty": "No cards recorded yet"
   },
   "models": {
-    "kicker": "Per model",
-    "meta_one": "{{count}} model",
-    "meta_other": "{{count}} models",
-    "model": "Model",
+    "kicker": "Per recipe",
+    "meta_one": "{{count}} recipe",
+    "meta_other": "{{count}} recipes",
+    "model": "Recipe",
     "calls": "Calls",
     "failed": "Failed",
     "tasks": "Tasks",
@@ -71,7 +71,7 @@
     "kicker": "Recent calls",
     "meta": "last {{count}}",
     "when": "When",
-    "model": "Model",
+    "model": "Recipe",
     "status": "Status",
     "queue": "Queue",
     "run": "Run",

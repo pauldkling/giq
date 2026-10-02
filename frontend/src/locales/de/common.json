@@ -31,15 +31,15 @@
     "unreachable": "nicht erreichbar"
   },
   "stateMessage": {
-    "paused": "Betrieb pausiert — Modelle entladen, GPU frei; Anfragen erhalten 503",
+    "paused": "Betrieb pausiert — Instanzen beendet, GPUs frei; Anfragen erhalten 503",
     "running_one": "{{count}} Job läuft",
     "running_other": "{{count}} Jobs laufen",
-    "loaded": "{{worker}} · {{model}} geladen, wartet",
+    "loaded": "{{modality}} · {{recipe}} geladen, wartet",
     "queued_one": "{{count}} Job in der Warteschlange, startet gleich",
     "queued_other": "{{count}} Jobs in der Warteschlange, starten gleich",
     "blocked_one": "{{count}} Job wartet auf VRAM ({{free}} frei)",
     "blocked_other": "{{count}} Jobs warten auf VRAM ({{free}} frei)",
-    "idle": "keine Jobs, kein Modell geladen"
+    "idle": "keine Jobs, nichts geladen"
   },
   "theme": {
     "label": "Design",
@@ -67,16 +67,16 @@
     "resuming": "Setze fort…",
     "unloading": "Entlade…",
     "draining": "Arbeite ab…",
-    "pauseTitle": "Alle Modelle entladen und die GPU freigeben",
-    "resumeTitle": "Betrieb fortsetzen — vorgehaltene Modelle laden in wenigen Sekunden neu",
+    "pauseTitle": "Alle Instanzen beenden und die GPUs freigeben",
+    "resumeTitle": "Betrieb fortsetzen — vorgehaltene Instanzen laden in wenigen Sekunden neu",
     "menuLabel": "Wie pausieren",
     "graceful": "Pausieren, sobald frei",
     "gracefulHelp": "Wartet bis zu 60 s, bis laufende Jobs und Chat-Sitzungen fertig sind, und entlädt dann.",
     "force": "Sofort pausieren",
-    "forceHelp": "Beendet die Worker sofort — alles, was gerade generiert, schlägt fehl.",
-    "hint": "In beiden Fällen: Alle Modelle werden entladen, die Karte geht in den Leerlauf, und API-Aufrufe erhalten 503, bis der Betrieb fortgesetzt wird. In der Zwischenzeit wird nichts eingereiht.",
+    "forceHelp": "Beendet alle Instanzen sofort — alles, was gerade generiert, schlägt fehl.",
+    "hint": "In beiden Fällen: Alle Instanzen werden beendet, die Karten gehen in den Leerlauf, und API-Aufrufe erhalten 503, bis der Betrieb fortgesetzt wird. In der Zwischenzeit wird nichts eingereiht.",
     "forceConfirmTitle": "Sofort pausieren?",
-    "forceConfirmBody": "Sofortiges Pausieren beendet die Worker auf der Stelle — alles, was gerade generiert, schlägt fehl.",
+    "forceConfirmBody": "Sofortiges Pausieren beendet alle Instanzen auf der Stelle — alles, was gerade generiert, schlägt fehl.",
     "forceConfirm": "Sofort pausieren",
     "warningsTitle": "Pausiert, mit Warnungen",
     "pauseFailed": "Pausieren fehlgeschlagen",
@@ -84,7 +84,7 @@
     "bannerTitle": "Betrieb pausiert",
     "bannerSince": "seit {{time}}",
     "bannerDraining": "laufende Arbeit wird abgeschlossen, dann entladen",
-    "bannerFreed": "{{free}} von {{total}} frei · alle Modelle entladen",
+    "bannerFreed": "{{free}} von {{total}} frei · alle Instanzen beendet",
     "banner503": "Anfragen erhalten 503"
   },
   "worker": {
@@ -127,7 +127,7 @@
     "fan": "Lüfter",
     "giq": "giq",
     "other": "andere",
-    "giqTitle": "von giqs Modellen belegt",
+    "giqTitle": "von giqs Instanzen belegt",
     "otherTitle": "Desktop, andere CUDA-Programme — giq kann das nicht freigeben"
   },
   "actions": {

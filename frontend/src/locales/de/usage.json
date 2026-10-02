@@ -24,7 +24,7 @@
   },
   "chart": {
     "kicker": "Token im Zeitverlauf",
-    "aria": "Token pro Intervall, gestapelt nach Modell",
+    "aria": "Token pro Intervall, gestapelt nach Rezept",
     "empty": "Keine Token in diesem Zeitraum",
     "hint": "Einige Aufrufe in diesem Zeitraum stammen aus der Zeit vor der Token-Zählung – sie zählen als Aufrufe, tragen aber keine Token bei.",
     "bucketNote": {
@@ -54,10 +54,10 @@
     "empty": "Noch keine Karten erfasst"
   },
   "models": {
-    "kicker": "Pro Modell",
-    "meta_one": "{{count}} Modell",
-    "meta_other": "{{count}} Modelle",
-    "model": "Modell",
+    "kicker": "Pro Rezept",
+    "meta_one": "{{count}} Rezept",
+    "meta_other": "{{count}} Rezepte",
+    "model": "Rezept",
     "calls": "Aufrufe",
     "failed": "Fehlgeschl.",
     "tasks": "Aufgaben",
@@ -71,7 +71,7 @@
     "kicker": "Letzte Aufrufe",
     "meta": "die letzten {{count}}",
     "when": "Wann",
-    "model": "Modell",
+    "model": "Rezept",
     "status": "Status",
     "queue": "Wartezeit",
     "run": "Laufzeit",
