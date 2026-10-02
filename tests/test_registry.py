@@ -159,12 +159,12 @@ def test_estimated_vram_matches_the_gate():
     They used to disagree: sd.cpp put zimage at 9GB while the gate wanted 13,
     so a victim's freed VRAM was mis-sized.
     """
-    from giq.workers.llm import LLMWorker, LLMWorkerConfig
-    from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
+    from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
+    from giq.adapters.sdcpp import SdCppAdapter, SdCppConfig
 
-    llm = LLMWorker(config=LLMWorkerConfig(model="gemma-4-12b"))
+    llm = LlamaCppAdapter(config=LlamaCppConfig(model="gemma-4-12b"))
     assert llm.estimated_vram_gb == get_vram_requirement("gemma-4-12b")
 
     for model in ("flux_klein", "zimage"):
-        worker = SdCppWorker(config=SdCppWorkerConfig(model=model))
+        worker = SdCppAdapter(config=SdCppConfig(model=model))
         assert worker.estimated_vram_gb == get_vram_requirement(model)

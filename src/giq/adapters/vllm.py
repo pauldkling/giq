@@ -67,12 +67,12 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
+from giq.adapters.engine import Concurrency, ServedLLM, StartError
 from giq.gpus import compute_capability, device_env, device_port, resolve_device, server_port
 from giq.models import JobResult
 from giq.paths import cache_dir, model_path, state_dir
 from giq.recipes.schema import Recipe, VllmParams, mtp_layers, read_hf_config
 from giq.registry import vram_for
-from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
 if TYPE_CHECKING:
     from giq.queue import JobStream
@@ -355,7 +355,7 @@ def _normalise_reasoning(message: dict) -> None:
 
 
 @dataclass
-class VLLMWorkerConfig:
+class VllmConfig:
     """How one vllm model is started. Everything is derived from its recipe."""
 
     model: str
@@ -413,13 +413,13 @@ class VLLMWorkerConfig:
 
 
 @dataclass
-class VLLMWorker(ServedLLM):
+class VllmAdapter(ServedLLM):
     """An LLM served by ``vllm serve`` in a RAM-capped scope on one card."""
 
     engine: ClassVar[str] = ENGINE
     lanes_from_engine: ClassVar[bool] = True
 
-    config: VLLMWorkerConfig
+    config: VllmConfig
     _process: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _client: httpx.AsyncClient | None = field(default=None, repr=False)
     _ready: bool = field(default=False, repr=False)
@@ -467,7 +467,7 @@ class VLLMWorker(ServedLLM):
     def http_timeout(self) -> httpx.Timeout:
         """Same rule as llama-server's: the read budget follows the context,
         slower than the runner's own plan so its timeout fires first."""
-        from giq.workers.llm import (
+        from giq.adapters.llama_cpp import (
             HTTP_CONNECT_SECONDS,
             HTTP_READ_FLOOR_SECONDS,
             HTTP_READ_TOKENS_PER_SECOND,
@@ -640,7 +640,7 @@ class VLLMWorker(ServedLLM):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._process is not None and self._process.returncode is not None:
-                raise WorkerStartError(
+                raise StartError(
                     f"vllm exited with {self._process.returncode} while starting "
                     f"{self.config.model}:\n{self._log_tail()}"
                 )
@@ -655,7 +655,7 @@ class VLLMWorker(ServedLLM):
             except (httpx.HTTPError, ValueError):
                 pass
             await asyncio.sleep(poll)
-        raise WorkerStartError(
+        raise StartError(
             f"vllm did not become ready within {timeout:.0f}s for {self.config.model}:\n"
             f"{self._log_tail()}"
         )
@@ -754,7 +754,7 @@ class VLLMWorker(ServedLLM):
     async def chat_completion_stream(self, request_body: dict, stream: JobStream) -> dict:
         """Relay vllm's SSE chunks, normalised to giq's shape, and return the
         assembled answer as a non-streamed response — same contract as
-        LLMWorker, so the job's stored result and token accounting match.
+        LlamaCppAdapter, so the job's stored result and token accounting match.
 
         The loop guard is llama.cpp's: it ends a looping thought through
         llama-server's control endpoint, which vllm has no counterpart for.
@@ -1005,8 +1005,8 @@ WARMUP_TIMEOUT_SECONDS = 3600.0
 async def warm_up(model: str, device: str | None = None) -> float:
     """Start a recipe once, with time for every first-use compile, and stop
     it. Returns the seconds the start took. Nothing is served meanwhile."""
-    worker = VLLMWorker(
-        VLLMWorkerConfig(model=model, device=device, ready_timeout=WARMUP_TIMEOUT_SECONDS)
+    worker = VllmAdapter(
+        VllmConfig(model=model, device=device, ready_timeout=WARMUP_TIMEOUT_SECONDS)
     )
     started = time.monotonic()
     try:

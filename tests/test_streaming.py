@@ -21,11 +21,11 @@ import json
 import httpx
 import pytest
 
+from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
 from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import STREAM_BUFFER_CHUNKS, Job, JobStream
 from giq.registry import get_recipe
 from giq.runner import FLOOR_TOKENS_PER_SECOND, JOB_TIMEOUT_SECONDS, _job_timeout
-from giq.workers.llm import LLMWorker, LLMWorkerConfig
 
 
 def sse(chunks: list[dict], done: bool = True) -> bytes:
@@ -39,15 +39,15 @@ def delta(**kw) -> dict:
     return {"id": "c1", "created": 1, "model": "m", "choices": [{"index": 0, "delta": kw}]}
 
 
-def worker_with(response_bytes: bytes, capture: dict | None = None) -> LLMWorker:
-    """An LLMWorker whose llama-server is a mock transport."""
+def worker_with(response_bytes: bytes, capture: dict | None = None) -> LlamaCppAdapter:
+    """An LlamaCppAdapter whose llama-server is a mock transport."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if capture is not None:
             capture.update(json.loads(request.content))
         return httpx.Response(200, content=response_bytes)
 
-    worker = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b"))
+    worker = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b"))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -167,7 +167,7 @@ async def test_a_server_error_surfaces_rather_than_hiding_as_an_empty_answer():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, content=b"model exploded")
 
-    worker = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b"))
+    worker = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b"))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -205,7 +205,7 @@ def test_no_budget_gets_the_models_whole_context():
     """Omitting max_tokens means "up to the context", so the ceiling has to
     follow the context — otherwise not asking for a budget would give a long
     answer *less* time than asking for one."""
-    from giq.workers.llm import MODEL_CTX_SIZE
+    from giq.adapters.llama_cpp import MODEL_CTX_SIZE
 
     ctx = MODEL_CTX_SIZE["qwen3.8-27b"]
     assert _job_timeout(Modality.llm, _job(None)) == pytest.approx(ctx / FLOOR_TOKENS_PER_SECOND)
@@ -338,12 +338,14 @@ def test_thinking_is_unrestricted_unless_a_model_asks_for_a_deadline():
     """No blanket cap. A launch flag has to serve every request size at once,
     and the same ceiling that rescues a thought going nowhere truncates one
     that was getting somewhere — so it is opt-in per model, not a default."""
-    from giq.workers.llm import MODEL_REASONING_BUDGET
+    from giq.adapters.llama_cpp import MODEL_REASONING_BUDGET
 
     assert MODEL_REASONING_BUDGET == {}
-    assert LLMWorkerConfig(model="qwen3.8-27b").reasoning_budget is None
+    assert LlamaCppConfig(model="qwen3.8-27b").reasoning_budget is None
 
-    cmd = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b", model_path="/tmp/x.gguf")).build_command()
+    cmd = LlamaCppAdapter(
+        LlamaCppConfig(model="qwen3.8-27b", model_path="/tmp/x.gguf")
+    ).build_command()
     assert "--reasoning-budget" not in cmd
 
 
@@ -357,11 +359,13 @@ def test_a_declared_budget_reaches_the_command_line(monkeypatch):
     gave 4,993 chars of thought and an empty answer at finish_reason=length;
     with --reasoning-budget 200 it gave ~920 chars of thought and a real
     1,105-char answer at finish_reason=stop."""
-    from giq.workers import llm
+    from giq.adapters import llama_cpp
 
-    monkeypatch.setitem(llm.MODEL_REASONING_BUDGET, "qwen3.8-27b", 24576)
+    monkeypatch.setitem(llama_cpp.MODEL_REASONING_BUDGET, "qwen3.8-27b", 24576)
 
-    cmd = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b", model_path="/tmp/x.gguf")).build_command()
+    cmd = LlamaCppAdapter(
+        LlamaCppConfig(model="qwen3.8-27b", model_path="/tmp/x.gguf")
+    ).build_command()
 
     assert cmd[cmd.index("--reasoning-budget") + 1] == "24576"
     # A budget means nothing unless reasoning is actually on.
@@ -380,7 +384,7 @@ def test_dry_is_configured_for_the_models_that_looped():
     """DRY rather than repeat_penalty: the latter penalises tokens wherever they
     appear, which taxes every "the" in ordinary prose. DRY penalises only the
     continuation of a run already seen, which is the observed failure exactly."""
-    defaults = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b")).request_defaults()
+    defaults = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b")).request_defaults()
 
     assert defaults["dry_multiplier"] > 0
     assert defaults["dry_allowed_length"] > 2, "2 penalises any repeated pair, which is normal"
@@ -392,7 +396,9 @@ def test_dry_penalty_last_n_is_a_real_number_and_not_minus_one():
     disabled, so -1 silently switches DRY back off. The default of 64 is no
     better here — it is shorter than one of the repeating fragments."""
     for model in ("qwen3.8-27b", "qwen-coder-30b"):
-        last_n = LLMWorker(LLMWorkerConfig(model=model)).request_defaults()["dry_penalty_last_n"]
+        last_n = LlamaCppAdapter(LlamaCppConfig(model=model)).request_defaults()[
+            "dry_penalty_last_n"
+        ]
 
         assert last_n > 64, f"{model}: must outrun the repeating fragment"
         assert last_n > 0, f"{model}: -1 or 0 disables DRY in this build"
@@ -402,7 +408,7 @@ def test_the_reasoning_budget_reaches_the_body():
     """The per-request form of the deadline, and the only one that reaches the
     non-streaming paths — they await a finished response, so no in-flight
     detector can help them. Zero would mean "skip thinking entirely"."""
-    defaults = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b")).request_defaults()
+    defaults = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b")).request_defaults()
 
     assert defaults["reasoning_budget_tokens"] > 0
 
@@ -444,7 +450,7 @@ def guarded_worker(response_bytes: bytes, control_result: dict | None = None):
             return httpx.Response(200, json=control_result or {"success": True})
         return httpx.Response(200, content=response_bytes)
 
-    worker = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b"))
+    worker = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b"))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -480,7 +486,7 @@ async def test_a_looping_thought_is_ended_through_the_control_endpoint():
     assert result["choices"][0]["message"]["content"] == "Here is the answer."
 
 
-async def with_reader(worker: LLMWorker, body: dict) -> dict:
+async def with_reader(worker: LlamaCppAdapter, body: dict) -> dict:
     """Run a stream with something draining it, the way the endpoint does. A
     thought long enough to be worth testing is longer than the 512-chunk buffer,
     and an unread buffer is supposed to park the worker — that is the stall
@@ -537,7 +543,7 @@ async def test_a_control_endpoint_that_errors_is_survivable():
             return httpx.Response(500, content=b"boom")
         return httpx.Response(200, content=looping_reasoning_sse())
 
-    worker = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b"))
+    worker = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b"))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -587,7 +593,7 @@ async def test_the_guard_can_be_switched_off_per_request():
         capture.update(json.loads(request.content))
         return httpx.Response(200, content=looping_reasoning_sse())
 
-    worker = LLMWorker(LLMWorkerConfig(model="qwen3.8-27b"))
+    worker = LlamaCppAdapter(LlamaCppConfig(model="qwen3.8-27b"))
     worker._client = httpx.AsyncClient(
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
@@ -623,7 +629,7 @@ def test_qwen38_runs_the_context_that_was_measured_to_fit():
     full_attention_interval=4, so only 16 hold a KV cache at 34 KiB/token (q8_0)
     and the other 49 cost a fixed ~150 MiB. 256k of q8_0 KV is 8.5 GiB, which
     does not fit beside 20.5 GiB of weights on a 31.8 GiB card."""
-    from giq.workers.llm import MODEL_CTX_SIZE
+    from giq.adapters.llama_cpp import MODEL_CTX_SIZE
 
     assert MODEL_CTX_SIZE["qwen3.8-27b"] == 131072
 
@@ -634,9 +640,9 @@ def test_k_and_v_cache_types_match_or_the_fast_kernel_is_lost():
     path -- q8_0/q4_0 to 235 tok/s, q8_0/iq4_nl to 76. So the usual "keep K
     precise, economise on V" is not available on this model at any context, and
     a mixed pair here would be a 12x prefill regression, not a saving."""
-    from giq.workers.llm import DEFAULT_CACHE_TYPE_K as DK
-    from giq.workers.llm import DEFAULT_CACHE_TYPE_V as DV
-    from giq.workers.llm import MODEL_CACHE_TYPE_K, MODEL_CACHE_TYPE_V
+    from giq.adapters.llama_cpp import DEFAULT_CACHE_TYPE_K as DK
+    from giq.adapters.llama_cpp import DEFAULT_CACHE_TYPE_V as DV
+    from giq.adapters.llama_cpp import MODEL_CACHE_TYPE_K, MODEL_CACHE_TYPE_V
 
     for model in set(MODEL_CACHE_TYPE_K) | set(MODEL_CACHE_TYPE_V):
         k = MODEL_CACHE_TYPE_K.get(model, DK)
@@ -651,8 +657,8 @@ def test_the_http_read_budget_follows_the_context():
     first chunk only exists once the prompt is processed, and prefill measured
     ~1400 tok/s at 32k and falls from there. A full-context prompt needs minutes
     before its first token."""
-    big = LLMWorker(LLMWorkerConfig(model="qwen3.6-27b")).http_timeout()
-    small = LLMWorker(LLMWorkerConfig(model="llama-3.2-3b", ctx_size=8192)).http_timeout()
+    big = LlamaCppAdapter(LlamaCppConfig(model="qwen3.6-27b")).http_timeout()
+    small = LlamaCppAdapter(LlamaCppConfig(model="llama-3.2-3b", ctx_size=8192)).http_timeout()
 
     assert big.read > 120.0
     assert big.read > small.read, "a bigger context must get a longer budget"
@@ -669,7 +675,7 @@ def test_the_job_timeout_still_fires_before_the_http_one():
     model = "qwen3.6-27b"
     job = Job(job_id="j", request=JobRequest(modality="llm", model=model, chat_request={}))
     job_limit = _job_timeout(Modality.llm, job)
-    http_limit = LLMWorker(LLMWorkerConfig(model=model)).http_timeout().read
+    http_limit = LlamaCppAdapter(LlamaCppConfig(model=model)).http_timeout().read
 
     assert job_limit < http_limit, "the runner must give up first, with cleanup"
 
@@ -678,7 +684,7 @@ def test_the_job_timeout_still_fires_before_the_http_one():
 #
 # A vision model with an MTP head can be served as two registry entries over
 # one GGUF: the vision entry keeps mmproj, the `-fast` entry drops it and runs
-# --spec-type draft-mtp (see MODEL_SPEC_TYPE in workers/llm.py for the
+# --spec-type draft-mtp (see MODEL_SPEC_TYPE in adapters/llama_cpp.py for the
 # measurement behind it). No built-in entry uses the pattern, so these tests
 # exercise it through a pair injected into the registry and llm tables, and the
 # invariants also run over the real tables so a pair added later is held to
@@ -688,7 +694,7 @@ def test_the_job_timeout_still_fires_before_the_http_one():
 @pytest.fixture
 def mtp_pair(monkeypatch):
     """A vision profile and its text-only speculative sibling, one GGUF."""
-    from giq.workers import llm
+    from giq.adapters import llama_cpp
     from tests._recipes import with_recipes
 
     base = get_recipe("qwen3.8-27b")
@@ -707,17 +713,17 @@ def mtp_pair(monkeypatch):
         ),
     )
     for name in (vision, fast):
-        monkeypatch.setitem(llm.MODEL_PATHS, name, "pair/model-Q6_K.gguf")
-        monkeypatch.setitem(llm.MODEL_CTX_SIZE, name, 196608)
-        monkeypatch.setitem(llm.MODEL_CACHE_TYPE_K, name, "q8_0")
-        monkeypatch.setitem(llm.MODEL_CACHE_TYPE_V, name, "q8_0")
-    monkeypatch.setitem(llm.MODEL_SPEC_TYPE, fast, "draft-mtp")
+        monkeypatch.setitem(llama_cpp.MODEL_PATHS, name, "pair/model-Q6_K.gguf")
+        monkeypatch.setitem(llama_cpp.MODEL_CTX_SIZE, name, 196608)
+        monkeypatch.setitem(llama_cpp.MODEL_CACHE_TYPE_K, name, "q8_0")
+        monkeypatch.setitem(llama_cpp.MODEL_CACHE_TYPE_V, name, "q8_0")
+    monkeypatch.setitem(llama_cpp.MODEL_SPEC_TYPE, fast, "draft-mtp")
     return vision, fast
 
 
 def _profile_pairs() -> list[tuple[str, str]]:
     """(vision, fast): a speculative entry and a plain one over the same GGUF."""
-    from giq.workers.llm import MODEL_PATHS, MODEL_SPEC_TYPE
+    from giq.adapters.llama_cpp import MODEL_PATHS, MODEL_SPEC_TYPE
 
     return [
         (other, fast)
@@ -729,12 +735,12 @@ def _profile_pairs() -> list[tuple[str, str]]:
 
 def _profile_drift(vision: str, fast: str) -> list[str]:
     """What differs between two profiles besides vision and speculation."""
-    from giq.workers import llm
+    from giq.adapters import llama_cpp
 
     tables = {
-        "ctx": (llm.MODEL_CTX_SIZE, llm.DEFAULT_CTX_SIZE),
-        "cache_k": (llm.MODEL_CACHE_TYPE_K, llm.DEFAULT_CACHE_TYPE_K),
-        "cache_v": (llm.MODEL_CACHE_TYPE_V, llm.DEFAULT_CACHE_TYPE_V),
+        "ctx": (llama_cpp.MODEL_CTX_SIZE, llama_cpp.DEFAULT_CTX_SIZE),
+        "cache_k": (llama_cpp.MODEL_CACHE_TYPE_K, llama_cpp.DEFAULT_CACHE_TYPE_K),
+        "cache_v": (llama_cpp.MODEL_CACHE_TYPE_V, llama_cpp.DEFAULT_CACHE_TYPE_V),
     }
     return [
         name
@@ -758,10 +764,10 @@ def test_the_pair_is_recognised_and_consistent(mtp_pair):
 
 
 def test_a_profile_that_drifts_is_caught(mtp_pair, monkeypatch):
-    from giq.workers import llm
+    from giq.adapters import llama_cpp
 
     vision, fast = mtp_pair
-    monkeypatch.setitem(llm.MODEL_CTX_SIZE, fast, 131072)
+    monkeypatch.setitem(llama_cpp.MODEL_CTX_SIZE, fast, 131072)
 
     assert _profile_drift(vision, fast) == ["ctx"]
 
@@ -770,8 +776,8 @@ def test_the_speculative_flag_reaches_the_command_line(mtp_pair):
     """It only exists if it is in the argv -- and it changes what the model
     does per token, not just how fast, so it is asserted like --reasoning is."""
     vision_name, fast_name = mtp_pair
-    fast = LLMWorker(LLMWorkerConfig(model=fast_name)).build_command()
-    vision = LLMWorker(LLMWorkerConfig(model=vision_name)).build_command()
+    fast = LlamaCppAdapter(LlamaCppConfig(model=fast_name)).build_command()
+    vision = LlamaCppAdapter(LlamaCppConfig(model=vision_name)).build_command()
 
     assert fast[fast.index("--spec-type") + 1] == "draft-mtp"
     assert "--spec-type" not in vision
@@ -806,7 +812,7 @@ SPEC_TYPE_WITH_VISION_ALLOWED: set[str] = set()
 
 def _unexempted_vision_speedup(allowed: set[str]) -> list[str]:
     """Models that pair mmproj with --spec-type without being allowlisted."""
-    from giq.workers.llm import MODEL_SPEC_TYPE
+    from giq.adapters.llama_cpp import MODEL_SPEC_TYPE
 
     offenders = []
     for model in MODEL_SPEC_TYPE:
@@ -825,10 +831,10 @@ def test_vision_and_the_speedup_are_not_paired_by_accident():
 
 
 def test_an_unlisted_vision_profile_with_the_speedup_is_caught(mtp_pair, monkeypatch):
-    from giq.workers import llm
+    from giq.adapters import llama_cpp
 
     vision, _ = mtp_pair
-    monkeypatch.setitem(llm.MODEL_SPEC_TYPE, vision, "draft-mtp")
+    monkeypatch.setitem(llama_cpp.MODEL_SPEC_TYPE, vision, "draft-mtp")
 
     assert _unexempted_vision_speedup(set()) == [vision]
     assert _unexempted_vision_speedup({vision}) == []
@@ -837,7 +843,7 @@ def test_an_unlisted_vision_profile_with_the_speedup_is_caught(mtp_pair, monkeyp
 def test_the_vision_speedup_exception_list_is_honest():
     """Every name on the allowlist must actually pair them. A stale entry would
     silently re-open the hole the test above exists to close."""
-    from giq.workers.llm import MODEL_SPEC_TYPE
+    from giq.adapters.llama_cpp import MODEL_SPEC_TYPE
 
     for model in SPEC_TYPE_WITH_VISION_ALLOWED:
         assert model in MODEL_SPEC_TYPE, f"{model} is exempted but runs no --spec-type"

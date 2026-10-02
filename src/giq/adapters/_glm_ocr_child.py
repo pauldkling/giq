@@ -32,7 +32,7 @@ Output is the same tagged text the Unlimited-OCR child emits —
 introduced by ``<PAGE>`` — so ``giq.ocrdoc`` strips, merges and renders
 either model's output identically. Labels are mapped onto that vocabulary.
 
-Wire protocol: see giq.workers._subprocess. Task and result shapes match
+Wire protocol: see giq.adapters._subprocess. Task and result shapes match
 ``_ocr_child`` (``tokens_in``/``tokens_out`` are summed over regions).
 """
 
@@ -45,7 +45,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-from giq.workers._subprocess import (  # noqa: E402
+from giq.adapters._subprocess import (  # noqa: E402
     reserve_ipc_stdout,
     run_ipc_child_loop,
     write_startup_error,

@@ -43,7 +43,7 @@ def _add(directory, filename: str, text: str) -> None:
 
 
 def test_an_ocr_instance_under_a_new_name_loads_its_own_weights(operator_dir, monkeypatch):
-    from giq.workers.ocr import OCRWorker, OCRWorkerConfig
+    from giq.adapters.ocr import OcrAdapter, OcrConfig
 
     # The built-in's override is scoped to the built-in's name.
     monkeypatch.setenv("GIQ_OCR_MODEL_DIR", "/elsewhere/unlimited")
@@ -53,14 +53,14 @@ def test_an_ocr_instance_under_a_new_name_loads_its_own_weights(operator_dir, mo
         "name: unlimited-ocr-ft\nmodalities: [ocr]\nengine: transformers-4.57\n"
         "weights: {path: /srv/models/unlimited-ft}\nvram: {gb: 9.0}\n",
     )
-    w = OCRWorker(OCRWorkerConfig(model="unlimited-ocr-ft"))
-    assert w.child_module == "giq.workers._ocr_child"
+    w = OcrAdapter(OcrConfig(model="unlimited-ocr-ft"))
+    assert w.child_module == "giq.adapters._ocr_child"
     assert w.child_args() == ["--weights", "/srv/models/unlimited-ft"]
-    assert OCRWorker(OCRWorkerConfig()).child_args() == ["--weights", "/elsewhere/unlimited"]
+    assert OcrAdapter(OcrConfig()).child_args() == ["--weights", "/elsewhere/unlimited"]
 
 
 def test_a_layout_ocr_instance_reads_its_layout_part(operator_dir):
-    from giq.workers.ocr import OCRWorker, OCRWorkerConfig
+    from giq.adapters.ocr import OcrAdapter, OcrConfig
 
     _add(
         operator_dir,
@@ -68,8 +68,8 @@ def test_a_layout_ocr_instance_reads_its_layout_part(operator_dir):
         "name: glm-ocr-ft\nmodalities: [ocr]\nengine: transformers\n"
         "weights:\n  path: glm-ft\n  parts: {layout: layout-v4}\nvram: {gb: 4.0}\n",
     )
-    w = OCRWorker(OCRWorkerConfig(model="glm-ocr-ft"))
-    assert w.child_module == "giq.workers._glm_ocr_child"
+    w = OcrAdapter(OcrConfig(model="glm-ocr-ft"))
+    assert w.child_module == "giq.adapters._glm_ocr_child"
     assert w.child_args() == [
         "--weights",
         str(models_dir() / "glm-ft"),
@@ -79,7 +79,7 @@ def test_a_layout_ocr_instance_reads_its_layout_part(operator_dir):
 
 
 def test_a_layout_ocr_instance_without_its_layout_fails_at_construction(operator_dir):
-    from giq.workers.ocr import OCRWorker, OCRWorkerConfig
+    from giq.adapters.ocr import OcrAdapter, OcrConfig
 
     _add(
         operator_dir,
@@ -88,11 +88,11 @@ def test_a_layout_ocr_instance_without_its_layout_fails_at_construction(operator
         "weights: {path: glm-ft}\nvram: {gb: 4.0}\n",
     )
     with pytest.raises(ValueError, match="weights.parts.layout"):
-        OCRWorker(OCRWorkerConfig(model="glm-ocr-ft"))
+        OcrAdapter(OcrConfig(model="glm-ocr-ft"))
 
 
 def test_a_multiview_instance_under_a_new_name_loads_its_own_weights(operator_dir):
-    from giq.workers.multiview import MultiviewWorker, MultiviewWorkerConfig
+    from giq.adapters.multiview import MultiviewAdapter, MultiviewConfig
 
     _add(
         operator_dir,
@@ -100,7 +100,7 @@ def test_a_multiview_instance_under_a_new_name_loads_its_own_weights(operator_di
         "name: da3-ft\nmodalities: [multiview]\nengine: da3\n"
         "weights: {path: ~/ckpt/da3-ft}\nvram: {gb: 7.0}\n",
     )
-    w = MultiviewWorker(MultiviewWorkerConfig(model="da3-ft"))
+    w = MultiviewAdapter(MultiviewConfig(model="da3-ft"))
     assert w.child_args()[-2:] == [
         "--weights",
         str(weights.resolve_path("multiview", "~/ckpt/da3-ft")),
@@ -109,7 +109,7 @@ def test_a_multiview_instance_under_a_new_name_loads_its_own_weights(operator_di
 
 
 def test_an_instance_without_weights_fails_at_construction(operator_dir):
-    from giq.workers.depth import DepthWorker, DepthWorkerConfig
+    from giq.adapters.depth import DepthAdapter, DepthConfig
 
     _add(
         operator_dir,
@@ -117,13 +117,13 @@ def test_an_instance_without_weights_fails_at_construction(operator_dir):
         "name: depth-nowhere\nmodalities: [depth]\nengine: transformers\nvram: {gb: 1.0}\n",
     )
     with pytest.raises(ValueError, match="no weights.path"):
-        DepthWorker(DepthWorkerConfig(model="depth-nowhere"))
+        DepthAdapter(DepthConfig(model="depth-nowhere"))
 
 
 def test_speech_models_load_the_repository_their_instance_names(operator_dir, monkeypatch):
-    from giq.workers.audio import AudioWorker, AudioWorkerConfig, EmbedWorker, EmbedWorkerConfig
-    from giq.workers.stt import model_ref
-    from giq.workers.tts import TTSWorker, TTSWorkerConfig
+    from giq.adapters.audio import AudioAdapter, AudioConfig, EmbedAdapter, EmbedConfig
+    from giq.adapters.stt import model_ref
+    from giq.adapters.tts import TtsAdapter, TtsConfig
 
     assert model_ref("large-v3") == "Systran/faster-whisper-large-v3"
     _add(
@@ -138,15 +138,15 @@ def test_speech_models_load_the_repository_their_instance_names(operator_dir, mo
 
     monkeypatch.delenv("GIQ_AUDIO_WHISPER_MODEL", raising=False)
     monkeypatch.setenv("GIQ_AUDIO_DIAR_MODEL", "org/other-diarization")
-    env = AudioWorker(AudioWorkerConfig())._spawn_env()
+    env = AudioAdapter(AudioConfig())._spawn_env()
     assert env["GIQ_AUDIO_WHISPER_MODEL"] == "Systran/faster-whisper-large-v3"
     assert env["GIQ_AUDIO_DIAR_MODEL"] == "org/other-diarization"  # the environment wins
     monkeypatch.delenv("GIQ_EMBED_MODEL", raising=False)
     assert (
-        EmbedWorker(EmbedWorkerConfig())._spawn_env()["GIQ_EMBED_MODEL"]
+        EmbedAdapter(EmbedConfig())._spawn_env()["GIQ_EMBED_MODEL"]
         == "speechbrain/spkrec-ecapa-voxceleb"
     )
-    assert TTSWorker(TTSWorkerConfig()).child_args()[-2:] == ["--repo", "hexgrad/Kokoro-82M"]
+    assert TtsAdapter(TtsConfig()).child_args()[-2:] == ["--repo", "hexgrad/Kokoro-82M"]
 
 
 def test_the_storage_catalog_finds_repositories_in_the_hf_cache(tmp_path, monkeypatch):
@@ -166,10 +166,10 @@ def test_the_storage_catalog_finds_repositories_in_the_hf_cache(tmp_path, monkey
 
 
 def test_image_models_take_their_files_from_the_instance():
+    from giq.adapters.sdcpp import SdCppConfig
     from giq.weights import image_files
-    from giq.workers.sdcpp import SdCppWorkerConfig
 
-    cfg = SdCppWorkerConfig(model="flux_klein", device="GPU-x", port=1)
+    cfg = SdCppConfig(model="flux_klein", device="GPU-x", port=1)
     assert cfg.diffusion == str(models_dir() / "diffusion_models/flux-2-klein-4b.safetensors")
     assert cfg.vae == str(models_dir() / "vae/flux2-vae.safetensors")
     files = image_files("zimage")
@@ -193,7 +193,7 @@ def test_config_image_models_are_no_longer_read(tmp_path, caplog):
 
 
 def test_an_image_instance_without_its_files_fails_at_construction(operator_dir):
-    from giq.workers.sdcpp import SdCppWorkerConfig
+    from giq.adapters.sdcpp import SdCppConfig
 
     _add(
         operator_dir,
@@ -202,7 +202,7 @@ def test_an_image_instance_without_its_files_fails_at_construction(operator_dir)
         "weights: {parts: {diffusion: d.gguf}}\nvram: {gb: 8.0}\n",
     )
     with pytest.raises(ValueError, match="weights.parts.text_encoder, weights.parts.vae"):
-        SdCppWorkerConfig(model="sketchy", device="GPU-x", port=1)
+        SdCppConfig(model="sketchy", device="GPU-x", port=1)
 
 
 # --- resolution ---------------------------------------------------------------

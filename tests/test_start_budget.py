@@ -17,20 +17,20 @@ import httpx
 import pytest
 
 from giq import runner
+from giq.adapters import llama_cpp
+from giq.adapters.engine import StartError
+from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
 from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import Job
-from giq.workers import llm
-from giq.workers.engine import WorkerStartError
-from giq.workers.llm import LLMWorker, LLMWorkerConfig
 
 
-def _llama(tmp_path, **over) -> LLMWorker:
+def _llama(tmp_path, **over) -> LlamaCppAdapter:
     log = tmp_path / "llama.log"
     log.write_text("load_model: failed to open GGUF\n")
-    config = LLMWorkerConfig(
+    config = LlamaCppConfig(
         model="gemma-4-12b", model_path=str(tmp_path / "m.gguf"), log_path=str(log), **over
     )
-    return LLMWorker(config=config)
+    return LlamaCppAdapter(config=config)
 
 
 def _answering(status: int) -> httpx.AsyncClient:
@@ -46,7 +46,7 @@ async def test_llama_start_that_dies_fails_at_once_with_its_log(tmp_path):
     worker._client = _answering(503)
     loop = asyncio.get_running_loop()
     started = loop.time()
-    with pytest.raises(WorkerStartError, match="exited with 1") as exc:
+    with pytest.raises(StartError, match="exited with 1") as exc:
         await worker._wait_for_ready(timeout=60, poll=0.01)
     assert loop.time() - started < 1, "a dead server must not be waited out"
     assert "failed to open GGUF" in str(exc.value)
@@ -57,7 +57,7 @@ async def test_llama_start_past_its_budget_is_a_start_error_not_a_timeout(tmp_pa
     worker = _llama(tmp_path)
     worker._process = SimpleNamespace(returncode=None)  # type: ignore[assignment]
     worker._client = _answering(503)
-    with pytest.raises(WorkerStartError, match="did not become ready") as exc:
+    with pytest.raises(StartError, match="did not become ready") as exc:
         await worker._wait_for_ready(timeout=0.05, poll=0.01)
     # The runner reads TimeoutError as "the job ran too long".
     assert not isinstance(exc.value, TimeoutError)
@@ -74,14 +74,14 @@ async def test_llama_ready_once_health_answers(tmp_path):
 def test_llama_ready_timeout_is_the_engine_default_unless_the_instance_sets_one(
     tmp_path, monkeypatch
 ):
-    assert _llama(tmp_path).config.ready_timeout == llm.DEFAULT_READY_TIMEOUT
-    monkeypatch.setitem(llm.MODEL_READY_TIMEOUT, "gemma-4-12b", 900.0)
+    assert _llama(tmp_path).config.ready_timeout == llama_cpp.DEFAULT_READY_TIMEOUT
+    monkeypatch.setitem(llama_cpp.MODEL_READY_TIMEOUT, "gemma-4-12b", 900.0)
     assert _llama(tmp_path).config.ready_timeout == 900.0
     assert runner.start_budget("gemma-4-12b") == 900.0
 
 
 def test_vllm_start_budget_is_the_instance_ready_timeout():
-    from giq.workers.vllm import recipe_for
+    from giq.adapters.vllm import recipe_for
 
     recipe = recipe_for("qwen3.8-27b-nvfp4")
     assert recipe is not None

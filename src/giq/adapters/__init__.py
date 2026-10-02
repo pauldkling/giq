@@ -4,11 +4,11 @@
 
 """giq workers package."""
 
-from giq.workers.llm import LLMWorker, LLMWorkerConfig
+from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
 
 __all__ = [
-    "LLMWorker",
-    "LLMWorkerConfig",
+    "LlamaCppAdapter",
+    "LlamaCppConfig",
     # Other workers imported lazily to avoid loading heavy deps unless needed:
     # - tts (kokoro)
     # - stt (faster-whisper)

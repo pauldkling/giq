@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""OCRWorker: child results become documents in the parent.
+"""OcrAdapter: child results become documents in the parent.
 
 The child is replaced by an inline script that answers every task with a
 canned tagged text, so this exercises hydration, the per-task flags and the
@@ -14,8 +14,8 @@ import sys
 
 import pytest
 
+from giq.adapters.ocr import OcrAdapter, OcrConfig, hydrate
 from giq.models import OCRResult
-from giq.workers.ocr import OCRWorker, OCRWorkerConfig, hydrate
 
 RAW = (
     "<PAGE>\n<|det|>header [100, 36, 400, 70]<|/det|>Example AG\n"
@@ -45,7 +45,7 @@ for line in sys.stdin:
 """
 
 
-class _StubOCRWorker(OCRWorker):
+class _StubOCRWorker(OcrAdapter):
     def _command(self) -> list[str]:
         return [sys.executable, "-u", "-c", CHILD_SCRIPT]
 
@@ -57,7 +57,7 @@ class _StubOCRWorker(OCRWorker):
 
 @pytest.mark.asyncio
 async def test_run_batch_returns_documents_not_pages():
-    worker = _StubOCRWorker(OCRWorkerConfig())
+    worker = _StubOCRWorker(OcrConfig())
     await worker.start()
     try:
         results = await worker.run_batch(
@@ -93,20 +93,18 @@ def test_hydrate_counts_pages_when_the_child_did_not():
 
 
 def test_estimated_vram_comes_from_the_registry():
-    assert OCRWorker(OCRWorkerConfig()).estimated_vram_gb == 9.0
+    assert OcrAdapter(OcrConfig()).estimated_vram_gb == 9.0
 
 
 def test_the_engine_picks_the_child():
-    assert (
-        OCRWorker(OCRWorkerConfig(model="unlimited-ocr")).child_module == "giq.workers._ocr_child"
-    )
-    assert OCRWorker(OCRWorkerConfig(model="glm-ocr")).child_module == "giq.workers._glm_ocr_child"
+    assert OcrAdapter(OcrConfig(model="unlimited-ocr")).child_module == "giq.adapters._ocr_child"
+    assert OcrAdapter(OcrConfig(model="glm-ocr")).child_module == "giq.adapters._glm_ocr_child"
     with pytest.raises(ValueError):
-        OCRWorker(OCRWorkerConfig(model="no-such-ocr"))
+        OcrAdapter(OcrConfig(model="no-such-ocr"))
 
 
 def test_glm_vram_comes_from_the_registry():
-    assert OCRWorker(OCRWorkerConfig(model="glm-ocr")).estimated_vram_gb == 4.0
+    assert OcrAdapter(OcrConfig(model="glm-ocr")).estimated_vram_gb == 4.0
 
 
 def test_unlimited_ocr_runs_on_its_own_interpreter(monkeypatch):
@@ -117,17 +115,17 @@ def test_unlimited_ocr_runs_on_its_own_interpreter(monkeypatch):
 
     from giq.engines import binary_for
 
-    w = OCRWorker(OCRWorkerConfig(model="unlimited-ocr"))
+    w = OcrAdapter(OcrConfig(model="unlimited-ocr"))
     monkeypatch.setattr("giq.engines.require_binary", lambda name: binary_for(name))
     cmd = w._command()
     assert cmd[0] == binary_for("transformers-4.57") and cmd[0] != sys.executable
-    assert cmd[1:4] == ["-u", "-m", "giq.workers._ocr_child"]
+    assert cmd[1:4] == ["-u", "-m", "giq.adapters._ocr_child"]
     env = w._spawn_env()
     assert env["PYTHONPATH"].split(os.pathsep)[0].endswith("/src")
 
     assert cmd[4] == "--weights" and cmd[5].endswith("/baidu-Unlimited-OCR")
 
-    g = OCRWorker(OCRWorkerConfig(model="glm-ocr"))
+    g = OcrAdapter(OcrConfig(model="glm-ocr"))
     assert g._command()[0] == sys.executable
     args = g._command()[4:]
     assert args[0] == "--weights" and args[1].endswith("/zai-GLM-OCR")

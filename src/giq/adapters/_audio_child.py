@@ -27,7 +27,7 @@ which mattered on torch 2.10+cu128 where no published build was ABI-
 compatible. On the cu130 line it works again — but decoding once is still
 better than twice, so this does not go back.)
 
-Wire protocol: see giq.workers._subprocess. Transcribe task shape:
+Wire protocol: see giq.adapters._subprocess. Transcribe task shape:
   {"id": str, "audio_b64": str, "language": str|null,
    "task": "transcribe", "diarize": bool}
 Result shape (unchanged — this is a served contract):
@@ -39,7 +39,7 @@ import os
 import sys
 from pathlib import Path
 
-from giq.workers._subprocess import (
+from giq.adapters._subprocess import (
     reserve_ipc_stdout,
     run_ipc_child_loop,
     write_startup_error,

@@ -464,7 +464,7 @@ def _advertised_llm_recipes() -> list[Recipe]:
 
     Chat clients get chat models: `/capabilities` enumerates every modality.
     """
-    from giq.workers.llm import weights_installed
+    from giq.adapters.llama_cpp import weights_installed
 
     residents = resident_defaults()
     offered = [r for r in recipes_serving("llm") if weights_installed(r.name)]

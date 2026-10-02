@@ -4,22 +4,22 @@
 
 """Child process for the Kokoro TTS worker.
 
-Invoked by ``TTSWorker`` (parent) via
-``python -u -m giq.workers._tts_child --lang-code a``.
+Invoked by ``TtsAdapter`` (parent) via
+``python -u -m giq.adapters._tts_child --lang-code a``.
 
 Kokoro was the last CUDA worker still running inside giq's own process. That
 meant its context was never destroyed: the runner would log "Kokoro TTS
 stopped", ``active_worker`` would go None, and ~968 MiB stayed held until giq
 restarted. On a 16GB card with the resident set loaded, that was the
 difference between the next render working and OOMing. See
-``giq.workers._subprocess`` for the mechanism and the rest of the rationale.
+``giq.adapters._subprocess`` for the mechanism and the rest of the rationale.
 """
 
 from __future__ import annotations
 
 # FIRST: reserve stdout for JSON IPC — kokoro/torch print during import and
 # would otherwise corrupt the channel before the parent sees {"type":"ready"}.
-from giq.workers._subprocess import reserve_ipc_stdout
+from giq.adapters._subprocess import reserve_ipc_stdout
 
 reserve_ipc_stdout()
 
@@ -31,9 +31,9 @@ import sys  # noqa: E402
 import traceback  # noqa: E402
 from typing import Any  # noqa: E402
 
+from giq.adapters._subprocess import run_ipc_child_loop, write_startup_error  # noqa: E402
+from giq.adapters.tts import KOKORO_SAMPLE_RATE, KOKORO_VOICES, VOICE_MAP  # noqa: E402
 from giq.models import JobResult  # noqa: E402
-from giq.workers._subprocess import run_ipc_child_loop, write_startup_error  # noqa: E402
-from giq.workers.tts import KOKORO_SAMPLE_RATE, KOKORO_VOICES, VOICE_MAP  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

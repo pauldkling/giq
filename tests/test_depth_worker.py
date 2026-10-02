@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""DepthWorker: child results become DepthResults in the parent.
+"""DepthAdapter: child results become DepthResults in the parent.
 
 The child is replaced by an inline script that answers every task with a
 canned map, so this exercises hydration and the error envelope without a
@@ -17,8 +17,8 @@ import sys
 import numpy as np
 import pytest
 
+from giq.adapters.depth import DepthAdapter, DepthConfig, hydrate
 from giq.models import DepthResult
-from giq.workers.depth import DepthWorker, DepthWorkerConfig, hydrate
 
 # Answers each task with a 2x2 map, or an error when the task id says so.
 CHILD_SCRIPT = """
@@ -43,7 +43,7 @@ for line in sys.stdin:
 """
 
 
-class _StubDepthWorker(DepthWorker):
+class _StubDepthWorker(DepthAdapter):
     def _command(self) -> list[str]:
         return [sys.executable, "-u", "-c", CHILD_SCRIPT]
 
@@ -53,7 +53,7 @@ class _StubDepthWorker(DepthWorker):
 
 @pytest.mark.asyncio
 async def test_run_batch_returns_depth_results():
-    worker = _StubDepthWorker(DepthWorkerConfig())
+    worker = _StubDepthWorker(DepthConfig())
     await worker.start()
     try:
         results = await worker.run_batch(
@@ -102,30 +102,30 @@ def second_model(tmp_path, monkeypatch):
 
 
 def test_estimated_vram_comes_from_the_registry(second_model):
-    assert DepthWorker(DepthWorkerConfig()).estimated_vram_gb == 1.5
-    assert DepthWorker(DepthWorkerConfig(model=second_model)).estimated_vram_gb == 4.0
+    assert DepthAdapter(DepthConfig()).estimated_vram_gb == 1.5
+    assert DepthAdapter(DepthConfig(model=second_model)).estimated_vram_gb == 4.0
 
 
 def test_unknown_model_fails_at_construction():
     with pytest.raises(ValueError):
-        DepthWorker(DepthWorkerConfig(model="midas"))
+        DepthAdapter(DepthConfig(model="midas"))
 
 
 def test_the_child_gets_the_instance_weights_under_an_overridable_root(monkeypatch, second_model):
     from giq.paths import models_dir
 
-    w = DepthWorker(DepthWorkerConfig(model=second_model))
+    w = DepthAdapter(DepthConfig(model=second_model))
     assert w._command()[1:] == [
         "-u",
         "-m",
-        "giq.workers._depth_child",
+        "giq.adapters._depth_child",
         "--model",
         second_model,
         "--weights",
         str(models_dir() / "depth-test-large-hf"),
     ]
     monkeypatch.setenv("GIQ_DEPTH_MODELS_DIR", "/elsewhere")
-    w = DepthWorker(DepthWorkerConfig())
+    w = DepthAdapter(DepthConfig())
     assert w.weights == "/elsewhere/depth-anything-Depth-Anything-V2-Small-hf"
 
 
@@ -133,7 +133,7 @@ def test_the_child_gets_the_instance_weights_under_an_overridable_root(monkeypat
 
 
 def test_sixteen_bit_mapping_spans_the_prediction_and_survives_a_flat_map():
-    from giq.workers._depth_child import _to_16bit
+    from giq.adapters._depth_child import _to_16bit
 
     depth = np.array([[0.5, 9.0], [4.75, 0.5]], dtype=np.float32)
     map16, lo, hi = _to_16bit(depth)
@@ -144,7 +144,7 @@ def test_sixteen_bit_mapping_spans_the_prediction_and_survives_a_flat_map():
 
 
 def test_visualization_paints_near_red_and_far_blue():
-    from giq.workers._depth_child import visualize
+    from giq.adapters._depth_child import visualize
 
     depth = np.array([[0.0, 1.0]], dtype=np.float32)  # inverse depth: 1.0 is near
     rgb = visualize(depth)

@@ -8,8 +8,8 @@ The pipeline loads in a child process so its CUDA context is released on stop.
 Kokoro was the last CUDA worker still running in giq's own process, which meant
 it never gave its VRAM back: the runner logged "Kokoro TTS stopped" and
 ``active_worker`` went None while ~968 MiB stayed held until giq restarted.
-See ``giq.workers._subprocess`` for the mechanism; child entry point is
-``giq.workers._tts_child``.
+See ``giq.adapters._subprocess`` for the mechanism; child entry point is
+``giq.adapters._tts_child``.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from giq.adapters._subprocess import SubprocessAdapter
 from giq.models import JobResult
 from giq.registry import vram_for
 from giq.weights import hub_repo, recipe_of
-from giq.workers._subprocess import SubprocessWorker
 
 logger = logging.getLogger(__name__)
 
@@ -55,20 +55,20 @@ KOKORO_SAMPLE_RATE = 24000
 
 
 @dataclass
-class TTSWorkerConfig:
+class TtsConfig:
     """Configuration for TTS worker."""
 
     model: str = "kokoro"
     lang_code: str = "a"  # American English
 
 
-class TTSWorker(SubprocessWorker):
+class TtsAdapter(SubprocessAdapter):
     """TTS worker — Kokoro runs in a child process for CUDA isolation."""
 
-    child_module: ClassVar[str] = "giq.workers._tts_child"
+    child_module: ClassVar[str] = "giq.adapters._tts_child"
     modality: ClassVar[str] = "tts"
 
-    def __init__(self, config: TTSWorkerConfig, device: str | None = None):
+    def __init__(self, config: TtsConfig, device: str | None = None):
         super().__init__(config, device)
 
     def child_args(self) -> list[str]:

@@ -133,7 +133,7 @@ def _prepare(argv: list[str]) -> int:
         "capped scope, as the installer does",
     )
     args = parser.parse_args(argv)
-    from giq.workers.vllm import DEFAULT_MEMORY_MAX, VLLMConfigError, prepare, warm_up
+    from giq.adapters.vllm import DEFAULT_MEMORY_MAX, VLLMConfigError, prepare, warm_up
 
     try:
         memory_max = args.memory_max or DEFAULT_MEMORY_MAX

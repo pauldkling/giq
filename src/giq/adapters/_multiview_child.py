@@ -4,8 +4,8 @@
 
 """Multiview child process: Depth Anything 3 on the ``da3`` interpreter.
 
-Invoked by ``MultiviewWorker`` via ``<envs/da3 python> -u -m
-giq.workers._multiview_child --model da3-base --weights <dir>`` with this
+Invoked by ``MultiviewAdapter`` via ``<envs/da3 python> -u -m
+giq.adapters._multiview_child --model da3-base --weights <dir>`` with this
 checkout's ``src`` on ``PYTHONPATH``. Loads the local snapshot the recipe
 names, with the hub disabled before anything from the hub ecosystem is
 imported, so nothing is fetched.
@@ -20,7 +20,7 @@ Optionally the model's own GLB export (fused, confidence-filtered point
 cloud with camera wireframes) is built in a RAM-backed directory and
 returned as bytes; nothing is written to disk.
 
-Wire protocol: see giq.workers._subprocess.
+Wire protocol: see giq.adapters._subprocess.
 """
 
 import os
@@ -30,7 +30,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
-from giq.workers._subprocess import (  # noqa: E402
+from giq.adapters._subprocess import (  # noqa: E402
     reserve_ipc_stdout,
     run_ipc_child_loop,
     write_startup_error,

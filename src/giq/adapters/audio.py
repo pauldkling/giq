@@ -17,8 +17,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from giq.adapters._subprocess import SubprocessAdapter
 from giq.weights import load_ref, recipe_of
-from giq.workers._subprocess import SubprocessWorker
 
 
 def _refs(env: dict[str, str], worker: str, model: str, wanted: dict[str, str | None]) -> None:
@@ -40,20 +40,20 @@ EMBED_VRAM_GB = 0.6
 
 
 @dataclass
-class AudioWorkerConfig:
+class AudioConfig:
     model: str = "whisper-large-v3"
 
 
-class AudioWorker(SubprocessWorker):
+class AudioAdapter(SubprocessAdapter):
     """Transcription + diarization (faster-whisper + pyannote)."""
 
-    child_module: ClassVar[str] = "giq.workers._audio_child"
+    child_module: ClassVar[str] = "giq.adapters._audio_child"
     modality: ClassVar[str] = "audio"
     # Diarizing an hours-long recording takes minutes; allow close to a 900s
     # client batch budget rather than the 600s subprocess default.
     run_batch_timeout: ClassVar[float] = 860.0
 
-    def __init__(self, config: AudioWorkerConfig, device: str | None = None):
+    def __init__(self, config: AudioConfig, device: str | None = None):
         super().__init__(config, device)
 
     def _spawn_env(self) -> dict[str, str]:
@@ -79,17 +79,17 @@ class AudioWorker(SubprocessWorker):
 
 
 @dataclass
-class EmbedWorkerConfig:
+class EmbedConfig:
     model: str = "ecapa-tdnn"
 
 
-class EmbedWorker(SubprocessWorker):
+class EmbedAdapter(SubprocessAdapter):
     """Speaker voiceprints (speechbrain ECAPA-TDNN), stateless clip → vector."""
 
-    child_module: ClassVar[str] = "giq.workers._embed_child"
+    child_module: ClassVar[str] = "giq.adapters._embed_child"
     modality: ClassVar[str] = "embed"
 
-    def __init__(self, config: EmbedWorkerConfig, device: str | None = None):
+    def __init__(self, config: EmbedConfig, device: str | None = None):
         super().__init__(config, device)
 
     def _spawn_env(self) -> dict[str, str]:

@@ -247,8 +247,8 @@ def test_the_api_layer_never_spawns_a_process():
 async def test_only_locally_served_models_are_advertised(tmp_path, monkeypatch):
     """/v1/models is where a caller learns what giq will run. Everything on it
     has to be something giq serves itself."""
+    from giq.adapters.llama_cpp import MODEL_PATHS
     from giq.api.openai_compat import list_models
-    from giq.workers.llm import MODEL_PATHS
 
     # Only installed models are listed, so install one under a fake models dir.
     gguf = tmp_path / MODEL_PATHS["gemma-4-12b"]

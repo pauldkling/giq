@@ -21,7 +21,7 @@ Result: {"id", "embedding": [float], "dim": int, "error": str|null}
 import os
 import sys
 
-from giq.workers._subprocess import (
+from giq.adapters._subprocess import (
     reserve_ipc_stdout,
     run_ipc_child_loop,
     write_startup_error,

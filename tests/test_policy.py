@@ -291,7 +291,7 @@ async def test_unpinning_unloads_the_resident(store, queue):
     store.set("whisper-large-v3", AUTO)
     await runner._release_demoted_residents()
 
-    res.worker.stop.assert_awaited()
+    res.adapter.stop.assert_awaited()
     assert key not in runner._residents
 
 
@@ -303,7 +303,7 @@ async def test_pinned_residents_are_left_alone(store, queue):
 
     await runner._release_demoted_residents()
 
-    res.worker.stop.assert_not_awaited()
+    res.adapter.stop.assert_not_awaited()
     assert key in runner._residents
 
 
@@ -320,7 +320,7 @@ async def test_unload_waits_for_in_flight_lane_jobs(store, queue):
     task = asyncio.create_task(runner._release_demoted_residents())
     await asyncio.sleep(0.05)
     assert key in runner._residents  # still waiting on the lane
-    res.worker.stop.assert_not_awaited()
+    res.adapter.stop.assert_not_awaited()
 
     res.active_count = 0
     res.lane.release()

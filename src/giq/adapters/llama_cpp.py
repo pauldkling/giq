@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from giq import recipes
+from giq.adapters.engine import Concurrency, ServedLLM, StartError
 from giq.gpus import device_env, device_port, server_port
 from giq.loopguard import LoopGuard
 from giq.models import JobResult
@@ -24,7 +25,6 @@ from giq.paths import model_path as resolve_path
 from giq.paths import state_dir
 from giq.recipes.schema import LlamaCppParams, Recipe
 from giq.registry import vram_for
-from giq.workers.engine import Concurrency, ServedLLM, WorkerStartError
 
 if TYPE_CHECKING:
     from giq.queue import JobStream
@@ -41,10 +41,10 @@ def weights_installed(model: str) -> bool:
     have failed on the first request. Registered means "giq knows how to run
     this"; installed means "the file is here".
     """
-    from giq.workers.engine import engine_for
+    from giq.adapters.engine import engine_for
 
     if engine_for(model) == "vllm":
-        from giq.workers.vllm import weights_installed as vllm_weights_installed
+        from giq.adapters.vllm import weights_installed as vllm_weights_installed
 
         return vllm_weights_installed(model)
     path = resolved_model_path(model)
@@ -384,7 +384,7 @@ HTTP_CONNECT_SECONDS = 10.0  # llama-server is on loopback; this is generous
 
 
 @dataclass
-class LLMWorkerConfig:
+class LlamaCppConfig:
     """Configuration for LLM worker."""
 
     model: str
@@ -464,12 +464,12 @@ class LLMWorkerConfig:
 
 
 @dataclass
-class LLMWorker(ServedLLM):
+class LlamaCppAdapter(ServedLLM):
     """LLM worker wrapping llama.cpp server."""
 
     engine: ClassVar[str] = "llama.cpp"
 
-    config: LLMWorkerConfig
+    config: LlamaCppConfig
     _process: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _client: httpx.AsyncClient | None = field(default=None, repr=False)
     _ready: bool = field(default=False, repr=False)
@@ -707,7 +707,7 @@ class LLMWorker(ServedLLM):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._process is not None and self._process.returncode is not None:
-                raise WorkerStartError(
+                raise StartError(
                     f"llama-server exited with {self._process.returncode} while starting "
                     f"{self.config.model}:\n{self._log_tail()}"
                 )
@@ -718,7 +718,7 @@ class LLMWorker(ServedLLM):
             except httpx.HTTPError:
                 pass
             await asyncio.sleep(poll)
-        raise WorkerStartError(
+        raise StartError(
             f"llama-server did not become ready within {timeout:.0f}s for "
             f"{self.config.model}:\n{self._log_tail()}"
         )

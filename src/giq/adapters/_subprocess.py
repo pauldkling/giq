@@ -15,7 +15,7 @@ sustained large-model inference on the machine it was measured on.
 
 This base class spawns an `execve`'d Python child per worker. Killing the
 child destroys its CUDA context cleanly. The pattern mirrors
-`giq.workers.llm.LLMWorker`, which has always run llama-server as a subprocess
+`giq.adapters.llama_cpp.LlamaCppAdapter`, which has always run llama-server as a subprocess
 and thus never exhibited this retention.
 
 Wire protocol (one JSON object per line, UTF-8, `\\n`-terminated):
@@ -129,10 +129,10 @@ class SubprocessWorkerDied(SubprocessWorkerError):
         super().__init__(msg)
 
 
-# --- Parent-side: SubprocessWorker base ----------------------------------
+# --- Parent-side: SubprocessAdapter base ----------------------------------
 
 
-class SubprocessWorker:
+class SubprocessAdapter:
     """Base class for workers that run in a child process for CUDA isolation.
 
     Subclasses must define:

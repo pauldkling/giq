@@ -26,7 +26,7 @@ def model_ref(model: str) -> str:
 
 
 @dataclass
-class STTWorkerConfig:
+class SttConfig:
     """Configuration for STT worker."""
 
     # A recipe name: faster-whisper-{tiny,base,small,medium,large-v3}.
@@ -42,10 +42,10 @@ class STTWorkerConfig:
 
 
 @dataclass
-class STTWorker:
+class SttAdapter:
     """STT worker using faster-whisper."""
 
-    config: STTWorkerConfig
+    config: SttConfig
     _model: object = field(default=None, repr=False)
     _ready: bool = field(default=False, repr=False)
 

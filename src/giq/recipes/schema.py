@@ -201,7 +201,7 @@ class EngineParams(_Strict):
 
 
 class LlamaCppParams(EngineParams):
-    """llama-server launch parameters. Unset = the default in workers/llm.py."""
+    """llama-server launch parameters. Unset = the default in adapters/llama_cpp.py."""
 
     ctx_size: int | None = Field(default=None, ge=512)
     cache_type_k: KvCacheType | None = None
@@ -219,14 +219,14 @@ class LlamaCppParams(EngineParams):
     # giq's in-flight loop guard on the thinking channel.
     loop_guard: bool | None = None
     # Seconds a start may take before it is abandoned; unset = the engine's
-    # default (workers/llm.py DEFAULT_READY_TIMEOUT). A big GGUF on a slow
+    # default (adapters/llama_cpp.py DEFAULT_READY_TIMEOUT). A big GGUF on a slow
     # disk is the reason to raise it.
     ready_timeout: float | None = Field(default=None, ge=10, le=3600)
 
     @model_validator(mode="after")
     def _kv_pair(self) -> LlamaCppParams:
         # Mixed K/V types fall off the fused attention kernel (see
-        # DEFAULT_CACHE_TYPE_K in workers/llm.py), so they are set as a pair.
+        # DEFAULT_CACHE_TYPE_K in adapters/llama_cpp.py), so they are set as a pair.
         if (self.cache_type_k is None) != (self.cache_type_v is None):
             raise ValueError("cache_type_k and cache_type_v are set together")
         if self.cache_type_k != self.cache_type_v:

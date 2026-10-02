@@ -223,8 +223,8 @@ async def test_v1_models_advertises_every_installed_model(client: AsyncClient):
     pick one and llama-server would fail on it. Generated from
     the recipes now and filtered only on whether the weights exist.
     """
+    from giq.adapters.llama_cpp import weights_installed
     from giq.registry import all_recipes, recipes_serving, resident_defaults
-    from giq.workers.llm import weights_installed
 
     response = await client.get("/v1/models")
     assert response.status_code == 200

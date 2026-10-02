@@ -6,9 +6,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from giq.adapters.llama_cpp import INTERNAL_LLM_PORT
 from giq.api.dependencies import get_audio_cache
 from giq.runner import get_runner
-from giq.workers.llm import INTERNAL_LLM_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,8 @@ async def _kill_stale_servers(port: int = INTERNAL_LLM_PORT):
     card's block. Every engine's pattern is swept over every block port, or
     those would be left holding VRAM with nothing tracking them.
     """
+    from giq.adapters.vllm import scope_unit, stop_scope
     from giq.gpus import device_port, device_ports, get_gpus
-    from giq.workers.vllm import scope_unit, stop_scope
 
     gpus = [None, *get_gpus()]
     blocks = {p for gpu in gpus for p in device_ports(gpu)}

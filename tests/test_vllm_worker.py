@@ -12,23 +12,23 @@ import signal
 import httpx
 import pytest
 
-from giq.models import Modality
-from giq.queue import JobQueue, JobStream
-from giq.recipes.schema import Recipe
-from giq.workers import vllm
-from giq.workers.engine import ServedLLM, WorkerStartError
-from giq.workers.vllm import (
+from giq.adapters import vllm
+from giq.adapters.engine import ServedLLM, StartError
+from giq.adapters.vllm import (
+    VllmAdapter,
+    VllmConfig,
     VLLMConfigError,
-    VLLMWorker,
-    VLLMWorkerConfig,
     check_checkpoint,
     flashinfer_arch,
 )
+from giq.models import Modality
+from giq.queue import JobQueue, JobStream
+from giq.recipes.schema import Recipe
 from tests._vllm import NAME, doc, make_checkpoint, make_recipe, params_of
 
 
-def worker_for(recipe: Recipe, **kw) -> VLLMWorker:
-    cfg = VLLMWorkerConfig(
+def worker_for(recipe: Recipe, **kw) -> VllmAdapter:
+    cfg = VllmConfig(
         model=recipe.name,
         recipe=recipe,
         device="GPU-test",
@@ -37,7 +37,7 @@ def worker_for(recipe: Recipe, **kw) -> VLLMWorker:
         log_path=kw.pop("log_path", "/nonexistent/vllm.log"),
         **kw,
     )
-    return VLLMWorker(config=cfg)
+    return VllmAdapter(config=cfg)
 
 
 @pytest.fixture
@@ -281,8 +281,8 @@ def test_a_null_ceiling_means_none(monkeypatch):
 
 
 def test_an_operator_instance_on_vllm(operator_dir, tmp_path):
+    from giq.adapters.llama_cpp import MODEL_PATHS, weights_installed
     from giq.registry import get_recipe, reload_registry
-    from giq.workers.llm import MODEL_PATHS, weights_installed
 
     weights = make_checkpoint(tmp_path)
     (operator_dir / "big.yaml").write_text(
@@ -296,15 +296,15 @@ def test_an_operator_instance_on_vllm(operator_dir, tmp_path):
     assert spec.vram_gb == pytest.approx(47.42) and spec.lanes == 64
     assert weights_installed("qwen-big")
     assert "qwen-big" not in MODEL_PATHS, "llama.cpp's tables stay llama.cpp's"
-    worker = VLLMWorker(VLLMWorkerConfig(model="qwen-big", device="GPU-test", port=8088))
+    worker = VllmAdapter(VllmConfig(model="qwen-big", device="GPU-test", port=8088))
     assert worker.config.weights == str(weights)
 
 
 def test_runner_builds_a_vllm_worker_for_engine_vllm(operator_dir, tmp_path, monkeypatch):
+    from giq.adapters.engine import context_size, engine_for
+    from giq.adapters.llama_cpp import LlamaCppAdapter
     from giq.registry import reload_registry
     from giq.runner import Runner, _lane_width
-    from giq.workers.engine import context_size, engine_for
-    from giq.workers.llm import LLMWorker
 
     weights = make_checkpoint(tmp_path)
     (operator_dir / "served.yaml").write_text(
@@ -318,13 +318,13 @@ def test_runner_builds_a_vllm_worker_for_engine_vllm(operator_dir, tmp_path, mon
     monkeypatch.setattr(runner, "_device_for", lambda model: "GPU-test")
 
     worker = runner._build_worker("served")
-    assert isinstance(worker, VLLMWorker) and isinstance(worker, ServedLLM)
+    assert isinstance(worker, VllmAdapter) and isinstance(worker, ServedLLM)
     assert worker.config.device == "GPU-test"
     assert _lane_width("served", worker) == 32
     assert engine_for("served") == "vllm" and context_size("served") == 65536
 
     llama = runner._build_worker("qwen3.8-27b")
-    assert isinstance(llama, LLMWorker) and isinstance(llama, ServedLLM)
+    assert isinstance(llama, LlamaCppAdapter) and isinstance(llama, ServedLLM)
     assert _lane_width("qwen3.8-27b", llama) == 4, "llama.cpp lanes unchanged"
     assert engine_for("qwen3.8-27b") == "llama.cpp"
 
@@ -385,7 +385,7 @@ def sse(chunks: list[dict]) -> bytes:
     return ("".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n").encode()
 
 
-def serving_worker(tmp_path, handler) -> VLLMWorker:
+def serving_worker(tmp_path, handler) -> VllmAdapter:
     served = {**doc(make_checkpoint(tmp_path)), "request_defaults": {"top_k": 20, "min_p": 0.0}}
     worker = worker_for(Recipe.model_validate(served))
     worker._client = httpx.AsyncClient(
@@ -647,7 +647,7 @@ async def test_ready_times_out(tmp_path):
         base_url="http://test", transport=httpx.MockTransport(lambda r: httpx.Response(503))
     )
     # A start that outlasts its budget is a failed start, not a job timeout.
-    with pytest.raises(WorkerStartError, match="did not become ready"):
+    with pytest.raises(StartError, match="did not become ready"):
         await worker._wait_for_ready(timeout=0.05, poll=0.01)
 
 
@@ -696,8 +696,8 @@ async def test_warm_up_starts_with_time_to_compile_and_always_stops(tmp_path, mo
         calls.append(("stop", None))
 
     monkeypatch.setattr(vllm, "recipe_for", lambda model: make_recipe(make_checkpoint(tmp_path)))
-    monkeypatch.setattr(vllm.VLLMWorker, "start", start)
-    monkeypatch.setattr(vllm.VLLMWorker, "stop", stop)
+    monkeypatch.setattr(vllm.VllmAdapter, "start", start)
+    monkeypatch.setattr(vllm.VllmAdapter, "stop", stop)
     with pytest.raises(TimeoutError):
         await vllm.warm_up(NAME, device="GPU-test")
     assert calls == [("start", vllm.WARMUP_TIMEOUT_SECONDS), ("stop", None)]

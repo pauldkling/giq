@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""MultiviewWorker: child results become MultiviewResults in the parent.
+"""MultiviewAdapter: child results become MultiviewResults in the parent.
 
 The child is replaced by an inline script that answers every task with two
 canned views, so this exercises hydration, the error envelope and the
@@ -15,8 +15,8 @@ import sys
 
 import pytest
 
+from giq.adapters.multiview import MultiviewAdapter, MultiviewConfig, hydrate
 from giq.models import MultiviewResult
-from giq.workers.multiview import MultiviewWorker, MultiviewWorkerConfig, hydrate
 
 VIEW = {
     "index": 0,
@@ -55,7 +55,7 @@ for line in sys.stdin:
 """
 
 
-class _StubMultiviewWorker(MultiviewWorker):
+class _StubMultiviewWorker(MultiviewAdapter):
     def _command(self) -> list[str]:
         return [sys.executable, "-u", "-c", CHILD_SCRIPT]
 
@@ -65,7 +65,7 @@ class _StubMultiviewWorker(MultiviewWorker):
 
 @pytest.mark.asyncio
 async def test_run_batch_returns_multiview_results():
-    worker = _StubMultiviewWorker(MultiviewWorkerConfig())
+    worker = _StubMultiviewWorker(MultiviewConfig())
     await worker.start()
     try:
         results = await worker.run_batch(
@@ -97,14 +97,14 @@ def test_hydrate_keeps_the_error_envelope():
 def test_estimated_vram_comes_from_the_registry():
     from giq.registry import get_recipe
 
-    recipe = get_recipe(MultiviewWorkerConfig().model)
+    recipe = get_recipe(MultiviewConfig().model)
     assert recipe is not None and recipe.name == "da3-base"
-    assert MultiviewWorker(MultiviewWorkerConfig()).estimated_vram_gb == recipe.vram_gb
+    assert MultiviewAdapter(MultiviewConfig()).estimated_vram_gb == recipe.vram_gb
 
 
 def test_unknown_model_fails_at_construction():
     with pytest.raises(ValueError):
-        MultiviewWorker(MultiviewWorkerConfig(model="vggt"))
+        MultiviewAdapter(MultiviewConfig(model="vggt"))
 
 
 def test_the_child_runs_on_the_da3_interpreter(monkeypatch):
@@ -113,10 +113,10 @@ def test_the_child_runs_on_the_da3_interpreter(monkeypatch):
     from giq.engines import binary_for
 
     monkeypatch.setattr("giq.engines.require_binary", lambda name: binary_for(name))
-    w = MultiviewWorker(MultiviewWorkerConfig(model="da3-base"))
+    w = MultiviewAdapter(MultiviewConfig(model="da3-base"))
     cmd = w._command()
     assert cmd[0] == binary_for("da3") and cmd[0] != sys.executable
-    assert cmd[1:6] == ["-u", "-m", "giq.workers._multiview_child", "--model", "da3-base"]
+    assert cmd[1:6] == ["-u", "-m", "giq.adapters._multiview_child", "--model", "da3-base"]
     assert cmd[6] == "--weights" and cmd[7].endswith("/depth-anything-DA3-BASE")
     env = w._spawn_env()
     assert env["PYTHONPATH"].split(os.pathsep)[0].endswith("/src")
@@ -124,5 +124,5 @@ def test_the_child_runs_on_the_da3_interpreter(monkeypatch):
 
 def test_snapshot_root_is_overridable(monkeypatch):
     monkeypatch.setenv("GIQ_MULTIVIEW_MODELS_DIR", "/elsewhere")
-    w = MultiviewWorker(MultiviewWorkerConfig(model="da3-base"))
+    w = MultiviewAdapter(MultiviewConfig(model="da3-base"))
     assert w.weights == "/elsewhere/depth-anything-DA3-BASE"

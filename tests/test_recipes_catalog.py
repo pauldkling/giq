@@ -16,8 +16,8 @@ batches of 4.
 import pytest
 
 from giq import recipes
+from giq.adapters import llama_cpp
 from giq.recipes.schema import LlamaCppParams, Recipe, VllmParams
-from giq.workers import llm
 from tests._catalog_baseline import BUILTIN_SPECS, LLM_DEFAULTS, LLM_TABLES
 
 
@@ -72,14 +72,14 @@ def test_every_spec_field_is_reproduced(expected):
 
 @pytest.mark.parametrize("table", sorted(LLM_TABLES))
 def test_every_llm_table_is_reproduced(table):
-    assert llm.tables_of(_builtin_instances())[table] == LLM_TABLES[table]
+    assert llama_cpp.tables_of(_builtin_instances())[table] == LLM_TABLES[table]
 
 
 @pytest.mark.parametrize("name", sorted(LLM_DEFAULTS))
 def test_the_engine_defaults_did_not_move(name):
     """The tables are sparse over these; a changed default would change every
     model that does not set the parameter, without touching a single file."""
-    assert getattr(llm, name) == LLM_DEFAULTS[name]
+    assert getattr(llama_cpp, name) == LLM_DEFAULTS[name]
 
 
 # --- operator recipes reach the consumers -----------------------------------
@@ -97,8 +97,8 @@ def operator_dir(tmp_path, monkeypatch):
 
 
 def test_an_operator_instance_is_served_like_a_builtin(operator_dir):
+    from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
     from giq.registry import get_recipe, reload_registry
-    from giq.workers.llm import LLMWorker, LLMWorkerConfig
 
     (operator_dir / "private.yaml").write_text(
         "name: private-ft\nmodalities: [llm]\nengine: llama.cpp\n"
@@ -109,7 +109,7 @@ def test_an_operator_instance_is_served_like_a_builtin(operator_dir):
     reload_registry()
 
     assert get_recipe("private-ft").vram_gb == 12.0
-    cmd = LLMWorker(LLMWorkerConfig(model="private-ft")).build_command()
+    cmd = LlamaCppAdapter(LlamaCppConfig(model="private-ft")).build_command()
     assert cmd[cmd.index("-m") + 1] == "/srv/models/private-ft.gguf"
     assert cmd[cmd.index("-c") + 1] == "32768"
 
@@ -127,9 +127,9 @@ def test_an_operator_override_replaces_the_builtin_everywhere(operator_dir):
 
     assert get_recipe("gemma-4-12b").vram_gb == 7.5
     assert get_recipe("gemma-4-12b").residency.priority is None
-    assert llm.MODEL_PATHS["gemma-4-12b"] == "elsewhere/gemma.gguf"
-    assert "gemma-4-12b" not in llm.MODEL_PARALLEL
-    assert "gemma-4-12b" not in llm.MODEL_CTX_SIZE
+    assert llama_cpp.MODEL_PATHS["gemma-4-12b"] == "elsewhere/gemma.gguf"
+    assert "gemma-4-12b" not in llama_cpp.MODEL_PARALLEL
+    assert "gemma-4-12b" not in llama_cpp.MODEL_CTX_SIZE
 
 
 def test_the_tables_return_to_the_builtins_when_the_override_goes(operator_dir):
@@ -145,7 +145,7 @@ def test_the_tables_return_to_the_builtins_when_the_override_goes(operator_dir):
     reload_registry()
 
     for table, expected in LLM_TABLES.items():
-        assert getattr(llm, table) == expected
+        assert getattr(llama_cpp, table) == expected
 
 
 def test_a_broken_operator_file_leaves_the_catalog_serving(operator_dir):
@@ -155,7 +155,7 @@ def test_a_broken_operator_file_leaves_the_catalog_serving(operator_dir):
     reload_registry()
 
     assert get_recipe("gemma-4-12b").vram_gb == 9.5
-    assert llm.MODEL_PARALLEL["gemma-4-12b"] == 4
+    assert llama_cpp.MODEL_PARALLEL["gemma-4-12b"] == 4
 
 
 async def test_storage_reports_the_operator_files_and_what_was_left_out(operator_dir, monkeypatch):

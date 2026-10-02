@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Job runner - processes jobs from queue using workers."""
+"""Job runner - processes jobs from queue using adapters."""
 
 import asyncio
 import json
@@ -13,6 +13,9 @@ from datetime import datetime
 from time import monotonic
 from typing import Any, Protocol
 
+from giq.adapters.engine import ServedLLM, context_size
+from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
+from giq.adapters.stt import SttAdapter
 from giq.models import ImageResult, JobRequest, JobStatus, LLMResult, Modality
 from giq.paths import inflight_log
 from giq.privacy import safe_extra
@@ -20,9 +23,6 @@ from giq.queue import Job, JobQueue, get_queue
 from giq.recipes.schema import VllmParams
 from giq.registry import get_recipe, lane_width_for
 from giq.vram import get_free_vram, wait_for_vram
-from giq.workers.engine import ServedLLM, context_size
-from giq.workers.llm import LLMWorker, LLMWorkerConfig
-from giq.workers.stt import STTWorker
 
 logger = logging.getLogger(__name__)
 
@@ -135,12 +135,12 @@ WARM_TIMEOUT_SECONDS = 120
 # Max time a single job can run before being killed
 JOB_TIMEOUT_SECONDS = 300
 
-# Per-worker-type overrides. Audio: diarizing an hours-long recording takes
+# Per-adapter-type overrides. Audio: diarizing an hours-long recording takes
 # minutes of GPU time; give it a full batch budget, just under 15 minutes.
 JOB_TIMEOUT_OVERRIDES: dict[Modality, float] = {
     Modality.audio: 870.0,
     # A long PDF is several passes of a few minutes each (~80 tok/s, up to
-    # 32k tokens a pass). Matches OCRWorker.run_batch_timeout.
+    # 32k tokens a pass). Matches OcrAdapter.run_batch_timeout.
     Modality.ocr: 3600.0,
 }
 
@@ -152,7 +152,7 @@ FLOOR_TOKENS_PER_SECOND = 20.0
 
 
 def _job_timeout(modality: Modality, job: "Job | None" = None) -> float:
-    """How long a job may run before it is killed and its worker unloaded.
+    """How long a job may run before it is killed and its adapter unloaded.
 
     The flat 300s was fine while answers were a few hundred tokens. It is not
     fine for a thinking model: measured, real reasoning prompts
@@ -180,8 +180,8 @@ def _job_timeout(modality: Modality, job: "Job | None" = None) -> float:
     return max(base, float(budget) / FLOOR_TOKENS_PER_SECOND)
 
 
-# Seconds a worker without an engine-specific start budget may take to load:
-# the in-process and child workers (whisper, kokoro, the OCR and depth
+# Seconds a adapter without an engine-specific start budget may take to load:
+# the in-process and child adapters (whisper, kokoro, the OCR and depth
 # children) load in seconds to a minute.
 DEFAULT_START_BUDGET_SECONDS = 300.0
 
@@ -190,7 +190,7 @@ def start_budget(model: str) -> float:
     """How long recipe ``model`` may take to start, from its engine or recipe.
 
     A start is not part of a job's run time — ``_job_timeout`` only begins
-    once the worker is up — but a caller waiting on the job sits through it.
+    once the adapter is up — but a caller waiting on the job sits through it.
     vllm needs minutes (192 s cold on an RTX 5090, CUDA graph capture
     included), llama.cpp seconds to minutes depending on the disk; each
     engine says so, and a recipe can say more.
@@ -201,11 +201,11 @@ def start_budget(model: str) -> float:
     if isinstance(recipe.params, VllmParams):
         return float(recipe.params.ready_timeout)
     if recipe.engine == "llama.cpp":
-        from giq.workers.llm import DEFAULT_READY_TIMEOUT, MODEL_READY_TIMEOUT
+        from giq.adapters.llama_cpp import DEFAULT_READY_TIMEOUT, MODEL_READY_TIMEOUT
 
         return float(MODEL_READY_TIMEOUT.get(recipe.name, DEFAULT_READY_TIMEOUT))
     if recipe.engine == "sd.cpp":
-        from giq.workers.sdcpp import READY_TIMEOUT_SECONDS
+        from giq.adapters.sdcpp import READY_TIMEOUT_SECONDS
 
         return READY_TIMEOUT_SECONDS
     return DEFAULT_START_BUDGET_SECONDS
@@ -241,7 +241,7 @@ def _context_budget(request: JobRequest) -> int | None:
 # memory as used for a second or two after SIGKILL.
 POST_UNLOAD_VRAM_GRACE_SECONDS = 10.0
 
-# Bounded VRAM wait for owned worker loads. giq controls the VRAM, so if it
+# Bounded VRAM wait for owned adapter loads. giq controls the VRAM, so if it
 # can't be freed in this window something is wrong — fail the job loudly
 # instead of wedging the queue.
 VRAM_WAIT_CAP_SECONDS = 180.0
@@ -285,13 +285,13 @@ RESIDENT_RELOAD_GRACE_SECONDS = 15.0
 
 RESIDENT_TICK_SECONDS = 5.0
 
-# How long a queued resident job waits for its worker to come back (evicted
+# How long a queued resident job waits for its adapter to come back (evicted
 # for an image batch) before failing. Kept under the 900s a typical polling
 # client waits, so the failure is attributable to giq rather than a timeout.
 RESIDENT_WAIT_TIMEOUT_SECONDS = 840.0
 
 # --- Pause (hand the card back) ----------------------------------------------
-# A paused runner serves nothing and holds no VRAM: every worker is unloaded,
+# A paused runner serves nothing and holds no VRAM: every adapter is unloaded,
 # residents stop reloading, and job submission is refused at the API edge
 # (503, see Orchestrator.submit_job). A graceful pause first waits this long
 # for in-flight work — batch job, resident lanes, live llama-server slots — to
@@ -311,7 +311,7 @@ _ALL_DEVICES = _AllDevices()
 
 
 def _declared_size(res: "_Resident") -> float:
-    return res.worker.estimated_vram_gb
+    return res.adapter.estimated_vram_gb
 
 
 def _choose_victims(
@@ -370,8 +370,8 @@ class ResidentDemoted(Exception):
     """A lane job's model stopped being resident while the job was waiting."""
 
 
-class Worker(Protocol):
-    """Protocol for workers."""
+class Adapter(Protocol):
+    """What the runner needs from an engine adapter: start it, stop it, run on it."""
 
     @property
     def is_running(self) -> bool: ...
@@ -394,12 +394,12 @@ class Worker(Protocol):
     ) -> list[LLMResult] | list[ImageResult]: ...
 
 
-# Lane widths: how many jobs may run concurrently on a resident's worker.
+# Lane widths: how many jobs may run concurrently on a resident's adapter.
 # llm matches llama-server's 4 slots; embed takes 2; audio is GPU-heavy and
 # serial. The figures live in registry.DEFAULT_LANE_WIDTH.
 
 
-def _lane_width(model: str, worker: Any) -> int:
+def _lane_width(model: str, adapter: Any) -> int:
     """How many jobs a resident runs at once.
 
     An engine that schedules requests itself says how many it takes (ADR-002,
@@ -407,16 +407,16 @@ def _lane_width(model: str, worker: Any) -> int:
     sized for, handing it more only queues them inside the server where giq
     cannot see or cancel them. Everything else keeps the registry's width.
     """
-    if isinstance(worker, ServedLLM) and worker.lanes_from_engine:
-        return max(1, worker.concurrency().max_parallel)
+    if isinstance(adapter, ServedLLM) and adapter.lanes_from_engine:
+        return max(1, adapter.concurrency().max_parallel)
     return lane_width_for(model)
 
 
 class _Resident:
-    """A loaded resident worker plus its concurrency lane."""
+    """A loaded resident adapter plus its concurrency lane."""
 
-    def __init__(self, worker: Worker, width: int, device: str | None = None):
-        self.worker = worker
+    def __init__(self, adapter: Adapter, width: int, device: str | None = None):
+        self.adapter = adapter
         self.width = width
         # UUID of the card this resident occupies. Recorded at load time
         # rather than looked up on demand: eviction has to reason about where
@@ -443,17 +443,17 @@ class _Resident:
 
 
 class _Slot:
-    """The one sleepy (non-resident) worker loaded on a given card.
+    """The one sleepy (non-resident) adapter loaded on a given card.
 
-    Before bindings there was a single such worker for the whole machine, so
+    Before bindings there was a single such adapter for the whole machine, so
     loading klein meant unloading whatever else was loaded — even when the two
     were destined for different cards. One slot per card keeps each card's
     load independent; dispatch is still serialized, so at most one of them is
     ever *running* a job.
     """
 
-    def __init__(self, worker: Worker, model: str, device: str | None):
-        self.worker = worker
+    def __init__(self, adapter: Adapter, model: str, device: str | None):
+        self.adapter = adapter
         # The recipe name: the slot's key, and what its jobs ask for.
         self.model = model
         self.device = device
@@ -470,7 +470,7 @@ class _Slot:
 
 
 class Runner:
-    """Processes jobs from queue, manages worker lifecycle."""
+    """Processes jobs from queue, manages adapter lifecycle."""
 
     def __init__(
         self,
@@ -481,7 +481,7 @@ class Runner:
         # `JobQueue` is falsy when empty (defines __len__), so `queue or …`
         # silently swaps a freshly-passed queue for the global one.
         self._queue = queue if queue is not None else get_queue()
-        # Sleepy workers by GPU UUID (None when no card is visible at all).
+        # Sleepy adapters by GPU UUID (None when no card is visible at all).
         self._slots: dict[str | None, _Slot] = {}
         self._running = False
         self._processing_job = False  # True while actively processing a job
@@ -501,7 +501,7 @@ class Runner:
         self._paused = False
         self._paused_since: datetime | None = None
         self._pause_reason: str | None = None
-        # Serializes worker lifecycle between _ensure_worker, warm-timeout
+        # Serializes adapter lifecycle between _ensure_worker, warm-timeout
         # unloads, shutdown, resident load/evict, and timeout/failure unloads.
         self._worker_lock = asyncio.Lock()
 
@@ -539,7 +539,7 @@ class Runner:
         return gpu.uuid if gpu else None
 
     def _slot_for(self, model: str) -> _Slot | None:
-        """The loaded sleepy worker for this model, if it is loaded."""
+        """The loaded sleepy adapter for this model, if it is loaded."""
         slot = self._slots.get(self._device_for(model))
         if slot and slot.key == model:
             return slot
@@ -547,7 +547,7 @@ class Runner:
 
     @property
     def active_worker(self) -> Modality | None:
-        """A currently loaded sleepy worker's type.
+        """A currently loaded sleepy adapter's type.
 
         Scalar for back-compat (/status, the stats sampler). With one slot per
         card there can be more than one; ``active_slots`` has them all.
@@ -557,19 +557,19 @@ class Runner:
 
     @property
     def active_model(self) -> str | None:
-        """The model of the worker ``active_worker`` reports."""
+        """The model of the adapter ``active_worker`` reports."""
         slot = next(iter(self._slots.values()), None)
         return slot.model if slot else None
 
     @property
     def active_slots(self) -> list[dict[str, Any]]:
-        """Every loaded sleepy worker, with the card it sits on."""
+        """Every loaded sleepy adapter, with the card it sits on."""
         return [
             {
                 "device": slot.device,
                 "worker": str(slot.modality),
                 "model": slot.model,
-                "ready": bool(getattr(slot.worker, "is_ready", False)),
+                "ready": bool(getattr(slot.adapter, "is_ready", False)),
             }
             for slot in self._slots.values()
         ]
@@ -580,38 +580,38 @@ class Runner:
         out = {}
         for key in self._resident_keys:
             res = self._residents.get(key)
-            out[key] = bool(res and res.worker.is_ready)
+            out[key] = bool(res and res.adapter.is_ready)
         return out
 
     def loaded_keys(self) -> set[str]:
-        """The recipe of every ready worker, resident or on a card's slot.
+        """The recipe of every ready adapter, resident or on a card's slot.
 
         A job for one of these needs no VRAM to start, which is what tells a
         job that is waiting its turn from one that is waiting for room.
         """
-        keys = {k for k, res in self._residents.items() if getattr(res.worker, "is_ready", False)}
-        keys |= {s.model for s in self._slots.values() if getattr(s.worker, "is_ready", False)}
+        keys = {k for k, res in self._residents.items() if getattr(res.adapter, "is_ready", False)}
+        keys |= {s.model for s in self._slots.values() if getattr(s.adapter, "is_ready", False)}
         return keys
 
     @property
     def owned_pids(self) -> dict[int, str]:
         """{pid: recipe} for every process giq is holding VRAM through.
 
-        Includes giq's own pid: STT is the one worker that still loads in this
+        Includes giq's own pid: STT is the one adapter that still loads in this
         process, so when it is up, part of the card is ours through no child
         at all. Workers with no pid (nothing spawned yet) are skipped rather
         than guessed at.
         """
         owned: dict[int, str] = {}
         for key, res in self._residents.items():
-            pid = getattr(res.worker, "pid", None)
+            pid = getattr(res.adapter, "pid", None)
             if pid:
                 owned[pid] = key
         for slot in self._slots.values():
-            pid = getattr(slot.worker, "pid", None)
+            pid = getattr(slot.adapter, "pid", None)
             if pid:
                 owned[pid] = f"{slot.model}"
-            elif isinstance(slot.worker, STTWorker):
+            elif isinstance(slot.adapter, SttAdapter):
                 owned[os.getpid()] = f"{slot.model}"
         return owned
 
@@ -642,13 +642,13 @@ class Runner:
         for key, res in self._residents.items():
             if model is not None and key != model:
                 continue
-            if isinstance(res.worker, ServedLLM) and res.worker.is_ready:
-                return res.worker.base_url
+            if isinstance(res.adapter, ServedLLM) and res.adapter.is_ready:
+                return res.adapter.base_url
         for slot in self._slots.values():
             if model is not None and slot.model != model:
                 continue
-            if isinstance(slot.worker, ServedLLM) and slot.worker.is_ready:
-                return slot.worker.base_url
+            if isinstance(slot.adapter, ServedLLM) and slot.adapter.is_ready:
+                return slot.adapter.base_url
         return None
 
     def is_resident_key(self, model: str) -> bool:
@@ -674,7 +674,7 @@ class Runner:
 
         Graceful (the default) waits up to ``PAUSE_DRAIN_TIMEOUT_SECONDS`` for
         in-flight work to finish before unloading; ``force`` skips that wait and
-        tears the workers down immediately, failing whatever was running. Jobs
+        tears the adapters down immediately, failing whatever was running. Jobs
         still queued are failed either way — the API refuses new ones while
         paused, so nothing accumulates behind the pause.
 
@@ -705,7 +705,7 @@ class Runner:
             warnings.append(f"failed {failed} queued job(s)")
 
         # Lane tasks that are still waiting for (or holding) a resident have no
-        # worker to come back to; cancel them rather than let them wait out
+        # adapter to come back to; cancel them rather than let them wait out
         # RESIDENT_WAIT_TIMEOUT_SECONDS.
         for task in list(self._resident_jobs):
             task.cancel()
@@ -716,12 +716,12 @@ class Runner:
             try:
                 await self._unload_worker()
             except Exception as e:
-                logger.error(f"Failed to unload batch worker(s) for pause: {e}")
-                warnings.append(f"batch worker still loaded: {e}")
+                logger.error(f"Failed to unload batch adapter(s) for pause: {e}")
+                warnings.append(f"batch adapter still loaded: {e}")
             for key in list(self._residents):
                 res = self._residents[key]
                 try:
-                    await res.worker.stop()
+                    await res.adapter.stop()
                     self._residents.pop(key, None)
                 except Exception as e:
                     logger.error(f"Failed to stop resident {key} for pause: {e}")
@@ -763,7 +763,7 @@ class Runner:
             busy = self._processing_job or any(r.in_flight for r in self._residents.values())
             if not busy:
                 for res in self._residents.values():
-                    if isinstance(res.worker, ServedLLM) and await res.worker.active_slot_count():
+                    if isinstance(res.adapter, ServedLLM) and await res.adapter.active_slot_count():
                         busy = True
                         break
             if not busy:
@@ -810,7 +810,7 @@ class Runner:
         logger.info("Runner started")
 
     async def stop(self) -> None:
-        """Stop the runner and unload all workers."""
+        """Stop the runner and unload all adapters."""
         self._running = False
         if self._task:
             self._task.cancel()
@@ -835,7 +835,7 @@ class Runner:
             for key in list(self._residents):
                 res = self._residents.pop(key)
                 try:
-                    await res.worker.stop()
+                    await res.adapter.stop()
                 except Exception as e:
                     logger.error(f"Failed to stop resident {key}: {e}")
         logger.info("Runner stopped")
@@ -896,24 +896,24 @@ class Runner:
             # them would free memory the load cannot use.
             await self._evict_residents_for(job.request.model)
 
-            # Ensure correct worker is loaded
-            worker = await self._ensure_worker(job.request.model, job.request.model_path)
+            # Ensure correct adapter is loaded
+            adapter = await self._ensure_worker(job.request.model, job.request.model_path)
 
             # Run the job with a timeout to prevent infinite hangs
             timeout = _job_timeout(job.request.modality, job)
-            if worker:
+            if adapter:
                 if job.request.chat_request is not None:
                     # Raw chat completion passthrough (tool-calling path)
-                    if not isinstance(worker, ServedLLM):
+                    if not isinstance(adapter, ServedLLM):
                         raise RuntimeError("chat_request requires LLM worker")
                     if job.stream is not None:
                         raw_result = await asyncio.wait_for(
-                            worker.chat_completion_stream(job.request.chat_request, job.stream),
+                            adapter.chat_completion_stream(job.request.chat_request, job.stream),
                             timeout=timeout,
                         )
                     else:
                         raw_result = await asyncio.wait_for(
-                            worker.chat_completion(job.request.chat_request),
+                            adapter.chat_completion(job.request.chat_request),
                             timeout=timeout,
                         )
                     # Store raw dict as single result
@@ -921,7 +921,7 @@ class Runner:
                     job.status = JobStatus.completed
                 else:
                     results = await asyncio.wait_for(
-                        worker.run_batch(
+                        adapter.run_batch(
                             job.request.tasks,
                             job.request.params,
                         ),
@@ -932,7 +932,7 @@ class Runner:
                     job.status = JobStatus.completed
             else:
                 job.status = JobStatus.failed
-                job.error = f"Failed to load worker: {job.request.modality}"
+                job.error = f"Failed to load adapter: {job.request.modality}"
 
         except TimeoutError:
             limit = _job_timeout(job.request.modality, job)
@@ -945,24 +945,24 @@ class Runner:
                 async with self._worker_lock:
                     await self._unload_worker(device)
             except Exception as unload_err:
-                logger.error(f"Failed to unload timed-out worker: {unload_err}")
+                logger.error(f"Failed to unload timed-out adapter: {unload_err}")
 
         except Exception as e:
             logger.error(f"Job {job.job_id} failed: {e}")
             job.status = JobStatus.failed
             job.error = str(e)
-            # A worker that errored mid-generation may be wedged. Unload so
+            # A adapter that errored mid-generation may be wedged. Unload so
             # the next job gets a clean slate rather than inheriting the mess.
             try:
                 async with self._worker_lock:
                     await self._unload_worker(device)
             except Exception as unload_err:
-                logger.error(f"Failed to unload failed worker: {unload_err}")
+                logger.error(f"Failed to unload failed adapter: {unload_err}")
 
         finally:
             self._processing_job = False
             # The reader is blocked on the sentinel; it has to arrive whether
-            # the job succeeded, failed, timed out or never loaded a worker.
+            # the job succeeded, failed, timed out or never loaded a adapter.
             if job.stream is not None:
                 await job.stream.close()
 
@@ -996,11 +996,11 @@ class Runner:
     # --- Resident machinery -------------------------------------------------
 
     def _build_worker(self, model: str, model_path: str | None = None):
-        """Construct (but don't start) the worker that runs recipe ``model``.
+        """Construct (but don't start) the adapter that runs recipe ``model``.
 
         Chosen by the recipe's engine and its first modality: a recipe serving
         several (flux_klein) runs them all in one process, so any of them
-        picks the same worker. Every worker is handed the card its recipe is
+        picks the same adapter. Every adapter is handed the card its recipe is
         bound to. That is what makes a binding real: it decides
         CUDA_VISIBLE_DEVICES for the child, and for the server backends the
         port as well, so two cards can each run their own llama-server or
@@ -1013,51 +1013,51 @@ class Runner:
         modality = Modality(recipe.modality)
         device = self._device_for(model)
         if recipe.engine == "vllm":
-            from giq.workers.vllm import VLLMWorker, VLLMWorkerConfig
+            from giq.adapters.vllm import VllmAdapter, VllmConfig
 
             if model_path:
                 # A path override names a GGUF for llama-server; a vllm
                 # model's weights are part of its declaration.
                 logger.warning(f"llm/{model}: model_path ignored, vllm serves its declared weights")
-            return VLLMWorker(config=VLLMWorkerConfig(model=model, device=device))
+            return VllmAdapter(config=VllmConfig(model=model, device=device))
         if modality == Modality.llm:
-            return LLMWorker(
-                config=LLMWorkerConfig(model=model, model_path=model_path, device=device)
+            return LlamaCppAdapter(
+                config=LlamaCppConfig(model=model, model_path=model_path, device=device)
             )
         if modality == Modality.audio:
-            from giq.workers.audio import AudioWorker, AudioWorkerConfig
+            from giq.adapters.audio import AudioAdapter, AudioConfig
 
-            return AudioWorker(config=AudioWorkerConfig(model=model), device=device)
+            return AudioAdapter(config=AudioConfig(model=model), device=device)
         if modality == Modality.embed:
-            from giq.workers.audio import EmbedWorker, EmbedWorkerConfig
+            from giq.adapters.audio import EmbedAdapter, EmbedConfig
 
-            return EmbedWorker(config=EmbedWorkerConfig(model=model), device=device)
+            return EmbedAdapter(config=EmbedConfig(model=model), device=device)
         if modality in (Modality.text2image, Modality.image_edit):
             # sd.cpp is the one image runtime; the recipe schema admits no other.
-            from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
+            from giq.adapters.sdcpp import SdCppAdapter, SdCppConfig
 
-            return SdCppWorker(config=SdCppWorkerConfig(model=model, device=device))
+            return SdCppAdapter(config=SdCppConfig(model=model, device=device))
         if modality == Modality.tts:
-            from giq.workers.tts import TTSWorker, TTSWorkerConfig
+            from giq.adapters.tts import TtsAdapter, TtsConfig
 
-            return TTSWorker(config=TTSWorkerConfig(model=model), device=device)
+            return TtsAdapter(config=TtsConfig(model=model), device=device)
         if modality == Modality.stt:
-            from giq.workers.stt import STTWorker, STTWorkerConfig
+            from giq.adapters.stt import SttAdapter, SttConfig
 
-            return STTWorker(config=STTWorkerConfig(model=model, gpu_device=device))
+            return SttAdapter(config=SttConfig(model=model, gpu_device=device))
         if modality == Modality.ocr:
-            from giq.workers.ocr import OCRWorker, OCRWorkerConfig
+            from giq.adapters.ocr import OcrAdapter, OcrConfig
 
-            return OCRWorker(config=OCRWorkerConfig(model=model), device=device)
+            return OcrAdapter(config=OcrConfig(model=model), device=device)
         if modality == Modality.depth:
-            from giq.workers.depth import DepthWorker, DepthWorkerConfig
+            from giq.adapters.depth import DepthAdapter, DepthConfig
 
-            return DepthWorker(config=DepthWorkerConfig(model=model), device=device)
+            return DepthAdapter(config=DepthConfig(model=model), device=device)
         if modality == Modality.multiview:
-            from giq.workers.multiview import MultiviewWorker, MultiviewWorkerConfig
+            from giq.adapters.multiview import MultiviewAdapter, MultiviewConfig
 
-            return MultiviewWorker(config=MultiviewWorkerConfig(model=model), device=device)
-        raise ValueError(f"no worker for {model}'s modality {modality}")
+            return MultiviewAdapter(config=MultiviewConfig(model=model), device=device)
+        raise ValueError(f"no adapter for {model}'s modality {modality}")
 
     async def _process_resident_job(self, job: Job, key: str) -> None:
         """Run one job on a resident's lane (concurrent with other lanes)."""
@@ -1069,7 +1069,7 @@ class Runner:
             while True:
                 res = await self._wait_resident_ready(key)
                 await res.lane.acquire()
-                if res.worker.is_ready:
+                if res.adapter.is_ready:
                     break
                 # Evicted between our ready-check and lane entry — the
                 # residents loop will bring up a fresh _Resident; wait for it.
@@ -1080,24 +1080,24 @@ class Runner:
                 try:
                     timeout = _job_timeout(job.request.modality, job)
                     if job.request.chat_request is not None:
-                        if not isinstance(res.worker, ServedLLM):
+                        if not isinstance(res.adapter, ServedLLM):
                             raise RuntimeError("chat_request requires LLM worker")
                         if job.stream is not None:
                             raw_result = await asyncio.wait_for(
-                                res.worker.chat_completion_stream(
+                                res.adapter.chat_completion_stream(
                                     job.request.chat_request, job.stream
                                 ),
                                 timeout=timeout,
                             )
                         else:
                             raw_result = await asyncio.wait_for(
-                                res.worker.chat_completion(job.request.chat_request),
+                                res.adapter.chat_completion(job.request.chat_request),
                                 timeout=timeout,
                             )
                         job.results = [raw_result]
                     else:
                         results = await asyncio.wait_for(
-                            res.worker.run_batch(job.request.tasks, job.request.params),
+                            res.adapter.run_batch(job.request.tasks, job.request.params),
                             timeout=timeout,
                         )
                         # Subprocess residents return raw dicts; LLM returns models.
@@ -1163,7 +1163,7 @@ class Runner:
         started = monotonic()
         while True:
             res = self._residents.get(key)
-            if res and res.worker.is_ready:
+            if res and res.adapter.is_ready:
                 return res
             # Unpinned mid-flight: nothing will ever load this on the lane, so
             # fail now instead of waiting out the full timeout. The job is not
@@ -1180,7 +1180,7 @@ class Runner:
     async def _residents_loop(self) -> None:
         """Keep residents loaded while nothing else claims the VRAM.
 
-        Single reload path: API handlers and lane tasks never load workers.
+        Single reload path: API handlers and lane tasks never load adapters.
         Reload fires when no sleepy-model jobs are pending/running and either
         the queue has been quiet for the reload grace or resident jobs are
         actively waiting (they skip the grace — they need the model now).
@@ -1213,7 +1213,7 @@ class Runner:
                     continue
                 for key in self._resident_keys:
                     res = self._residents.get(key)
-                    if res and res.worker.is_ready:
+                    if res and res.adapter.is_ready:
                         continue
                     # Re-check before EACH load: a sleepy job that arrived
                     # mid-sequence would otherwise fight our loads for VRAM
@@ -1266,7 +1266,7 @@ class Runner:
                     if self._residents.get(key) is not res:
                         continue
                     logger.info(f"unloading {key} — {why}")
-                    await res.worker.stop()
+                    await res.adapter.stop()
                     self._residents.pop(key, None)
                     await get_stats().record_event("unload", f"{key} ({why})")
             except Exception as e:
@@ -1285,12 +1285,12 @@ class Runner:
             if self.is_disabled(key):
                 return
             res = self._residents.get(key)
-            if res and res.worker.is_ready:
+            if res and res.adapter.is_ready:
                 return
             if res:
                 # Loaded-but-dead (child crashed): reap before respawning.
                 try:
-                    await res.worker.stop()
+                    await res.adapter.stop()
                 except Exception as e:
                     logger.error(f"Failed to reap dead resident {key}: {e}")
                     return
@@ -1309,14 +1309,14 @@ class Runner:
                 logger.info(f"resident {model}: VRAM not free yet, retry next tick")
                 return
             logger.info(f"resident: loading {model}")
-            worker = self._build_worker(model)
-            width = _lane_width(model, worker)
-            resident = _Resident(worker, width, device)
+            adapter = self._build_worker(model)
+            width = _lane_width(model, adapter)
+            resident = _Resident(adapter, width, device)
             self._residents[key] = resident
             try:
-                await worker.start()
+                await adapter.start()
             except BaseException:
-                if not getattr(worker, "is_running", False):
+                if not getattr(adapter, "is_running", False):
                     self._residents.pop(key, None)
                 raise
             from giq.stats import get_stats
@@ -1369,7 +1369,7 @@ class Runner:
                     if self._residents.get(key) is not res:
                         continue
                     logger.info(f"evicting resident {key} for {model}")
-                    await res.worker.stop()
+                    await res.adapter.stop()
                     self._residents.pop(key, None)
                     await get_stats().record_event("evict", f"{key} for {model}")
             finally:
@@ -1386,7 +1386,7 @@ class Runner:
         believed evicting it freed half a gigabyte that does not exist, and
         could pick a victim set that leaves the load short.
 
-        Measured per-process via nvidia-smi where a worker owns a child.
+        Measured per-process via nvidia-smi where a adapter owns a child.
         Workers running in giq's own process have no distinguishable share, so
         they keep the declared figure.
         """
@@ -1397,12 +1397,12 @@ class Runner:
             return _declared_size
 
         def size_of(res: "_Resident") -> float:
-            pid = getattr(res.worker, "pid", None)
+            pid = getattr(res.adapter, "pid", None)
             measured = pid_memory.get(pid) if pid is not None else None
             # A just-started child may not have allocated yet; trust the
             # declared figure rather than plan around a near-zero reading.
             if measured is None or measured <= 0.05:
-                return res.worker.estimated_vram_gb
+                return res.adapter.estimated_vram_gb
             return measured
 
         return size_of
@@ -1426,8 +1426,8 @@ class Runner:
                 if res.in_flight:
                     busy = True
                     break
-                if isinstance(res.worker, ServedLLM):
-                    slots = await res.worker.active_slot_count()
+                if isinstance(res.adapter, ServedLLM):
+                    slots = await res.adapter.active_slot_count()
                     if slots:
                         res.last_active = monotonic()  # direct clients bypass lanes
                         busy = True
@@ -1449,10 +1449,10 @@ class Runner:
         self,
         model: str,
         model_path: str | None = None,
-    ) -> Worker | None:
-        """Ensure this model's worker is loaded on its card. Returns it.
+    ) -> Adapter | None:
+        """Ensure this model's adapter is loaded on its card. Returns it.
 
-        Only the slot on that card is disturbed: a worker loaded on another
+        Only the slot on that card is disturbed: a adapter loaded on another
         card keeps running, because it is not in the way. Serialized via
         ``self._worker_lock`` so that warm-timeout unloads and timeout/failure
         unloads can't race with loads.
@@ -1461,7 +1461,7 @@ class Runner:
             # A forced pause can land between job dispatch and this load; fail
             # the job rather than re-claim the card the operator just took back.
             if self._paused:
-                raise RuntimeError("giq is paused — no workers may load")
+                raise RuntimeError("giq is paused — no adapters may load")
             # Policy is enforced at submit, but re-check here: a model can be
             # turned off between dispatch and load, and `off` must mean no
             # load path at all, not just no new submissions.
@@ -1469,10 +1469,10 @@ class Runner:
                 raise RuntimeError(f"{model} is disabled (policy: off)")
 
             device = self._device_for(model)
-            # Check if we already have the right worker AND it's ready
+            # Check if we already have the right adapter AND it's ready
             slot = self._slots.get(device)
-            if slot and slot.key == model and slot.worker.is_ready:
-                return slot.worker
+            if slot and slot.key == model and slot.adapter.is_ready:
+                return slot.adapter
 
             # Unload whatever else holds this card's slot (free VRAM first)
             await self._unload_worker(device)
@@ -1502,26 +1502,26 @@ class Runner:
 
             logger.info(f"VRAM available ({get_free_vram(device):.1f}GB free), loading {model}")
 
-            worker = self._build_worker(model, model_path)
+            adapter = self._build_worker(model, model_path)
 
-            # Publish the worker BEFORE start() so that _unload_worker can reap
+            # Publish the adapter BEFORE start() so that _unload_worker can reap
             # it if start() raises (including CancelledError during load).
-            self._slots[device] = _Slot(worker, model, device)
+            self._slots[device] = _Slot(adapter, model, device)
             try:
-                await worker.start()
+                await adapter.start()
             except BaseException:
                 # start() already attempts its own stop(). If the process is
                 # still alive (SIGKILL-stuck CUDA), keep the reference so a
                 # later _unload_worker can retry. Otherwise clear the slot.
-                if not getattr(worker, "is_running", False):
+                if not getattr(adapter, "is_running", False):
                     self._slots.pop(device, None)
                 raise
-            return worker
+            return adapter
 
     async def _unload_worker(self, device: str | None | _AllDevices = _ALL_DEVICES) -> None:
-        """Unload the sleepy worker on one card, or (by default) on all.
+        """Unload the sleepy adapter on one card, or (by default) on all.
 
-        Raises RuntimeError if a worker process cannot be killed (e.g. stuck
+        Raises RuntimeError if a adapter process cannot be killed (e.g. stuck
         in CUDA driver). In that case its slot is NOT cleared — the caller
         must handle the zombie state.
         """
@@ -1532,7 +1532,7 @@ class Runner:
             slot = self._slots.get(dev)
             if slot is None:
                 continue
-            await slot.worker.stop()  # raises RuntimeError if unkillable
+            await slot.adapter.stop()  # raises RuntimeError if unkillable
             self._slots.pop(dev, None)
 
     async def _cleanup_finished_jobs(self, max_age_seconds: float = 300) -> None:
@@ -1550,7 +1550,7 @@ class Runner:
             logger.info(f"Cleaned up {removed} finished jobs")
 
     def _schedule_warm_timeout(self) -> None:
-        """Schedule check to unload worker after timeout."""
+        """Schedule check to unload adapter after timeout."""
         if self._warm_task:
             self._warm_task.cancel()
         self._warm_task = asyncio.create_task(self._warm_timeout_check())
@@ -1559,7 +1559,7 @@ class Runner:
         """Loaded slots a pending job needs for a *different* model.
 
         Keep-warm key is the recipe: a pending job for it is served by the
-        loaded worker, whichever of the recipe's modalities it asks for, so it
+        loaded adapter, whichever of the recipe's modalities it asks for, so it
         stays warm. A job that wants
         the same card for something else is what makes unloading urgent — and
         a job destined for another card is not, which is the whole point of
@@ -1577,7 +1577,7 @@ class Runner:
         return contested
 
     async def _warm_timeout_check(self) -> None:
-        """Unload idle sleepy workers, or evict one a queued job is waiting on.
+        """Unload idle sleepy adapters, or evict one a queued job is waiting on.
 
         A pending job for a different model on the same card triggers an
         immediate unload of that card's slot so the next load starts sooner;
@@ -1594,7 +1594,7 @@ class Runner:
             if contested:
                 async with self._worker_lock:
                     # Re-validate state under lock: run-loop may have already
-                    # switched workers while we were waiting to acquire.
+                    # switched adapters while we were waiting to acquire.
                     if self._processing_job:
                         return
                     pending = await self._queue.get_pending()
@@ -1606,7 +1606,7 @@ class Runner:
                         await self._unload_worker(slot.device)
                 return
 
-        # No other workers waiting - apply warm timeout
+        # No other adapters waiting - apply warm timeout
         await asyncio.sleep(WARM_TIMEOUT_SECONDS)
 
         # Re-check after sleep - might be processing now
@@ -1628,7 +1628,7 @@ class Runner:
                     pending = await self._queue.get_pending()
                     if pending:
                         return
-                    logger.info("Warm timeout reached, unloading worker(s)")
+                    logger.info("Warm timeout reached, unloading adapter(s)")
                     await self._unload_worker()
 
 

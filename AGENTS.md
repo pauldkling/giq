@@ -21,11 +21,11 @@ including tool-calling chat, goes through it. Keep it that way.
 
 - `src/giq/api/` — HTTP routers (`router.py` job API, `openai_compat.py`, `stats_api.py`, `access.py`)
 - `src/giq/services/orchestration.py` — `Orchestrator`, the one way into the queue
-- `src/giq/runner.py` — the worker loop: residency, eviction, lifecycle
+- `src/giq/runner.py` — the scheduler: residency, eviction, and the instances it starts and stops
 - `src/giq/recipes/` — the built-in recipes, one YAML file each (`<name>.yaml`: modalities, weights, engine, parameters, residency, measured VRAM, and the reasoning as comments), plus the schema and loader; operator files in `GIQ_RECIPES_DIR` add or replace recipes (ADR-002, ADR-003 for the terms)
 - `src/giq/registry.py` — the catalog: recipes by name (aliases resolved), and the default resident set
 - `src/giq/weights.py` — where a recipe's weights are: its `weights.path`/`weights.parts`, under the models directory, with the env overrides; every worker and the storage catalog ask here
-- `src/giq/workers/` — one module per worker; `_*_child.py` run in subprocesses
+- `src/giq/adapters/` — the engine adapters, one module per engine or modality (`llama_cpp.py`, `vllm.py`, `sdcpp.py`, `stt.py` …); `_*_child.py` run in subprocesses
 - `src/giq/paths.py` — every filesystem location, resolved from env > `config.yaml` `paths:` > `GIQ_HOME` > defaults
 - `deploy/` — the systemd unit and Debian install script (see `docs/deployment.md`)
 - `frontend/` — the dashboard: React + TypeScript + Vite, built into `src/giq/static/ui/` (gitignored, shipped in the wheel) and served at `/dash`. `src/components/` shared UI and charts, `src/state/` the app-wide pollers, `src/api/` the typed client, `src/views/<view>/` one folder per page, `src/locales/<lang>/<ns>.json` strings

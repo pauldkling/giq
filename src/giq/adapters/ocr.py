@@ -26,10 +26,10 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from giq import ocrdoc
+from giq.adapters._subprocess import SubprocessAdapter
 from giq.models import OCRResult
 from giq.registry import vram_for
 from giq.weights import recipe_of, require_path
-from giq.workers._subprocess import SubprocessWorker
 
 # 8266 MiB per-process peak measured on an RTX 5090 (4-page pass at 1024px);
 # 6.3 GiB idle after load. Declared above the peak, as a gate figure
@@ -43,11 +43,11 @@ OCR_VRAM_GB = 9.0
 # reads from weights.parts.layout. An operator's OCR recipe is another
 # checkpoint of one of the two, served under a name of its own.
 CHILD_OF_ENGINE: dict[str, str] = {
-    "transformers-4.57": "giq.workers._ocr_child",
-    "transformers": "giq.workers._glm_ocr_child",
+    "transformers-4.57": "giq.adapters._ocr_child",
+    "transformers": "giq.adapters._glm_ocr_child",
 }
 # The parts each child loads besides the main weights.
-PARTS_OF_CHILD: dict[str, tuple[str, ...]] = {"giq.workers._glm_ocr_child": ("layout",)}
+PARTS_OF_CHILD: dict[str, tuple[str, ...]] = {"giq.adapters._glm_ocr_child": ("layout",)}
 # `giq` must be importable in the other interpreter: its venv does not
 # install giq, so the child gets this checkout's src on PYTHONPATH.
 _GIQ_SRC = str(Path(__file__).resolve().parents[2])
@@ -61,19 +61,19 @@ def _instance(model: str):
 
 
 @dataclass
-class OCRWorkerConfig:
+class OcrConfig:
     model: str = "unlimited-ocr"
 
 
-class OCRWorker(SubprocessWorker):
+class OcrAdapter(SubprocessAdapter):
     """An OCR model in a child process; documents assembled in the parent."""
 
-    child_module: ClassVar[str] = "giq.workers._ocr_child"  # per engine; see CHILD_OF_ENGINE
+    child_module: ClassVar[str] = "giq.adapters._ocr_child"  # per engine; see CHILD_OF_ENGINE
     modality: ClassVar[str] = "ocr"
     # A long document is several passes of a few minutes each.
     run_batch_timeout: ClassVar[float] = 3600.0
 
-    def __init__(self, config: OCRWorkerConfig, device: str | None = None):
+    def __init__(self, config: OcrConfig, device: str | None = None):
         super().__init__(config, device)
         # Unknown model, foreign engine or missing weights: fail here, not at spawn.
         self.engine = _instance(config.model).engine

@@ -264,10 +264,10 @@ def test_children_and_catalog_agree_on_hf_home(clean, tmp_path):
 
 
 def test_subprocess_worker_spawn_env_carries_caches(clean, tmp_path):
-    from giq.workers._subprocess import SubprocessWorker
+    from giq.adapters._subprocess import SubprocessAdapter
 
     clean.setenv("GIQ_HOME", str(tmp_path))
-    worker = SubprocessWorker(config=None, device="no-such-card")
+    worker = SubprocessAdapter(config=None, device="no-such-card")
     env = worker._spawn_env()
     assert env["HF_HOME"] == str(tmp_path / "cache" / "huggingface")
 

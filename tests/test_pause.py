@@ -65,7 +65,7 @@ async def test_pause_unloads_residents_and_batch_worker(queue: JobQueue):
     assert runner.active_worker is None
     batch.stop.assert_awaited()
     for res in residents:
-        res.worker.stop.assert_awaited()
+        res.adapter.stop.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -127,7 +127,7 @@ async def test_graceful_pause_waits_for_in_flight_job(queue: JobQueue, monkeypat
 
     assert state["drained"] is True
     assert not runner._residents
-    res.worker.stop.assert_awaited()
+    res.adapter.stop.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_forced_pause_skips_the_drain(queue: JobQueue, monkeypatch):
 
     assert state["forced"] is True
     assert not runner._residents
-    res.worker.stop.assert_awaited()
+    res.adapter.stop.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_unload_failure_is_reported_not_raised(queue: JobQueue):
     """An unkillable worker leaves giq paused with a warning, not a 500."""
     runner = Runner(queue, residents=RESIDENTS)
     res = _prime_resident(runner, RESIDENTS[0])
-    res.worker.stop.side_effect = RuntimeError("CUDA-stuck")
+    res.adapter.stop.side_effect = RuntimeError("CUDA-stuck")
 
     state = await runner.pause()
 

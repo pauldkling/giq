@@ -27,27 +27,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from giq.adapters._subprocess import SubprocessAdapter
 from giq.models import DepthResult
 from giq.registry import vram_for
 from giq.weights import require_path
-from giq.workers._subprocess import SubprocessWorker
 
 # Upper bound for an unregistered model; the registry has the measured ones.
 DEPTH_VRAM_GB = 2.0
 
 
 @dataclass
-class DepthWorkerConfig:
+class DepthConfig:
     model: str = "depth-anything-v2-small"
 
 
-class DepthWorker(SubprocessWorker):
+class DepthAdapter(SubprocessAdapter):
     """Depth Anything V2 in a child process."""
 
-    child_module: ClassVar[str] = "giq.workers._depth_child"
+    child_module: ClassVar[str] = "giq.adapters._depth_child"
     modality: ClassVar[str] = "depth"
 
-    def __init__(self, config: DepthWorkerConfig, device: str | None = None):
+    def __init__(self, config: DepthConfig, device: str | None = None):
         super().__init__(config, device)
         # The recipe's weights.path, under GIQ_DEPTH_MODELS_DIR when that is
         # set. Unknown model or no weights: fail here, not at spawn.

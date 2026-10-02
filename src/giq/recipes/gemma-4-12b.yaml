@@ -19,7 +19,7 @@ params:
   ctx_size: 131072
   # q8_0 for attention fidelity on recently emitted tokens, the same rule as
   # the 26B; K and V stay one type (see DEFAULT_CACHE_TYPE_K in
-  # workers/llm.py).
+  # adapters/llama_cpp.py).
   cache_type_k: q8_0
   cache_type_v: q8_0
   # No --reasoning flag: the chat template decides. Thinking is on by

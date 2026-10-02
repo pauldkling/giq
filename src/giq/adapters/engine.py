@@ -7,7 +7,7 @@
 llama-server and ``vllm serve`` are different engines behind one contract: a
 process giq spawns on one card, an OpenAI-compatible endpoint on a loopback
 port, and a way to ask how busy it is. The runner used to test for
-``LLMWorker`` by class wherever it meant "a chat server"; it now tests for
+``LlamaCppAdapter`` by class wherever it meant "a chat server"; it now tests for
 this base, so a second engine is an adapter rather than a second set of
 branches through the scheduler (ADR-002, D4).
 """
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from giq.queue import JobStream
 
 
-class WorkerStartError(RuntimeError):
+class StartError(RuntimeError):
     """A server giq spawned did not come up: it exited, or outlasted its start budget.
 
     Deliberately not a ``TimeoutError``. The runner reads ``TimeoutError`` as
@@ -121,12 +121,12 @@ def engine_for(model: str) -> str:
 def context_size(model: str) -> int:
     """The context window an LLM is served with, whichever engine runs it."""
     if engine_for(model) == "vllm":
+        from giq.adapters.vllm import recipe_for
         from giq.recipes.schema import VllmParams
-        from giq.workers.vllm import recipe_for
 
         recipe = recipe_for(model)
         if recipe is not None and isinstance(recipe.params, VllmParams):
             return recipe.params.max_model_len
-    from giq.workers.llm import DEFAULT_CTX_SIZE, MODEL_CTX_SIZE
+    from giq.adapters.llama_cpp import DEFAULT_CTX_SIZE, MODEL_CTX_SIZE
 
     return MODEL_CTX_SIZE.get(model, DEFAULT_CTX_SIZE)

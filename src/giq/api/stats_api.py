@@ -431,13 +431,13 @@ def reasoning_for(worker: str, model: str) -> str | None:
     """
     if worker != "llm":
         return None
-    from giq.workers.engine import engine_for
+    from giq.adapters.engine import engine_for
 
     if engine_for(model) == "vllm":
         # vllm has no server-level switch: the chat template decides, and a
         # caller turns it off per request with chat_template_kwargs.
         return "template"
-    from giq.workers.llm import DEFAULT_REASONING, MODEL_REASONING
+    from giq.adapters.llama_cpp import DEFAULT_REASONING, MODEL_REASONING
 
     return MODEL_REASONING.get(model, DEFAULT_REASONING)
 

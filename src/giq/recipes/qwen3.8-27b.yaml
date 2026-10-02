@@ -10,7 +10,7 @@
 # speculative decoding: it carries the vision projector, and this build has
 # not been measured under draft-mtp. A text-only `-fast` recipe over the
 # same GGUF is how that speedup would be served (see the speculative-decoding
-# notes in workers/llm.py); it goes in with its own measurement.
+# notes in adapters/llama_cpp.py); it goes in with its own measurement.
 name: qwen3.8-27b
 modalities: [llm]
 engine: llama.cpp
@@ -34,7 +34,7 @@ params:
   # 4.25 GiB of KV at 128k and 8.5 at 256k; the latter does not fit alongside
   # 20.5 GiB of weights on a 31.8 GiB card.
   ctx_size: 131072
-  # The K/V benchmark in workers/llm.py is this model's: symmetric q8_0 keeps
+  # The K/V benchmark in adapters/llama_cpp.py is this model's: symmetric q8_0 keeps
   # the fused attention kernel.
   cache_type_k: q8_0
   cache_type_v: q8_0
@@ -42,7 +42,7 @@ params:
   mmproj: unsloth-Qwen3.8-27B-GGUF/mmproj-F16.gguf
 # Qwen's sampling guidance for thinking mode, plus DRY against verbatim loops
 # (why DRY rather than a token penalty is in the request-defaults notes in
-# workers/llm.py). Defaults, not overrides: the caller's body wins.
+# adapters/llama_cpp.py). Defaults, not overrides: the caller's body wins.
 # `temperature` is absent on purpose — openai_compat always sends it (0.7),
 # so an entry here would never apply.
 request_defaults:

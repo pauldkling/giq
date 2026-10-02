@@ -38,7 +38,7 @@ two consecutive verdicts have to agree before the guard trips. The cost of a
 false positive is a thought cut short; the cost of a false negative is one
 wasted generation. Neither is bad enough to justify a hair trigger.
 
-This module only measures. What to do about it — see LLMWorker's use of
+This module only measures. What to do about it — see LlamaCppAdapter's use of
 llama.cpp's reasoning_end control — is the caller's decision.
 """
 

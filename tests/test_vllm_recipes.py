@@ -8,8 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from giq import recipes
+from giq.adapters.engine import context_size, engine_for
 from giq.recipes.schema import Recipe
-from giq.workers.engine import context_size, engine_for
 from tests._vllm import NAME, doc, make_checkpoint, make_recipe, params_of
 
 

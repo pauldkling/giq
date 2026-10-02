@@ -31,10 +31,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from giq.adapters._subprocess import SubprocessAdapter
 from giq.models import MultiviewResult
 from giq.registry import vram_for
 from giq.weights import require_path
-from giq.workers._subprocess import SubprocessWorker
 
 # Which declared engine runs the child.
 ENGINE = "da3"
@@ -47,17 +47,17 @@ MULTIVIEW_VRAM_GB = 8.0
 
 
 @dataclass
-class MultiviewWorkerConfig:
+class MultiviewConfig:
     model: str = "da3-base"
 
 
-class MultiviewWorker(SubprocessWorker):
+class MultiviewAdapter(SubprocessAdapter):
     """Depth Anything 3 in a child process on the ``da3`` interpreter."""
 
-    child_module: ClassVar[str] = "giq.workers._multiview_child"
+    child_module: ClassVar[str] = "giq.adapters._multiview_child"
     modality: ClassVar[str] = "multiview"
 
-    def __init__(self, config: MultiviewWorkerConfig, device: str | None = None):
+    def __init__(self, config: MultiviewConfig, device: str | None = None):
         super().__init__(config, device)
         # The recipe's weights.path, under GIQ_MULTIVIEW_MODELS_DIR when
         # that is set. Unknown model or no weights: fail here, not at spawn.

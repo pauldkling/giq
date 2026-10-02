@@ -207,7 +207,7 @@ async def test_eviction_picks_minimal_single_victim(
     assert RESIDENTS[0] in runner._residents  # gemma survives
     assert RESIDENTS[1] not in runner._residents  # audio evicted
     assert RESIDENTS[2] in runner._residents  # embed survives
-    audio.worker.stop.assert_awaited()
+    audio.adapter.stop.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -228,7 +228,7 @@ async def test_eviction_flux_takes_gemma_only(queue: JobQueue, monkeypatch: pyte
     assert RESIDENTS[0] not in runner._residents  # gemma evicted
     assert RESIDENTS[1] in runner._residents  # audio survives
     assert RESIDENTS[2] in runner._residents  # embed survives
-    gemma.worker.stop.assert_awaited()
+    gemma.adapter.stop.assert_awaited()
 
 
 @pytest.mark.asyncio

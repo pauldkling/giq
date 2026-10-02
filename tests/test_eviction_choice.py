@@ -29,9 +29,9 @@ def _loaded(**sizes):
     out = []
     for key, gb in sizes.items():
         res = MagicMock()
-        res.worker.estimated_vram_gb = gb
+        res.adapter.estimated_vram_gb = gb
         out.append(((key[0], key[1]), res))
-    return sorted(out, key=lambda kv: kv[1].worker.estimated_vram_gb)
+    return sorted(out, key=lambda kv: kv[1].adapter.estimated_vram_gb)
 
 
 def _keys(victims):
@@ -49,9 +49,9 @@ def standard_set():
     out = []
     for key, gb in ((GEMMA, 9.5), (WHISPER, 4.0), (ECAPA, 0.6)):
         res = MagicMock()
-        res.worker.estimated_vram_gb = gb
+        res.adapter.estimated_vram_gb = gb
         out.append((key, res))
-    return sorted(out, key=lambda kv: kv[1].worker.estimated_vram_gb)
+    return sorted(out, key=lambda kv: kv[1].adapter.estimated_vram_gb)
 
 
 def test_one_resident_covering_the_deficit_is_evicted_alone():
@@ -146,8 +146,8 @@ def sized(**by_key):
     out = []
     for key, (declared, pid) in by_key.items():
         res = MagicMock()
-        res.worker.estimated_vram_gb = declared
-        res.worker.pid = pid
+        res.adapter.estimated_vram_gb = declared
+        res.adapter.pid = pid
         out.append((key, res))
     return out
 
@@ -159,8 +159,8 @@ def test_victim_size_can_differ_from_the_declared_gate_size():
     it frees half a gigabyte that does not exist.
     """
     loaded = [(GEMMA, MagicMock()), (WHISPER, MagicMock())]
-    loaded[0][1].worker.estimated_vram_gb = 9.5
-    loaded[1][1].worker.estimated_vram_gb = 4.0
+    loaded[0][1].adapter.estimated_vram_gb = 9.5
+    loaded[1][1].adapter.estimated_vram_gb = 4.0
     measured = {id(loaded[0][1]): 8.88, id(loaded[1][1]): 3.76}
     size_of = lambda res: measured[id(res)]  # noqa: E731
 
@@ -172,7 +172,7 @@ def test_victim_size_can_differ_from_the_declared_gate_size():
 
 def test_declared_size_is_the_default():
     loaded = [(GEMMA, MagicMock())]
-    loaded[0][1].worker.estimated_vram_gb = 9.5
+    loaded[0][1].adapter.estimated_vram_gb = 9.5
     assert _choose_victims(loaded, 9.0) == loaded
 
 

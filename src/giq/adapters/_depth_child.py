@@ -4,7 +4,7 @@
 
 """Depth child process: Depth Anything V2, native transformers.
 
-Invoked by ``DepthWorker`` via ``python -u -m giq.workers._depth_child
+Invoked by ``DepthAdapter`` via ``python -u -m giq.adapters._depth_child
 --model depth-anything-v2-small --weights <dir>``. Loads the local snapshot
 the recipe names, with the hub disabled before transformers is imported,
 so nothing is ever fetched.
@@ -16,7 +16,7 @@ return it as a 16-bit PNG with the range it was scaled from. The model's
 output is relative inverse depth — larger is nearer, no unit — and it is
 returned as-is; no inversion, no normalisation beyond the 16-bit mapping.
 
-Wire protocol: see giq.workers._subprocess.
+Wire protocol: see giq.adapters._subprocess.
 """
 
 import os
@@ -26,7 +26,7 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
-from giq.workers._subprocess import (  # noqa: E402
+from giq.adapters._subprocess import (  # noqa: E402
     reserve_ipc_stdout,
     run_ipc_child_loop,
     write_startup_error,

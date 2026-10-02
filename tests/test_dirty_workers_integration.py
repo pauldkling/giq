@@ -27,9 +27,9 @@ import subprocess
 
 import pytest
 
+from giq.adapters.sdcpp import SdCppAdapter, SdCppConfig
+from giq.adapters.tts import TtsAdapter, TtsConfig
 from giq.vram import get_free_vram
-from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
-from giq.workers.tts import TTSWorker, TTSWorkerConfig
 
 
 def _has_nvidia_gpu() -> bool:
@@ -77,7 +77,7 @@ def _query_free_vram_mib() -> int:
 
 async def test_text2image_zimage_full_lifecycle():
     """Sanity: worker starts, produces an image, stops cleanly."""
-    worker = SdCppWorker(SdCppWorkerConfig(model="zimage"))
+    worker = SdCppAdapter(SdCppConfig(model="zimage"))
     await worker.start()
     try:
         assert worker.is_ready
@@ -109,7 +109,7 @@ async def test_text2image_process_not_in_nvidia_smi_after_stop():
     # Sanity: before any CUDA work, parent should not appear.
     assert parent_pid not in _query_nvidia_smi_compute_apps_pids()
 
-    worker = SdCppWorker(SdCppWorkerConfig(model="zimage"))
+    worker = SdCppAdapter(SdCppConfig(model="zimage"))
     await worker.start()
     try:
         await worker.run_batch([{"id": "t", "prompt": "a potted plant by a window"}])
@@ -137,7 +137,7 @@ async def test_text2image_vram_fully_returned_after_stop():
     await asyncio.sleep(0.5)  # let any prior work settle
     cold_free_mib = _query_free_vram_mib()
 
-    worker = SdCppWorker(SdCppWorkerConfig(model="zimage"))
+    worker = SdCppAdapter(SdCppConfig(model="zimage"))
     await worker.start()
     try:
         await worker.run_batch([{"id": "t", "prompt": "a mountain landscape at dusk"}])
@@ -167,7 +167,7 @@ async def test_kokoro_process_not_in_nvidia_smi_after_stop():
     parent_pid = os.getpid()
     assert parent_pid not in _query_nvidia_smi_compute_apps_pids()
 
-    worker = TTSWorker(TTSWorkerConfig())
+    worker = TtsAdapter(TtsConfig())
     await worker.start()
     assert worker.pid is not None, "kokoro must own a child process"
     child_pid = worker.pid
@@ -196,7 +196,7 @@ async def test_kokoro_vram_fully_returned_after_stop():
     """The number that actually mattered: ~1GB back, not merely a dead PID."""
     cold_free_mib = _query_free_vram_mib()
 
-    worker = TTSWorker(TTSWorkerConfig())
+    worker = TtsAdapter(TtsConfig())
     await worker.start()
     try:
         await worker.run_batch([{"id": "t", "text": "Hello there.", "voice": "alloy"}])
@@ -222,7 +222,7 @@ async def test_sequencing_text2image_then_llm_sees_cold_vram():
     await asyncio.sleep(0.5)
     cold_free_gb = get_free_vram()
 
-    worker = SdCppWorker(SdCppWorkerConfig(model="zimage"))
+    worker = SdCppAdapter(SdCppConfig(model="zimage"))
     await worker.start()
     try:
         await worker.run_batch([{"id": "x", "prompt": "a waterfall"}])

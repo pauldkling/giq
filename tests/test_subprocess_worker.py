@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for SubprocessWorker base class.
+"""Unit tests for SubprocessAdapter base class.
 
 No GPU required. Uses tiny inline Python scripts as stub children, invoked via
 ``sys.executable -c <script>``. The behaviors exercised are IPC framing,
@@ -15,9 +15,9 @@ import sys
 
 import pytest
 
-from giq.workers._subprocess import (
+from giq.adapters._subprocess import (
     SHUTDOWN_GRACE_SECONDS,
-    SubprocessWorker,
+    SubprocessAdapter,
     SubprocessWorkerDied,
     SubprocessWorkerError,
     SubprocessWorkerStartError,
@@ -26,7 +26,7 @@ from giq.workers._subprocess import (
 # ---- Test helper: stub worker that runs an inline script --------------------
 
 
-class _StubWorker(SubprocessWorker):
+class _StubWorker(SubprocessAdapter):
     """Run arbitrary Python via ``python -u -c <script>`` instead of ``-m``."""
 
     def __init__(self, script: str):
@@ -220,7 +220,7 @@ async def test_stop_graceful_is_fast():
 async def test_stop_sigterm_escalates_to_sigkill(caplog):
     w = _StubWorker(SCRIPT_IGNORE_SIGTERM)
     await w.start()
-    with caplog.at_level(logging.WARNING, logger="giq.workers._subprocess"):
+    with caplog.at_level(logging.WARNING, logger="giq.adapters._subprocess"):
         await w.stop()
     assert any("SIGKILL" in r.message for r in caplog.records), (
         f"Expected SIGKILL escalation warning in logs, got: {[r.message for r in caplog.records]}"
@@ -230,7 +230,7 @@ async def test_stop_sigterm_escalates_to_sigkill(caplog):
 
 async def test_stderr_forwarded_to_logger(caplog):
     w = _StubWorker(SCRIPT_STDERR_NOISY)
-    with caplog.at_level(logging.DEBUG, logger="giq.workers._subprocess"):
+    with caplog.at_level(logging.DEBUG, logger="giq.adapters._subprocess"):
         await w.start()
         await asyncio.sleep(0.2)  # give drain task a moment
         await w.stop()
@@ -253,7 +253,7 @@ async def test_cancellation_during_start_reaps_child():
 
 
 async def test_estimated_vram_gb_raises_on_base():
-    class NoVramWorker(SubprocessWorker):
+    class NoVramWorker(SubprocessAdapter):
         child_module = "x"
 
     w = NoVramWorker(config=None)
@@ -262,7 +262,7 @@ async def test_estimated_vram_gb_raises_on_base():
 
 
 async def test_command_not_set_raises():
-    class EmptyWorker(SubprocessWorker):
+    class EmptyWorker(SubprocessAdapter):
         pass  # no child_module set
 
     w = EmptyWorker(config=None)
@@ -274,9 +274,9 @@ async def test_ipc_child_loop_integration():
     """End-to-end: parent spawns child that uses run_ipc_child_loop helper."""
     script = (
         "import sys\n"
-        # run_ipc_child_loop lives in giq.workers._subprocess
+        # run_ipc_child_loop lives in giq.adapters._subprocess
         "sys.path.insert(0, " + repr(str(_repo_src_path())) + ")\n"
-        "from giq.workers._subprocess import run_ipc_child_loop\n"
+        "from giq.adapters._subprocess import run_ipc_child_loop\n"
         "def echo(tasks, params):\n"
         "    return [{'id': t.get('id'), 'echoed': True} for t in tasks]\n"
         "run_ipc_child_loop(echo)\n"

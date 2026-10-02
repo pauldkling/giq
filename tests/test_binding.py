@@ -207,16 +207,16 @@ async def test_eviction_only_considers_residents_on_the_target_card(two_cards, s
                 await runner._evict_residents_for("zimage")
 
     assert "gemma-4-12b" in runner._residents  # untouched
-    gemma.worker.stop.assert_not_awaited()
+    gemma.adapter.stop.assert_not_awaited()
     assert "kokoro" not in runner._residents  # its card, its cost
-    kokoro.worker.stop.assert_awaited()
+    kokoro.adapter.stop.assert_awaited()
 
 
 def test_each_card_gets_its_own_server_port(two_cards, store):
     """Two llama-servers cannot both bind 8086."""
+    from giq.adapters.llama_cpp import INTERNAL_LLM_PORT
+    from giq.adapters.sdcpp import INTERNAL_SD_PORT
     from giq.gpus import device_port
-    from giq.workers.llm import INTERNAL_LLM_PORT
-    from giq.workers.sdcpp import INTERNAL_SD_PORT
 
     with two_cards():
         assert device_port(INTERNAL_LLM_PORT, BIG) == 8086  # unchanged for card 0
@@ -230,20 +230,20 @@ def test_each_card_gets_its_own_server_port(two_cards, store):
 
 
 def test_a_bound_llm_config_takes_its_cards_port(two_cards, store):
-    from giq.workers.llm import LLMWorkerConfig
+    from giq.adapters.llama_cpp import LlamaCppConfig
 
     with two_cards():
         store.set_device("gemma-4-12b", "1")
-        config = LLMWorkerConfig(model="gemma-4-12b")
+        config = LlamaCppConfig(model="gemma-4-12b")
     assert config.device == SMALL
     assert config.port == 8096
 
 
 def test_the_child_environment_names_the_bound_card(two_cards, store):
     with two_cards(bind={"kokoro": "1"}):
-        from giq.workers.tts import TTSWorker, TTSWorkerConfig
+        from giq.adapters.tts import TtsAdapter, TtsConfig
 
-        worker = TTSWorker(TTSWorkerConfig(model="kokoro"))
+        worker = TtsAdapter(TtsConfig(model="kokoro"))
         env = worker._spawn_env()
     assert env["CUDA_VISIBLE_DEVICES"] == SMALL
 
@@ -442,11 +442,11 @@ def test_a_second_server_on_a_card_takes_a_spare_port_of_that_card(two_cards, mo
 
 @pytest.mark.asyncio
 async def test_llama_moves_off_a_held_port_at_start(two_cards, store, monkeypatch):
-    from giq.workers.llm import LLMWorker, LLMWorkerConfig
+    from giq.adapters.llama_cpp import LlamaCppAdapter, LlamaCppConfig
 
     with two_cards():
         store.set_device("gemma-4-12b", "1")
-        worker = LLMWorker(config=LLMWorkerConfig(model="gemma-4-12b"))
+        worker = LlamaCppAdapter(config=LlamaCppConfig(model="gemma-4-12b"))
         _taken(monkeypatch, 8096)
         await worker._claim_port()
     assert worker.config.port == 8105
@@ -455,8 +455,8 @@ async def test_llama_moves_off_a_held_port_at_start(two_cards, store, monkeypatc
 
 @pytest.mark.asyncio
 async def test_the_stale_sweep_covers_every_port_of_every_card(two_cards, monkeypatch):
+    from giq.adapters import vllm
     from giq.core import lifecycle
-    from giq.workers import vllm
 
     calls: list[tuple[str, ...]] = []
 
