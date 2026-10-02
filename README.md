@@ -10,7 +10,7 @@ SPDX-License-Identifier: Apache-2.0
 LLM, image, speech, OCR and depth models to every client on the machine
 through a single job queue.
 
-![The control surface: two GPUs with their loaded models, the job queue and the last 24 hours](docs/images/control-surface.png)
+![The control surface: two GPUs with the instances running on each, the job queue and the last 24 hours](docs/images/control-surface.png)
 
 ## Features
 
@@ -48,13 +48,45 @@ through a single job queue.
   is announced at startup and on the dashboard; an optional shared token
   guards everything.
 - **Dashboard** at `/dash`: overview, the recipe catalog, the inventory of
-  weights and engines on disk, usage and a sandbox (chat, tool calls, vision, image generation and edit, transcription,
-  speech, voiceprints), in English and German, light and dark, with its
-  fonts and icons bundled so it works without internet.
+  weights and engines on disk, usage and a sandbox (chat, tool calls,
+  vision, image generation and edit, transcription, speech, voiceprints), in
+  English and German, light and dark, with its fonts and icons bundled so it
+  works without internet.
 
-![The model catalog in German, light theme: residency, GPU binding and engine per model](docs/images/models-de.png)
+![The recipe catalog in German, light theme: residency, GPU binding and engine per recipe](docs/images/recipes-de.png)
 
 ## How it works
+
+Six terms, one meaning each ([ADR-003](docs/ADR-003-domain.md)):
+
+```mermaid
+flowchart TB
+    weights["<b>Weights</b><br/>a GGUF, a checkpoint,<br/>an HF repository"]
+    engine["<b>Engine</b><br/>llama.cpp · vllm · sd.cpp<br/>and the Python runtimes"]
+    recipe["<b>Recipe</b> — one YAML file<br/>weights + engine + parameters<br/>its VRAM figure<br/>the modalities it serves"]
+    instance["<b>Instance</b><br/>a recipe running on a card<br/>a process, a port, its VRAM"]
+    residency{{"<b>Residency</b><br/>keep warm · on demand · off"}}
+    client(["Client<br/>model: gemma-4-12b"])
+    queue["Job queue"]
+    weights --> recipe
+    engine --> recipe
+    recipe -->|"started on GPU 0 or GPU 1"| instance
+    residency -.->|"keeps it, or lets it go"| instance
+    client -->|"a job: modality + recipe"| queue
+    queue -->|"runs on"| instance
+```
+
+- **Weights** are the files on disk; one checkpoint can serve several
+  recipes, and the Inventory lists each once.
+- An **engine** is the runtime that executes them.
+- A **recipe** is weights + engine + parameters, with its VRAM figure
+  (measured on real hardware, or marked as an estimate).
+  Its name is what a client sends as `model`; it serves one or more
+  **modalities** (`llm`, `text2image`, `ocr` …).
+- An **instance** is a recipe running on a card. **Residency** decides
+  whether it stays: *keep warm* (a resident instance, reloaded after
+  eviction and on boot), *on demand* (started for a job, stopped when idle),
+  or *off*.
 
 A request names a recipe (`model`) and becomes a job, which waits in the
 queue for an instance of that recipe — the recipe running on a card. If one
@@ -71,8 +103,10 @@ Instances run in their own processes — `llama-server`, `sd-server` or
 started with `CUDA_VISIBLE_DEVICES` set to their card, so stopping one gives
 its VRAM back. (Batch `stt` is the exception: faster-whisper runs inside
 giq's process, and its CUDA context stays until giq restarts.)
-`POST /control/pause` unloads everything and hands the GPUs back until
+`POST /control/pause` stops every instance and hands the GPUs back until
 `/control/resume`.
+
+![The inventory: every checkpoint once, with its format, licence, the recipes that load it and its size; disks and engines alongside](docs/images/inventory.png)
 
 ## Quick start
 

@@ -70,7 +70,7 @@ scope.
 
 The UI is in English and German.
 
-![The Models view in German, light theme](images/models-de.png)
+![The Recipes view in German, light theme](images/recipes-de.png)
 
 Strings live in
 `frontend/src/locales/<lang>/<namespace>.json` (namespaces `common`,
