@@ -325,3 +325,17 @@ def delete_weights(weights_id: str, *, busy: set[str]) -> dict:
         "missing": missing,
         "freed_bytes": freed,
     }
+
+
+def installed(name: str) -> bool:
+    """Are recipe ``name``'s weights on disk? Every file, part and shard.
+
+    A presence check, not a size: the catalog asks it for every recipe on
+    every poll, and walking a checkpoint directory to sum it is the storage
+    report's job.
+    """
+    hub = hf_cache_dir()
+    found = locations(name)
+    return bool(found) and all(
+        p.exists() for loc in found for p in _expand_gguf(_on_disk(loc, hub))
+    )

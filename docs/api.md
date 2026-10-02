@@ -94,6 +94,10 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/stats/gpus`, `/stats/vram`, `/stats/gpus/eras` | GET | GPU telemetry history and per-card job totals |
 | `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's recipe files — see [Storage](#storage) |
 | `/storage/models/{worker}/{model}` | DELETE | Delete a model's weights |
+| `/recipes` | GET | Every recipe: modalities, engine, installed, residency, card, fit, the instance running it, weights ids; per-card pinned budgets; reload order |
+| `/recipes/{name}` | GET | One recipe, by name or alias |
+| `/recipes/{name}/residency` | PUT, DELETE | `{"policy": "pinned" \| "auto" \| "off", "reason"?, "force"?}`; DELETE returns to the default |
+| `/recipes/{name}/card` | PUT | `{"device": index \| uuid \| null, "force"?}` — bind to a card, or unbind |
 | `/instances` | GET | Every recipe running on a card: residency (`resident`/`on_demand`), state, card, port, pid, lanes, VRAM |
 | `/weights` | GET | Every checkpoint the recipes name, once each: location, provenance, the recipes that load it, size — see [Weights](#weights) |
 | `/weights/{id}` | DELETE | Delete one checkpoint; the recipes using it stay, uninstalled |
