@@ -9,9 +9,10 @@ its modalities and engine, whether its weights are installed, its residency
 and card, whether it fits that card now, and the instance running it if
 there is one. The writes set residency and card by recipe name.
 
-The 409 rules behind the writes — one pinned LLM per card, a pinned set that
-must fit its card, a card the recipe can never fit — are the control routes'
-(``giq.api.router``), called here rather than copied until those routes go.
+Every write is refused with 409 when it would leave the scheduler with a
+set it can never satisfy: two LLMs pinned to one card, a pinned set that
+does not fit its card (unless ``force``), a recipe bound to a card it can
+never fit.
 """
 
 from __future__ import annotations
@@ -227,23 +228,69 @@ async def _after(recipe: Recipe, warnings: list[str]) -> dict:
     return {"recipe": recipe_entry(recipe, m), "cards": card_budgets(m), "warnings": warnings}
 
 
+def _card_label(uuid: str | None) -> str:
+    """Human-readable card name for messages: "GPU 1 (RTX 5060 Ti)"."""
+    gpu = resolve_device(uuid) if uuid else None
+    if gpu is None:
+        return "the default card"
+    return f"GPU {gpu.index} ({gpu.name})"
+
+
 @router.put("/recipes/{name}/residency")
 async def set_residency(name: str, request: ResidencyRequest) -> dict:
     """Keep a recipe loaded (``pinned``), load it on demand (``auto``), or switch it ``off``.
 
-    Pinning is refused (409) when the card's pinned set could never all load
-    — the scheduler would retry forever — unless ``force``.
+    ``pinned`` keeps it loaded and brings it back on boot; ``auto`` loads it
+    on demand and lets the scheduler evict it; ``off`` refuses jobs for it and
+    blocks every load path until it is set back. Changes take effect on the
+    next residents tick (a few seconds), which is also when a demoted recipe
+    is actually unloaded — teardown waits out in-flight lane jobs first, so
+    nothing is killed mid-generation.
+
+    Pinning a set that cannot coexist on the card is refused with 409: the
+    scheduler would thrash reloads forever trying to satisfy it. ``force``
+    overrides that. Pinning a second LLM on one card is refused outright.
     """
-    from giq.api.router import set_model_policy
-    from giq.models import ModelPolicyRequest
+    from giq.policy import PINNED
+    from giq.stats import get_stats
 
     recipe = _recipe_or_404(name)
-    done = await set_model_policy(
-        recipe.modality,
-        recipe.name,
-        ModelPolicyRequest(policy=request.policy, reason=request.reason, force=request.force),
-    )
-    return await _after(recipe, done.warnings)
+    store = get_policy_store()
+    warnings: list[str] = []
+    if request.policy == PINNED:
+        target = store.effective_device(recipe.name)
+        other_llm = store.resident_llm(exclude=recipe.name, device=target)
+        if recipe.serves("llm") and other_llm is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{other_llm} is already pinned to the same card. One resident LLM per "
+                    "card: unpin it, or bind one of them to another card."
+                ),
+            )
+        fits, projected, total, device = store.pinned_fit(extra=recipe.name)
+        where = _card_label(device)
+        if not fits and not request.force:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"pinning {recipe.name} would need {projected:.1f}GB of {total:.1f}GB on "
+                    f"{where} — the resident set there could never all load, and the scheduler "
+                    "would retry forever. Unpin something, bind it to another card, or pass "
+                    "force=true."
+                ),
+            )
+        if not fits:
+            warnings.append(
+                f"pinned set on {where} needs {projected:.1f}GB of {total:.1f}GB — "
+                "it cannot all load"
+            )
+    try:
+        store.set(recipe.name, request.policy, request.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    await get_stats().record_event("policy", f"{recipe.name} -> {request.policy}")
+    return await _after(recipe, warnings)
 
 
 @router.delete("/recipes/{name}/residency")
@@ -258,18 +305,57 @@ async def clear_residency(name: str) -> dict:
 async def set_card(name: str, request: CardRequest) -> dict:
     """Bind a recipe to a card by index or UUID, or unbind it with ``null``.
 
-    Refused (409) when the recipe could never fit that card, and when the
-    card's pinned set would over-commit (``force`` overrides the latter).
+    The binding decides where the recipe loads, which card's VRAM it is gated
+    against, and which residents can be evicted to make room for it; it does
+    not change residency. Stored as the UUID: an index is a position in this
+    boot's enumeration and a binding has to outlive that. Refused (409) when
+    the recipe could never fit that card — checked against the card's total,
+    since a binding is durable — and when the card's pinned set would
+    over-commit, unless ``force``.
     """
-    from giq.api.router import set_model_device
-    from giq.models import ModelDeviceRequest
+    from giq.stats import get_stats
+    from giq.vram import can_load
 
     recipe = _recipe_or_404(name)
-    done = await set_model_device(
-        recipe.modality,
-        recipe.name,
-        ModelDeviceRequest(
-            device=None if request.device is None else str(request.device), force=request.force
-        ),
-    )
-    return await _after(recipe, done.warnings)
+    store = get_policy_store()
+    previous = store.device_for(recipe.name)
+    device = None if request.device is None else str(request.device)
+    try:
+        store.set_device(recipe.name, device)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    warnings: list[str] = []
+    target = store.effective_device(recipe.name)
+    where = _card_label(target)
+    fits_card, reason = await asyncio.to_thread(can_load, recipe.name, target)
+    if not fits_card and "can never fit" in reason:
+        store.set_device(recipe.name, previous)
+        raise HTTPException(status_code=409, detail=f"{recipe.name} on {where}: {reason}")
+
+    if store.policy_for(recipe.name) == "pinned":
+        other_llm = store.resident_llm(exclude=recipe.name, device=target)
+        if recipe.serves("llm") and other_llm is not None:
+            store.set_device(recipe.name, previous)
+            raise HTTPException(
+                status_code=409,
+                detail=f"{other_llm} is already pinned to {where}. One resident LLM per card.",
+            )
+        fits, projected, total, _dev = store.pinned_fit(extra=recipe.name)
+        if not fits and not request.force:
+            store.set_device(recipe.name, previous)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"binding {recipe.name} to {where} would put {projected:.1f}GB of pinned "
+                    f"recipes on a {total:.1f}GB card. Unpin something there, or pass force=true."
+                ),
+            )
+        if not fits:
+            warnings.append(
+                f"pinned set on {where} needs {projected:.1f}GB of {total:.1f}GB — "
+                "it cannot all load"
+            )
+
+    await get_stats().record_event("device", f"{recipe.name} -> {target or 'default'}")
+    return await _after(recipe, warnings)

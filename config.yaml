@@ -56,10 +56,10 @@ access:
 # re-enumeration, and what giq reports back). Unset = the biggest card, which
 # is also usually not the one driving the desktop.
 #
-# `bind` places individual models. A bound model is gated against its own
+# `bind` places individual recipes. A bound recipe is gated against its own
 # card's VRAM, loads there, and can only ever evict residents that share it —
 # so a render on one card cannot cost you the LLM on the other. Operator
-# changes made through the dashboard or /control/models/.../device outrank
+# changes made through the dashboard or PUT /recipes/{name}/card outrank
 # this and persist in stats.db; what is here is the checked-in default.
 #
 # `reserve` leaves VRAM unclaimed on a card giq shares with something it does

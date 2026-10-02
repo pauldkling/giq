@@ -20,7 +20,7 @@ export interface CardChoice {
 }
 
 /* The card list arrives from two endpoints with two names for free VRAM
-   (/gpus says vram_free_gb, /stats/models says free_gb). /gpus is polled
+   (/gpus says vram_free_gb, /recipes says free_gb). /gpus is polled
    every 3 s and so is fresher; the catalog's list is the fallback. */
 export function cardChoices(
   gpus: { uuid: string; index: number; name: string; vram_free_gb?: number }[] | undefined,

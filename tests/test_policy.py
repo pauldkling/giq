@@ -380,22 +380,25 @@ async def client(store, queue):
 async def test_policy_round_trip_over_http(client, store):
     # kokoro is 0.5GB, so it fits alongside the default resident set; pinning
     # a 9GB image model on top of it would (correctly) be refused as overcommit.
-    r = await client.post(
-        "/control/models/tts/kokoro", json={"policy": "pinned", "reason": "demo day"}
+    r = await client.put(
+        "/recipes/kokoro/residency", json={"policy": "pinned", "reason": "demo day"}
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["state"]["policy"] == "pinned"
-    assert body["state"]["source"] == "override"
-    assert body["state"]["reason"] == "demo day"
-    assert "tts/kokoro" in body["pinned"]
-    assert body["pinned_vram_gb"] <= body["vram_total_gb"]
+    residency = body["recipe"]["residency"]
+    assert (residency["policy"], residency["source"], residency["reason"]) == (
+        "pinned",
+        "override",
+        "demo day",
+    )
+    assert any("kokoro" in c["pinned"] for c in body["cards"])
+    assert all(c["pinned_gb"] <= c["total_gb"] for c in body["cards"])
 
-    r = await client.delete("/control/models/tts/kokoro")
+    r = await client.delete("/recipes/kokoro/residency")
     assert r.status_code == 200
-    assert r.json()["state"]["policy"] == "auto"
-    assert r.json()["state"]["source"] == "default"
-    assert "tts/kokoro" not in r.json()["pinned"]
+    residency = r.json()["recipe"]["residency"]
+    assert (residency["policy"], residency["source"]) == ("auto", "default")
+    assert not any("kokoro" in c["pinned"] for c in r.json()["cards"])
 
 
 @pytest.mark.asyncio
@@ -413,37 +416,16 @@ async def test_pinning_an_image_model_overcommits_a_small_card(client, store, mo
         "giq.vram.get_vram_status",
         lambda *args, **kwargs: VRAMStatus(used_gb=0.0, total_gb=16.0, free_gb=16.0),
     )
-    r = await client.post("/control/models/text2image/flux_klein", json={"policy": "pinned"})
+    r = await client.put("/recipes/flux_klein/residency", json={"policy": "pinned"})
     assert r.status_code == 409
     # gemma 9.5 + whisper 4.0 + ecapa 0.6 + klein 8.0 + 0.5 headroom = 22.6
     assert "22.6GB of 16.0GB" in r.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_listing_policies_covers_every_model(client):
-    r = await client.get("/control/models")
-    assert r.status_code == 200
-    from giq.registry import all_recipes
-
-    assert len(r.json()) == len(all_recipes())
-
-
-@pytest.mark.asyncio
-async def test_unknown_model_is_404(client):
-    r = await client.post("/control/models/llm/nope", json={"policy": "pinned"})
-    assert r.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_invalid_policy_is_400(client):
-    r = await client.post("/control/models/tts/kokoro", json={"policy": "sometimes"})
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
 async def test_overcommitting_the_card_is_refused(client, store, sixteen_gb_card):
     """The footgun guard: an unsatisfiable pinned set thrashes reloads forever."""
-    r = await client.post("/control/models/text2image/zimage", json={"policy": "pinned"})
+    r = await client.put("/recipes/zimage/residency", json={"policy": "pinned"})
     assert r.status_code == 409
     assert "force=true" in r.json()["detail"]
     assert store.policy_for("zimage") == AUTO  # nothing was written
@@ -451,9 +433,7 @@ async def test_overcommitting_the_card_is_refused(client, store, sixteen_gb_card
 
 @pytest.mark.asyncio
 async def test_overcommit_can_be_forced_but_warns(client, store, sixteen_gb_card):
-    r = await client.post(
-        "/control/models/text2image/zimage", json={"policy": "pinned", "force": True}
-    )
+    r = await client.put("/recipes/zimage/residency", json={"policy": "pinned", "force": True})
     assert r.status_code == 200
     assert any("cannot all load" in w for w in r.json()["warnings"])
     assert store.policy_for("zimage") == PINNED
@@ -461,7 +441,7 @@ async def test_overcommit_can_be_forced_but_warns(client, store, sixteen_gb_card
 
 @pytest.mark.asyncio
 async def test_pinning_a_second_llm_is_refused(client, store):
-    r = await client.post("/control/models/llm/llama-3.2-3b", json={"policy": "pinned"})
+    r = await client.put("/recipes/llama-3.2-3b/residency", json={"policy": "pinned"})
     assert r.status_code == 409
     assert "One resident LLM per card" in r.json()["detail"]
     assert store.policy_for("llama-3.2-3b") == AUTO
@@ -471,9 +451,9 @@ async def test_pinning_a_second_llm_is_refused(client, store):
 async def test_swapping_the_pinned_llm_works(client, store):
     """Unpin then pin: the natural way to change which LLM is resident."""
     assert (
-        await client.post("/control/models/llm/gemma-4-12b", json={"policy": "auto"})
+        await client.put("/recipes/gemma-4-12b/residency", json={"policy": "auto"})
     ).status_code == 200
-    r = await client.post("/control/models/llm/llama-3.2-3b", json={"policy": "pinned"})
+    r = await client.put("/recipes/llama-3.2-3b/residency", json={"policy": "pinned"})
     assert r.status_code == 200
     assert store.resident_llm() == "llama-3.2-3b"
 
@@ -481,13 +461,12 @@ async def test_swapping_the_pinned_llm_works(client, store):
 @pytest.mark.asyncio
 async def test_catalog_reports_policy(client, store):
     store.set("kokoro", OFF, reason="noisy")
-    r = await client.get("/stats/models")
+    r = await client.get("/recipes")
     assert r.status_code == 200
     body = r.json()
-    entry = next(m for m in body["models"] if m["worker"] == "tts" and m["model"] == "kokoro")
-    assert entry["policy"] == "off"
-    assert entry["policy_reason"] == "noisy"
-    assert body["pinned_fits"] is True
+    entry = next(m for m in body["recipes"] if m["name"] == "kokoro")
+    assert (entry["residency"]["policy"], entry["residency"]["reason"]) == ("off", "noisy")
+    assert all(c["pinned_fits"] for c in body["cards"])
 
 
 @pytest.mark.asyncio

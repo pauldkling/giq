@@ -77,3 +77,48 @@ async def test_an_unknown_recipe_is_404(client):
 async def test_a_bad_policy_is_a_client_error(client):
     r = await client.put("/recipes/kokoro/residency", json={"policy": "sometimes"})
     assert r.status_code == 400 and "unknown policy" in r.json()["detail"]
+
+
+BIG = "GPU-8f6adead-beef-0000-0000-c0ffee000001"
+SMALL = "GPU-8f6adead-beef-0000-0000-c0ffee000002"
+TWO_CARDS = (
+    f"{BIG}, 0, NVIDIA GeForce RTX 5090, 32607, 4921, 30, 9.00, 500.00, 0, 0, 0x0\n"
+    f"{SMALL}, 1, NVIDIA GeForce RTX 5060 Ti, 16311, 811, 36, 9.00, 180.00, 3, 0, 0x0\n"
+)
+
+
+@pytest.fixture
+def two_cards():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from giq import gpus
+
+    gpus._cache = None
+    gpus.reset_selected_device()
+    with patch(
+        "giq.gpus.subprocess.run", return_value=SimpleNamespace(stdout=TWO_CARDS, returncode=0)
+    ):
+        yield
+    gpus._cache = None
+    gpus.reset_selected_device()
+
+
+async def test_a_card_is_bound_by_index_and_stored_as_its_uuid(client, two_cards):
+    from giq.policy import get_policy_store
+
+    r = await client.put("/recipes/kokoro/card", json={"device": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["recipe"]["card"]["index"] == 1
+    assert get_policy_store().device_for("kokoro") == SMALL
+
+    r = await client.put("/recipes/kokoro/card", json={"device": None})
+    assert r.status_code == 200 and get_policy_store().device_for("kokoro") is None
+
+
+async def test_a_card_the_recipe_can_never_fit_is_refused_and_nothing_is_written(client, two_cards):
+    from giq.policy import get_policy_store
+
+    r = await client.put("/recipes/qwen3.8-27b/card", json={"device": SMALL})
+    assert r.status_code == 409 and "GPU 1" in r.json()["detail"]
+    assert get_policy_store().device_for("qwen3.8-27b") is None

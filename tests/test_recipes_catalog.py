@@ -177,7 +177,7 @@ async def test_storage_reports_the_operator_files_and_what_was_left_out(operator
     )
     (operator_dir / "broken.yaml").write_text("name: broken\nmodalities: [llm]\nctx: 1\n")
     reload_registry()
-    monkeypatch.setattr(stats_api, "storage_report", lambda: ([], []))
+    monkeypatch.setattr(stats_api, "disk_report", lambda: [])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
         block = (await c.get("/storage")).json()["recipes"]
 

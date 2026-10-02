@@ -150,16 +150,19 @@ def test_speech_models_load_the_repository_their_instance_names(operator_dir, mo
 
 
 def test_the_storage_catalog_finds_repositories_in_the_hf_cache(tmp_path, monkeypatch):
-    from giq.storage import resolve_model_paths
+    from giq.storage import installed
 
     monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(tmp_path))
-    resolved = resolve_model_paths()
-    assert resolved["whisper-large-v3"] == [
-        (tmp_path / "models--Systran--faster-whisper-large-v3").resolve(),
-        (tmp_path / "models--pyannote--speaker-diarization-community-1").resolve(),
-    ]
-    assert resolved["faster-whisper-large-v3"] == resolved["whisper-large-v3"][:1]
-    assert resolved["kokoro"] == [(tmp_path / "models--hexgrad--Kokoro-82M").resolve()]
+    assert not installed("faster-whisper-large-v3")
+    (tmp_path / "models--Systran--faster-whisper-large-v3").mkdir()
+    assert installed("faster-whisper-large-v3")
+    # The audio resident also needs the diarization pipeline.
+    assert not installed("whisper-large-v3")
+    (tmp_path / "models--pyannote--speaker-diarization-community-1").mkdir()
+    assert installed("whisper-large-v3")
+    assert not installed("kokoro")
+    (tmp_path / "models--hexgrad--Kokoro-82M").mkdir()
+    assert installed("kokoro")
 
 
 # --- image models -------------------------------------------------------------

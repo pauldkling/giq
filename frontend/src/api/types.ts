@@ -142,9 +142,7 @@ export interface GpusResponse {
   gpus: Gpu[];
 }
 
-// --- GET /stats/models (the catalog) ------------------------------------------
-
-// --- GET /recipes (ADR-003) ---------------------------------------------------------
+// --- GET /recipes -------------------------------------------------------------
 
 /** A recipe's residency: why it is (or is not) kept loaded. */
 export interface Residency {
@@ -231,7 +229,7 @@ export interface RecipeWriteResponse {
   warnings: string[];
 }
 
-// --- GET /instances ----------------------------------------------------------------
+// --- GET /instances -----------------------------------------------------------
 
 export type InstanceState = "ready" | "starting" | "stopped";
 export type InstanceResidency = "resident" | "on_demand";
@@ -261,7 +259,7 @@ export interface InstancesResponse {
   instances: InstanceEntry[];
 }
 
-// --- GET /weights, DELETE /weights/{id} ---------------------------------------------
+// --- GET /weights, DELETE /weights/{id} --------------------------------------
 
 /** One checkpoint, however many recipes load it. */
 export interface WeightsItem {
@@ -293,7 +291,7 @@ export interface DeleteWeightsResult {
   freed_bytes: number;
 }
 
-// --- GET /storage, DELETE /storage/models/{w}/{m} ----------------------------
+// --- GET /storage ------------------------------------------------------------
 
 export interface Disk {
   mount: string;
@@ -301,19 +299,6 @@ export interface Disk {
   free_bytes: number;
   models_bytes: number;
   other_bytes: number;
-}
-
-export interface StorageModel {
-  worker: Modality;
-  model: string;
-  size_bytes: number;
-  on_disk: boolean;
-  /** Other worker/model keys sharing these files. */
-  shared_with: string[];
-  resident: boolean;
-  /** Epoch seconds of the last completed job. */
-  last_used: number | null;
-  paths: string[];
 }
 
 /** An operator recipe file that is serving. */
@@ -344,20 +329,10 @@ export interface RecipesInfo {
 
 export interface StorageResponse {
   disks: Disk[];
-  models: StorageModel[];
   /** Every data directory giq resolved: models, recipes, engines, state, caches. */
   paths?: Record<string, string | null>;
   /** Absent from a giq older than recipe files. */
   recipes?: RecipesInfo;
-}
-
-export interface DeleteWeightsResponse {
-  worker: string;
-  model: string;
-  deleted: string[];
-  skipped_shared: { path: string; shared_with: string[] }[];
-  missing: string[];
-  freed_bytes: number;
 }
 
 // --- GET /engines --------------------------------------------------------------
@@ -391,32 +366,6 @@ export interface PauseResponse {
   warnings: string[];
   vram_free_gb: number;
   vram_total_gb: number;
-}
-
-export interface ModelPolicyState {
-  worker: string;
-  model: string;
-  policy: Policy;
-  source: "override" | "default";
-  reason: string | null;
-  updated_at: number | null;
-  vram_gb: number;
-  ready: boolean;
-  device: string | null;
-  device_source: string;
-  effective_device: string | null;
-  device_index: number | null;
-  device_name: string | null;
-}
-
-/** POST /control/models/{w}/{m} {policy, reason?, force?} and …/device {device, force?}. */
-export interface ModelPolicyResponse {
-  state: ModelPolicyState;
-  pinned: string[];
-  pinned_vram_gb: number;
-  vram_total_gb: number;
-  pinned_by_device: Record<string, string[]>;
-  warnings: string[];
 }
 
 // --- jobs ------------------------------------------------------------------------

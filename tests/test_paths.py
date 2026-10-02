@@ -400,7 +400,7 @@ async def test_storage_endpoint_reports_paths(clean, tmp_path, monkeypatch):
     from giq.api import stats_api
     from giq.main import app
 
-    monkeypatch.setattr(stats_api, "storage_report", lambda: ([], []))
+    monkeypatch.setattr(stats_api, "disk_report", lambda: [])
     clean.setenv("GIQ_HOME", str(tmp_path))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as c:
         body = (await c.get("/storage")).json()

@@ -7,7 +7,7 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class Modality(StrEnum):
@@ -324,62 +324,6 @@ class PauseResponse(BaseModel):
     warnings: list[str] = []
     vram_free_gb: float
     vram_total_gb: float
-
-
-class ModelPolicyRequest(BaseModel):
-    """Body for POST /control/models/{worker}/{model}."""
-
-    policy: str  # pinned | auto | off
-    reason: str | None = None
-    # Pin anyway when the pinned set would not fit the card. The scheduler
-    # cannot honour an over-committed set, so this is a deliberate override.
-    force: bool = False
-
-
-class ModelDeviceRequest(BaseModel):
-    """Body for POST /control/models/{worker}/{model}/device."""
-
-    # GPU index ("1") or UUID ("GPU-xxxx…"); null unbinds, sending the model
-    # back to giq's default card. Stored as the UUID either way.
-    device: str | None = None
-    # Bind anyway when the pinned set on the target card would not fit.
-    force: bool = False
-
-
-class ModelPolicyState(BaseModel):
-    """One model's residency policy and device binding."""
-
-    worker: str
-    model: str
-    policy: str
-    source: str  # override | default
-    reason: str | None = None
-    updated_at: float | None = None
-    vram_gb: float
-    ready: bool = False
-    # Card binding. `device` is null when unbound, in which case the model
-    # runs on `effective_device` — giq's selected card — anyway.
-    device: str | None = None
-    device_source: str = "default"  # override | config | default
-    effective_device: str | None = None
-    device_index: int | None = None
-    device_name: str | None = None
-
-
-class ModelPolicyResponse(BaseModel):
-    """Result of a policy change, with the pinned-set budget after it."""
-
-    model_config = ConfigDict(protected_namespaces=())
-
-    state: ModelPolicyState
-    pinned: list[str]
-    # Budget for ONE card — the one this model lands on. A machine-wide total
-    # would be meaningless: two cards' pinned sets do not compete.
-    pinned_vram_gb: float
-    vram_total_gb: float
-    # Pinned models grouped by the card they load on, keyed by GPU UUID.
-    pinned_by_device: dict[str, list[str]] = {}
-    warnings: list[str] = []
 
 
 class ModalityCapability(BaseModel):
