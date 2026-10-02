@@ -38,8 +38,7 @@ interpreters; `GIQ_UNLIMITED_OCR_PYTHON` / `GIQ_DA3_PYTHON` /
 ## Engine names
 
 Each engine has one name, used alike in recipe files (`engine:`),
-`config.yaml` (`engines:`), the catalog (`/stats/models`: `backend`, and
-`engine` for the image models) and the dashboard:
+`config.yaml` (`engines:`), the catalog (`/recipes`: `engine`) and the dashboard:
 
 | Engine | Runs | Executed by (`runtime`) |
 |--------|------|-------------------------|
@@ -54,8 +53,8 @@ Each engine has one name, used alike in recipe files (`engine:`),
 The old spelling `sdcpp` is still accepted wherever an engine is named and
 read as `sd.cpp`, with a deprecation warning.
 
-An image model's runtime is its instance's `engine`. A model's VRAM figure
-is measured under its engine; switching engine means measuring again.
+A recipe's runtime is its `engine`. A recipe's VRAM figure is measured
+under its engine; switching engine means measuring again.
 
 ## vllm
 
@@ -74,7 +73,7 @@ NVIDIA's NVFP4 checkpoint of Qwen3.8-27B, 256 generated tokens per request:
 
 What it costs: a start of minutes rather than seconds (192 s the first time,
 64 s of it CUDA graph capture; 82 s once its compile cache is warm), and
-memory claimed up front. A vllm instance is meant to be pinned resident, not
+memory claimed up front. A vllm recipe is meant to be pinned resident, not
 loaded on some user's first request; the built-ins are not resident by
 default so that pinning is the operator's decision.
 
@@ -177,24 +176,24 @@ guard needs llama-server's control endpoint and does nothing on vllm.
 | `memory_max` | RAM ceiling of the engine process (default `40G`; `null` = none) |
 | `ready_timeout` | Seconds a start may take (default 600) |
 
-A multimodal checkpoint whose instance does not list the `vision`
+A multimodal checkpoint whose recipe does not list the `vision`
 capability is started with `--language-model-only`.
 
 **Why a KV size rather than a fraction.** `gpu_memory_utilization: 0.93` is
 29 GB on a 32 GB card and 89 GB on a 96 GB one: on a big card shared with
 other models it takes everything. A KV budget means the same on any card,
-and giq's VRAM figure for the instance is then the sum of three measured
+and giq's VRAM figure for the recipe is then the sum of three measured
 parts — `vram.weights_gb` (vllm logs "Model loading took …") +
 `kv_cache_memory` + `vram.overhead_gb` (CUDA context, activations, graphs,
 the vision encoder's profile) — which the recipe file may state instead of
 `vram.gb`. vllm still refuses to start unless free memory covers
 `gpu_memory_utilization × card` (0.9 by default) even with a byte budget, so
-giq passes the instance's own figure over the card's size, and the check
+giq passes the recipe's own figure over the card's size, and the check
 means what it should.
 
 ### Profiles
 
-An instance names a profile and overrides single values under `params`;
+A recipe names a profile and overrides single values under `params`;
 the profile never sets the budget.
 
 | Profile | Speculation | `max_num_seqs` | `max_num_batched_tokens` | KV |
@@ -211,9 +210,9 @@ under load through vllm's default scheduling budget, hence 8192. 16 parallel
 requests was the measured point for `throughput`; 32 is only a ceiling over
 the paged pool, so it suits a large card without costing a small one memory.
 
-### The built-in instances
+### The built-in recipes
 
-`llm/qwen3.8-27b-nvfp4` (throughput) and `llm/qwen3.8-27b-nvfp4-chat`
+`qwen3.8-27b-nvfp4` (throughput) and `qwen3.8-27b-nvfp4-chat`
 (interactive) serve `nvidia/Qwen3.8-27B-NVFP4` from
 `$GIQ_MODELS_DIR/nvidia-Qwen3.8-27B-NVFP4`. Their KV budgets keep them
 loadable on a 32 GB card through giq's gate; on a larger card, replace the

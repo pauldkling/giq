@@ -74,7 +74,7 @@ The UI is in English and German.
 
 Strings live in
 `frontend/src/locales/<lang>/<namespace>.json` (namespaces `common`,
-`overview`, `usage`, `models`, `sandbox`), and German terminology follows
+`overview`, `recipes`, `inventory`, `usage`, `sandbox`), and German terminology follows
 `frontend/src/locales/GLOSSARY.md`. To add a language, copy `en/` to
 `<code>/`, translate it, and add `{ code, label }` to `LANGUAGES` in
 `frontend/src/i18n/index.ts`; `npm test` checks that every language has
@@ -109,6 +109,8 @@ local stand-in for the GitHub API); CI runs it on the tarball it built.
 
 ## Architecture
 
-See [ADR-001-ontology.md](ADR-001-ontology.md) for design decisions and
-[ADR-002-model-instances.md](ADR-002-model-instances.md) for model instances
-(weights, engine, parameters).
+See [ADR-001-ontology.md](ADR-001-ontology.md) for design decisions,
+[ADR-002-model-instances.md](ADR-002-model-instances.md) for recipe files
+(weights, engine, parameters) and [ADR-003-domain.md](ADR-003-domain.md) for
+the terms the code and the API use: engine, weights, recipe, instance,
+residency, modality.

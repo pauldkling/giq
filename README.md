@@ -18,21 +18,26 @@ through a single job queue.
   the OCR/depth/multiview endpoints — goes through one job queue, so clients
   never race each other for VRAM. Jobs carry batches of tasks.
 - **OpenAI-compatible API.** `/v1/chat/completions` with streaming and tool
-  calls, `/v1/models`, `/v1/audio/transcriptions`, `/v1/audio/speech` and
-  `/v1/audio/embeddings` — point an existing client at it.
-- **Many workers, local runtimes.** LLMs via llama.cpp (vision via
+  calls, `/v1/responses`, `/v1/models`, `/v1/audio/transcriptions`,
+  `/v1/audio/speech` and `/v1/audio/embeddings` — point an existing client
+  at it.
+- **Many modalities, local engines.** LLMs via llama.cpp (vision via
   `--mmproj`, speculative decoding via `--spec-type`); text-to-image and image
   edit via stable-diffusion.cpp; speech to text with diarization
   (faster-whisper + pyannote); text to speech (Kokoro); speaker voiceprints
   (ECAPA-TDNN); OCR (Unlimited-OCR, GLM-OCR); depth (Depth Anything V2);
   multiview depth and camera poses (Depth Anything 3).
-- **Residency you choose.** Each model is *keep warm*, *on demand* or *off*,
+- **Recipes, not code.** Every model giq serves is a recipe: one YAML file
+  naming its weights, the engine that runs them, the engine's parameters and
+  a measured VRAM figure. Clients ask for a recipe by name; your own files
+  add recipes or replace the built-ins.
+- **Residency you choose.** Each recipe is *keep warm*, *on demand* or *off*,
   changeable at runtime and persistent. Before a load, a VRAM gate checks the
-  model's declared figure — measured on real hardware, and marked as an
+  recipe's declared figure — measured on real hardware, and marked as an
   estimate where it is not — against the card's free VRAM, and evicts
-  keep-warm models on that card if that is what it takes.
-- **Multiple GPUs.** Bind a model to a card and it is gated against, loads on
-  and evicts only on that card; used VRAM is split into what giq holds and
+  keep-warm instances on that card if that is what it takes.
+- **Multiple GPUs.** Bind a recipe to a card and it is gated against, loads
+  on and evicts only on that card; used VRAM is split into what giq holds and
   what everything else does.
 - **Records that a job ran, never what it said.** Prompts, images and outputs
   stay in memory; the stats database has no column one could go in, and a
@@ -42,8 +47,8 @@ through a single job queue.
   are refused by Host/Origin checks; binding beyond loopback without a token
   is announced at startup and on the dashboard; an optional shared token
   guards everything.
-- **Dashboard** at `/dash`: control surface, usage, model catalog and a
-  sandbox (chat, tool calls, vision, image generation and edit, transcription,
+- **Dashboard** at `/dash`: overview, the recipe catalog, the inventory of
+  weights and engines on disk, usage and a sandbox (chat, tool calls, vision, image generation and edit, transcription,
   speech, voiceprints), in English and German, light and dark, with its
   fonts and icons bundled so it works without internet.
 
@@ -51,20 +56,21 @@ through a single job queue.
 
 ## How it works
 
-A request becomes a job, and the job waits in the queue for its model. If the
-model is already loaded — a keep-warm model, or the on-demand model that ran
-last — it runs at once; keep-warm LLMs take several requests in parallel. If
-not, giq checks the model's card: the declared VRAM figure plus a margin,
-against what is free there now. When it does not fit, giq evicts keep-warm
-models on that card until it does, runs the job, and the residents loop
-brings the evicted models back afterwards. An on-demand model unloads after
+A request names a recipe (`model`) and becomes a job, which waits in the
+queue for an instance of that recipe — the recipe running on a card. If one
+is up — a keep-warm (resident) instance, or the on-demand one that ran last —
+the job runs at once; resident LLMs take several requests in parallel. If
+not, giq checks the recipe's card: the declared VRAM figure plus a margin,
+against what is free there now. When it does not fit, giq evicts resident
+instances on that card until it does, runs the job, and the residents loop
+brings the evicted ones back afterwards. An on-demand instance stops after
 two idle minutes.
 
-Models run in their own processes — `llama-server` or `sd-server` on a
-loopback port, or a Python child for the other workers — started with
-`CUDA_VISIBLE_DEVICES` set to their card, so unloading a model gives its VRAM
-back. (The batch `stt` worker is the exception: it runs inside giq's process,
-and its CUDA context stays until giq restarts.)
+Instances run in their own processes — `llama-server`, `sd-server` or
+`vllm serve` on a loopback port, or a Python child for the other engines —
+started with `CUDA_VISIBLE_DEVICES` set to their card, so stopping one gives
+its VRAM back. (Batch `stt` is the exception: faster-whisper runs inside
+giq's process, and its CUDA context stays until giq restarts.)
 `POST /control/pause` unloads everything and hands the GPUs back until
 `/control/resume`.
 
@@ -112,7 +118,7 @@ curl http://localhost:8084/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model": "gemma-4-12b", "messages": [{"role": "user", "content": "Hello!"}]}'
 
-# The job API: any worker, a batch of tasks; ?wait=true returns the result
+# The job API: any modality, a batch of tasks; ?wait=true returns the result
 curl -X POST 'http://localhost:8084/run?wait=true' \
   -H 'content-type: application/json' \
   -d '{"modality": "text2image", "model": "flux_klein",
@@ -121,7 +127,7 @@ curl -X POST 'http://localhost:8084/run?wait=true' \
 
 ## Documentation
 
-- [API](docs/api.md) — the job API, every endpoint, worker task shapes, OCR,
+- [API](docs/api.md) — the job API, every endpoint, task shapes per modality, OCR,
   depth, multiview and vision
 - [Configuration](docs/configuration.md) — `config.yaml`, environment
   variables, residency, multiple GPUs, the systemd service
@@ -134,7 +140,9 @@ curl -X POST 'http://localhost:8084/run?wait=true' \
 - [Development](docs/development.md) — tests, the dashboard, languages,
   architecture
 - Design decisions: [ADR-001](docs/ADR-001-ontology.md),
-  [ADR-002](docs/ADR-002-model-instances.md)
+  [ADR-002](docs/ADR-002-model-instances.md),
+  [ADR-003](docs/ADR-003-domain.md) (the terms: engine, weights, recipe,
+  instance, residency, modality)
 
 ## Contributing
 

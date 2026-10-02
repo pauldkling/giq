@@ -14,8 +14,10 @@ it. Access rules (Host/Origin checks, the optional token) are described in
 
 ## Submit a job
 
-`modality` names the kind of job (ADR-003); `worker`, its name before, is
-still accepted for one release.
+`modality` names the kind of job and `model` the recipe that serves it —
+by name or alias, the same names `/recipes` lists
+([ADR-003](ADR-003-domain.md) defines the terms). `worker`, the modality's
+name before, is still accepted for one release.
 
 ```bash
 # LLM inference
@@ -56,7 +58,7 @@ curl http://localhost:8084/status
 
 ## Pause serving / free the GPU
 
-Unloads every model — residents included — and hands the card back. While
+Stops every instance — residents included — and hands the cards back. While
 paused, job submission returns `503` with `Retry-After` so clients back off
 instead of blocking; nothing queues up behind the pause. Also a button in the
 dashboard header.
@@ -80,20 +82,15 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/run` | POST | Submit a job (`?wait=true` blocks until it finishes) |
 | `/jobs/{id}` | GET | Get job status and results |
 | `/jobs/{id}` | DELETE | Cancel a pending job |
-| `/status` | GET | Active worker, VRAM per card (`gpus`; the `vram_*` scalars are the default card's), queue depth, pause state, access posture |
+| `/status` | GET | Active modality, VRAM per card (`gpus`; the `vram_*` scalars are the default card's), queue depth, pause state, access posture |
 | `/gpus` | GET | Per-card telemetry; `selected` marks the default card |
 | `/engines` | GET | Declared inference engines and the build each one reports |
 | `/capabilities` | GET | Per modality: the recipes that serve it, their engines, batch ceilings and voices |
-| `/control/models` | GET | Residency policy and GPU binding of every model |
-| `/control/models/{worker}/{model}` | POST | Set a model's residency policy (`pinned`, `auto`, `off`) |
-| `/control/models/{worker}/{model}/device` | POST | Bind a model to a GPU (or unbind) |
 | `/control/pause` | POST | Stop serving, unload everything, free VRAM |
 | `/control/resume` | POST | Resume serving; residents reload |
-| `/stats/models` | GET | The model catalog: VRAM needs, fit per card, policy, binding |
 | `/stats/summary`, `/stats/timeline`, `/stats/usage`, `/stats/jobs` | GET | Job history (see [Privacy](access-and-privacy.md#privacy) for what is recorded) |
 | `/stats/gpus`, `/stats/vram`, `/stats/gpus/eras` | GET | GPU telemetry history and per-card job totals |
-| `/storage` | GET | Model weights on disk, per-mount usage, the resolved directories and the operator's recipe files — see [Storage](#storage) |
-| `/storage/models/{worker}/{model}` | DELETE | Delete a model's weights |
+| `/storage` | GET | Per-mount disk usage, the resolved directories and the operator's recipe files — see [Storage](#storage) |
 | `/recipes` | GET | Every recipe: modalities, engine, installed, residency, card, fit, the instance running it, weights ids; per-card pinned budgets; reload order |
 | `/recipes/{name}` | GET | One recipe, by name or alias |
 | `/recipes/{name}/residency` | PUT, DELETE | `{"policy": "pinned" \| "auto" \| "off", "reason"?, "force"?}`; DELETE returns to the default |
@@ -103,29 +100,29 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/weights/{id}` | DELETE | Delete one checkpoint; the recipes using it stay, uninstalled |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat, streaming and tool calls included |
 | `/v1/responses` | POST | OpenAI Responses API, streaming and tool calls included — see [Responses API](#responses-api) |
-| `/v1/models` | GET | The chat models whose weights are on disk |
+| `/v1/models` | GET | The chat recipes whose weights are on disk |
 | `/v1/audio/transcriptions` | POST | Speech to text with speaker diarization (faster-whisper + pyannote; `?diarize=false` skips it) |
 | `/v1/audio/speech` | POST | Text to speech (Kokoro) |
 | `/v1/audio/embeddings` | POST | Speaker voiceprint (ECAPA-TDNN) of an audio clip |
-| `/dash` | GET | Dashboard (control surface, usage, models, sandbox; English/German; light/dark/system theme) |
+| `/dash` | GET | Dashboard (overview, recipes, inventory, usage, sandbox; English/German; light/dark/system theme) |
 | `/ocr` | POST | One PDF (multipart `file`) in, one HTML document out — see [OCR](#ocr) |
 | `/depth` | POST | One image in, one 16-bit depth map out — see [Depth](#depth) |
 | `/multiview` | POST | N images of one scene in; per-view depth, poses, intrinsics, optional GLB — see [Multiview](#multiview) |
 
-## Workers
+## Modalities
 
 ### LLM (`llm`)
-- Models: the models declared by `llm` recipe files (`giq/recipes/llm.*.yaml`
-  and your own, see [Instances](configuration.md#recipes)) — GGUFs via
-  llama.cpp, Hugging Face checkpoints via vllm; `/capabilities` lists them
+- Recipes: every recipe file serving `llm` (`giq/recipes/<name>.yaml` and
+  your own, see [Recipes](configuration.md#recipes)) — GGUFs via llama.cpp,
+  Hugging Face checkpoints via vllm; `/capabilities` lists them
 - Task: `{id, messages[], temperature?, max_tokens?}`
 - Result: `{id, text}`
 
-A non-streaming request waits for its model to start and then for its answer:
-the model's start budget (its instance's `ready_timeout`, or the engine's
-default — minutes for vllm) plus the job's time limit. A cold model therefore
-answers late rather than with a 504. Streaming requests send keepalives while
-the model loads.
+A non-streaming request waits for its recipe's instance to start and then
+for its answer: the start budget (the recipe's `ready_timeout`, or the
+engine's default — minutes for vllm) plus the job's time limit. A cold recipe
+therefore answers late rather than with a 504. Streaming requests send
+keepalives while the instance starts.
 
 #### Responses API
 
@@ -171,31 +168,31 @@ whatever was produced as incomplete items; a job that failed before or during
 generation ends as `response.failed` with `giq_job_failed`.
 
 ### Text2Image (`text2image`)
-- Models: `flux_klein` (FLUX.2 klein 4B, sd.cpp), `zimage` (Z-Image-Turbo,
+- Recipes: `flux_klein` (FLUX.2 klein 4B, sd.cpp), `zimage` (Z-Image-Turbo,
   sd.cpp)
 - Task: `{id, prompt, negative_prompt?, seed?}`
 - Result: `{id, image_b64, seed}`
 
 ### Image Edit (`image_edit`)
-- Models: `flux_klein` (reference edits via sd.cpp)
+- Recipes: `flux_klein` (reference edits via sd.cpp)
 - Task: `{id, reference_image_b64, instruction, negative_prompt?}`
 - Result: `{id, image_b64, seed}`
 
 ### OCR (`ocr`)
-- Models: `unlimited-ocr` (baidu, 3B, one pass over many pages),
+- Recipes: `unlimited-ocr` (baidu, 3B, one pass over many pages),
   `glm-ocr` (zai-org 0.9B behind PP-DocLayoutV3: layout, then each region
   read with the prompt for its kind — the stronger choice for tables)
 - Task: `{id, pdf_b64 | images_b64[], dpi?, pages?, raw?, strip?, merge?}`
 - Result: `{id, html, pages, blocks[], raw?, tokens_in, tokens_out, truncated}`
 
 ### Depth (`depth`)
-- Models: `depth-anything-v2-small` (Apache-2.0, the default; Base and Large
+- Recipes: `depth-anything-v2-small` (Apache-2.0, the default; Base and Large
   are CC-BY-NC-4.0 and not registered)
 - Task: `{id, image_b64, visualize?}`
 - Result: `{id, depth_b64, width, height, depth_min, depth_max, metric, visualization_b64?}`
 
 ### Multiview (`multiview`)
-- Models: `da3-base` (Apache-2.0, the default) — Depth Anything 3, on its
+- Recipes: `da3-base` (Apache-2.0, the default) — Depth Anything 3, on its
   own interpreter (`envs/da3`, engine `da3`)
 - Task: `{id, images_b64[], extrinsics?, intrinsics?, process_res?, use_ray_pose?,
   ref_view_strategy?, glb?, conf_percentile?, max_points?}`
@@ -209,8 +206,8 @@ diarization), speaker voiceprints (`ecapa-tdnn`) and text to speech
 (`kokoro`) are reached through the `/v1/audio/*` routes above. Plain speech
 to text without diarization (`stt`: `faster-whisper-tiny` …
 `faster-whisper-large-v3`; the bare sizes still work as aliases) is a batch
-worker behind `/run`. `/capabilities` lists every
-worker's models, and Kokoro's voices.
+modality behind `/run`. `/capabilities` lists every modality's recipes, and
+Kokoro's voices.
 
 ## OCR
 
@@ -308,7 +305,7 @@ N images of one scene in; a depth map, a camera pose and intrinsics per
 view out, all in one shared frame, through Depth Anything 3 (ByteDance-Seed,
 arXiv 2511.10647): one transformer over every view's tokens at once, with or
 without known poses. This is what a scan from many angles needs and what the
-single-image `depth` worker cannot give, since its maps have an unknown
+single-image `depth` modality cannot give, since its maps have an unknown
 scale and shift per frame.
 
 ```bash
@@ -378,13 +375,11 @@ left out, like any other broken one.
 
 ## Storage
 
-`GET /storage` answers what is on disk and where giq looks:
+`GET /storage` answers how full the disks are and where giq looks; what is
+on them, checkpoint by checkpoint, is [`/weights`](#weights):
 
-- `models` — per model: its resolved `paths` (files, snapshot directories,
-  or HF-cache directories for models loaded by repository), `size_bytes`,
-  `on_disk` (every path present), `shared_with` (other models using the
-  same files), `resident`, `last_used`.
-- `disks` — per mount: total, free, and how much of it is model weights.
+- `disks` — per mount: total, free, how much of it is weights (each file
+  counted once), and the rest.
 - `paths` — every data directory giq resolved (config, models, recipes,
   engines, state, caches).
 - `recipes` — the operator's [recipe files](configuration.md#recipes):
@@ -408,12 +403,12 @@ left out, like any other broken one.
 `files` are the operator files serving; `overrides` the built-ins they
 replace; `errors` the files left out, each with giq's reason (`file` is
 `null` when the problem is not one file's, such as two files defining one
-instance). A file in `errors` is not served — a built-in of that name keeps
+recipe). A file in `errors` is not served — a built-in of that name keeps
 serving — until it is fixed and giq restarted.
 
 ## Vision
 
-Models whose instance declares the `vision` capability accept images alongside text, via
+Recipes that declare the `vision` capability accept images alongside text, via
 llama.cpp's `--mmproj` projector. Send OpenAI-style content parts to
 `/v1/chat/completions`:
 

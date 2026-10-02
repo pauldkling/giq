@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # ADR-003: The domain — engines, weights, recipes, instances
 
-**Status:** Proposed
+**Status:** Accepted — implemented in full (the migration below)
 **Date:** 2026-10-01
 **Authors:** giq maintainers
 **Amends:** [ADR-002](ADR-002-model-instances.md) (its terms; its decisions on
@@ -131,7 +131,7 @@ a model; inside giq, the word is not used for anything else.
 
 | Today | After |
 |---|---|
-| `GET /control/models` | `GET /recipes` — every recipe with its residency, card, fit and whether its weights are present |
+| `GET /control/models`, `GET /stats/models` | `GET /recipes` — every recipe with its residency, card, fit and whether its weights are present |
 | `POST /control/models/{worker}/{model}` (policy), `…/device` | `PUT /recipes/{name}/residency`, `PUT /recipes/{name}/card` |
 | `GET /storage`, `DELETE /storage/models/{worker}/{model}` | `GET /weights`, `DELETE /weights/{id}` — `/storage` keeps the per-mount disk report |
 | — | `GET /instances` |
@@ -152,8 +152,10 @@ Three places, one per layer:
 - **Recipes** — today's model cards, slimmer: engine and weights as links
   into Inventory, residency and card, fit, and ADR-002's editor (duplicate,
   edit params from the schema, measure) when it is built.
-- **Running** — instances per card: port, VRAM, state, unload. Overview's
-  "models in RAM" panel grows into this.
+- **Running** — instances per card: port, VRAM, state, unload. This stays
+  on the Overview, whose GPU cards and lanes are built from `/instances`,
+  rather than becoming a view of its own: it is the page an operator
+  watches, and a second one would show the same rows.
 
 The German glossary (`frontend/src/locales/GLOSSARY.md`) gets the six terms
 before any string uses them.

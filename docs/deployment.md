@@ -63,7 +63,7 @@ On Debian 13 (trixie), x86_64:
 $GIQ_HOME/              /projects/giq in the unit
   config.yaml           the one config
   models/               model weights (GGUFs, OCR/depth/multiview snapshots)
-  instances/            operator model instances (ADR-002)
+  recipes/              your recipe files (ADR-002, ADR-003)
   engines/              engine builds: engines/<engine>/bin/<binary>
   state/                stats.db, inflight.log
   cache/                huggingface/, torch, Triton and CUDA JIT caches
@@ -83,7 +83,7 @@ is expanded.
 |----------|-------------|---------------|-----------------|---------|
 | Config file | `GIQ_CONFIG` | — | `$GIQ_HOME/config.yaml` | `./config.yaml` |
 | Models | `GIQ_MODELS_DIR` | `paths.models` | `$GIQ_HOME/models` | `~/models` |
-| Instances | `GIQ_RECIPES_DIR` | `paths.recipes` | `$GIQ_HOME/recipes` | `~/.config/giq/recipes` |
+| Recipes | `GIQ_RECIPES_DIR` | `paths.recipes` | `$GIQ_HOME/recipes` | `~/.config/giq/recipes` |
 | Engines | `GIQ_ENGINES_DIR` | `paths.engines` | `$GIQ_HOME/engines` | — (PATH) |
 | State | `GIQ_DATA_DIR` | `paths.state` | `$GIQ_HOME/state` | `$STATE_DIRECTORY`, else `<checkout>/data` |
 | Stats DB | `GIQ_STATS_DB` | — | `<state>/stats.db` | `<state>/stats.db` |
@@ -92,20 +92,20 @@ is expanded.
 | HF home | `HF_HOME` | — | `<cache>/huggingface` | `~/.cache/huggingface` |
 
 The config file's location never comes from the config itself. The
-per-worker model variables (`GIQ_OCR_MODEL_DIR` and friends) still outrank
-the recipe files' weight paths for their worker (see
+per-modality weight variables (`GIQ_OCR_MODEL_DIR` and friends) still
+outrank the recipe files' weight paths for their built-ins (see
 [Weights](configuration.md#weights)).
 
 When giq has a cache directory it exports `HF_HOME`, `XDG_CACHE_HOME`,
 `TRITON_CACHE_DIR`, `CUDA_CACHE_PATH` and `MPLCONFIGDIR` under it — to its
 own process and to every engine and child it spawns — unless you set them
-yourself. That keeps downloads where the storage view looks and JIT caches
+yourself. That keeps downloads where the inventory looks and JIT caches
 somewhere the service can write. `$STATE_DIRECTORY` and `$CACHE_DIRECTORY`
 (set by systemd for units with `StateDirectory=`/`CacheDirectory=`) are
 used only when neither `GIQ_HOME` nor a more specific setting names one.
 
 `GET /storage` includes a `paths` object with every resolved location, so
-you can check what a running instance uses.
+you can check what a running giq uses.
 
 The side environments (`envs/*/.venv`) and the dashboard build are code,
 not data: they stay in the checkout.
@@ -206,7 +206,7 @@ sudo deploy/install-debian.sh --with-vllm
    with `MemoryMax=40G` and no swap — two compile jobs peak near 15 GB each.
    Run it again after updating vllm; it only rebuilds what changed.
 
-Then, by hand once the weights are in place, warm each vllm instance up once
+Then, by hand once the weights are in place, warm each vllm recipe up once
 so its first real start does not spend tens of minutes compiling (see
 [engines.md](engines.md#prepare-once-giq-prepare-vllm)) — with giq paused,
 since it uses the card:
@@ -228,7 +228,7 @@ its engines together, which is why the kernels are built beforehand rather
 than inside the service. Make sure the machine's RAM holds the checkpoint
 once more than its size while vllm loads it.
 
-The built-in vllm instances expect their weights under `$GIQ_MODELS_DIR`
+The built-in vllm recipes expect their weights under `$GIQ_MODELS_DIR`
 (`nvidia-Qwen3.8-27B-NVFP4`); fetch them beforehand, e.g.
 `hf download nvidia/Qwen3.8-27B-NVFP4 --revision 482ca0f --local-dir
 $GIQ_HOME/models/nvidia-Qwen3.8-27B-NVFP4`. Pin one resident from the
@@ -299,7 +299,7 @@ dashboard; `git checkout` leaves the old build (it is gitignored) in place.
 with `GIQ_HOME` set and `/etc/giq/giq.env` read on top. Every directive
 carries its reason in the file; the parts that matter operationally:
 
-- **Read-only except state, cache and instances** (`ProtectSystem=strict`,
+- **Read-only except state, cache and recipes** (`ProtectSystem=strict`,
   `ReadWritePaths=`). Models and engines are read-only to the service, so
   deleting weights from the dashboard is refused; do it as the operator. A
   directory you move elsewhere with `paths:` or an environment variable
@@ -357,7 +357,7 @@ sudo -u giq-build env UV_PYTHON_INSTALL_DIR=/opt/giq/.uv-python make -C /opt/giq
 sudo systemctl restart giq
 ```
 
-A restart unloads every model; the resident set reloads on its own.
+A restart stops every instance; the resident set reloads on its own.
 
 ## Backups
 
@@ -376,7 +376,7 @@ is slower than restoring.
   `/dev/nvidia-uvm` exists (see Prerequisites); `sudo -u giq nvidia-smi`
   must work.
 - **`Read-only file system` in the log:** something wrote outside state,
-  cache and instances — often a library's cache under `~`. Point its
+  cache and recipes — often a library's cache under `~`. Point its
   variable at `$GIQ_HOME/cache` in `giq.env`, or add the path to
   `ReadWritePaths`.
 - **Killed with `oom-kill` in the journal:** the unit hit `MemoryMax`.

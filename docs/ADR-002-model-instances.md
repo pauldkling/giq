@@ -6,9 +6,17 @@ SPDX-License-Identifier: Apache-2.0
 
 # ADR-002: Model instances — weights × engine × parameters
 
-**Status:** Proposed  
+**Status:** Accepted, amended by [ADR-003](ADR-003-domain.md)  
 **Date:** 2026-09-28  
 **Authors:** giq maintainers
+
+> **Amended by [ADR-003](ADR-003-domain.md).** What this record calls an
+> *instance* — the YAML file — is a **recipe** now; *instance* names a
+> recipe running on a card. Files are `<name>.yaml` under `giq/recipes/`
+> and `GIQ_RECIPES_DIR`, keyed by a globally unique name with a
+> `modalities` list rather than `(worker, name)`, and "worker" is
+> **modality**. The decisions on files, schemas, VRAM and the adapter
+> contract stand as written below.
 
 ## Context
 

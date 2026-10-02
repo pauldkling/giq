@@ -31,7 +31,7 @@ Set `GIQ_HOME` and everything that is not code lives under one directory —
 $GIQ_HOME/
   config.yaml   the one config
   models/       weights
-  instances/    model recipe files (ADR-002)
+  recipes/      your recipe files (ADR-002, ADR-003)
   engines/      engine builds, e.g. engines/llama.cpp/bin/llama-server
   state/        stats.db, in-flight log
   cache/        Hugging Face and kernel caches
@@ -53,16 +53,16 @@ Environment variables:
 | `GIQ_DATA_DIR` | `$GIQ_HOME/state`, else `data/` | Stats database and in-flight log |
 | `GIQ_RECIPES_DIR` | `$GIQ_HOME/recipes`, else `~/.config/giq/recipes` | Recipe files |
 | `GIQ_ENGINES_DIR` | `$GIQ_HOME/engines` | Engine builds, looked up before PATH |
-| `GIQ_CACHE_DIR` | `$GIQ_HOME/cache` | Caches, exported to the workers as `HF_HOME`, `XDG_CACHE_HOME` and friends |
+| `GIQ_CACHE_DIR` | `$GIQ_HOME/cache` | Caches, exported to the engine children as `HF_HOME`, `XDG_CACHE_HOME` and friends |
 | `GIQ_MODELS_DIR` | `$GIQ_HOME/models`, else `~/models` | Root of the model store; relative weight paths in recipe files resolve against it |
 | `GIQ_CONFIG` | `$GIQ_HOME/config.yaml`, else `./config.yaml` | Config file |
 | `GIQ_LLAMA_BINARY` | `llama-server` on PATH | llama.cpp server binary |
 | `GIQ_SDCPP_BINARY` | `sd-server` on PATH | stable-diffusion.cpp server binary |
 | `GIQ_UNLIMITED_OCR_PYTHON`, `GIQ_DA3_PYTHON` | `envs/*/.venv` | Interpreters for the OCR and multiview children |
 | `GIQ_VLLM_PYTHON` | `envs/vllm/.venv/bin/python` | The vllm engine's interpreter; `vllm serve` is the console script beside it ([engines.md](engines.md#vllm)) |
-| `GIQ_OCR_MODEL_DIR`, `GIQ_GLM_OCR_MODEL_DIR`, `GIQ_GLM_LAYOUT_DIR` | the instance's | The `unlimited-ocr` snapshot, the `glm-ocr` snapshot and its layout part; each outranks that built-in's `weights` (see [Weights](#weights)) |
-| `GIQ_DEPTH_MODELS_DIR`, `GIQ_MULTIVIEW_MODELS_DIR` | `GIQ_MODELS_DIR` | Root for the relative weight paths of depth / multiview instances |
-| `GIQ_AUDIO_WHISPER_MODEL`, `GIQ_AUDIO_DIAR_MODEL`, `GIQ_EMBED_MODEL` | the instance's | Repository or path the audio and voiceprint children load, outranking the instance's `weights` |
+| `GIQ_OCR_MODEL_DIR`, `GIQ_GLM_OCR_MODEL_DIR`, `GIQ_GLM_LAYOUT_DIR` | the recipe's | The `unlimited-ocr` snapshot, the `glm-ocr` snapshot and its layout part; each outranks that built-in's `weights` (see [Weights](#weights)) |
+| `GIQ_DEPTH_MODELS_DIR`, `GIQ_MULTIVIEW_MODELS_DIR` | `GIQ_MODELS_DIR` | Root for the relative weight paths of depth / multiview recipes |
+| `GIQ_AUDIO_WHISPER_MODEL`, `GIQ_AUDIO_DIAR_MODEL`, `GIQ_EMBED_MODEL` | the recipe's | Repository or path the audio and voiceprint children load, outranking the recipe's `weights` |
 | `GIQ_GPU_DEVICE` | biggest card | Default GPU, index or NVML UUID |
 | `GIQ_TOKEN` | unset | Shared access token (see [Access](access-and-privacy.md#access)) |
 | `GIQ_STATS_DB` | `<data dir>/stats.db` | Stats database |
@@ -152,12 +152,12 @@ or `gpu_memory_utilization`; exactly one), `max_model_len` (required),
 `max_num_seqs`, `max_num_batched_tokens`, `kv_cache_dtype`, `speculative`,
 `enforce_eager`, `reasoning_parser`, `tool_call_parser`, `memory_max`,
 `ready_timeout` — are described in [engines.md](engines.md#parameters). The
-other engines take no parameters from an instance yet.
+other engines take no parameters from a recipe yet.
 
 ### Weights
 
-Every worker loads the weights its instance names, so a recipe file with
-a new name is a new model — no table in giq's code has to know it. The main
+Every engine loads the weights its recipe names, so a recipe file with a
+new name is a new model — no table in giq's code has to know it. The main
 weights are `weights.path`; the other files a model needs are
 `weights.parts`, each a path or a mapping with its own provenance:
 
@@ -173,7 +173,7 @@ weights:
       revision: 97d101e
 ```
 
-| Worker | Main weights | Parts |
+| Modality | Main weights | Parts |
 |--------|--------------|-------|
 | `llm` | the GGUF | — (the projector is `params.mmproj`) |
 | `text2image`, `image_edit` | — | `diffusion`, `text_encoder`, `vae` (required), `lora` |
@@ -183,24 +183,25 @@ weights:
 | `audio` | — | `asr`, `diarization` (`hf:` sources) |
 | `embed`, `tts` | the `hf:` source | — |
 
-A part a worker does not read is refused, like an unknown key. The OCR child
+A part the modality's adapter does not read is refused, like an unknown key. The OCR child
 is chosen by the engine: `transformers-4.57` runs Unlimited-OCR's pipeline,
-`transformers` runs GLM-OCR behind its layout model — so an OCR instance of
+`transformers` runs GLM-OCR behind its layout model — so an OCR recipe of
 your own is another checkpoint of one of the two.
 
-The environment variables that located these snapshots before instance
+The environment variables that located these snapshots before recipe
 files existed still work, and outrank the file: `GIQ_OCR_MODEL_DIR`,
 `GIQ_GLM_OCR_MODEL_DIR` and `GIQ_GLM_LAYOUT_DIR` replace the paths of the
-built-in `unlimited-ocr` and `glm-ocr` (and only theirs — an OCR instance
+built-in `unlimited-ocr` and `glm-ocr` (and only theirs — an OCR recipe
 under another name is not redirected), `GIQ_DEPTH_MODELS_DIR` and
-`GIQ_MULTIVIEW_MODELS_DIR` replace the models directory for their worker's
+`GIQ_MULTIVIEW_MODELS_DIR` replace the models directory for their modality's
 relative paths, and `GIQ_AUDIO_WHISPER_MODEL`, `GIQ_AUDIO_DIAR_MODEL` and
 `GIQ_EMBED_MODEL` replace what the audio and voiceprint children load.
-`GET /storage` reports each model's resolved paths.
+`GET /weights` lists every checkpoint where giq resolved it, and whether it
+is there.
 
 ### Image models
 
-An image model's files are its instance's `weights.parts`. The built-ins
+An image recipe's files are its `weights.parts`. The built-ins
 expect them under the models directory, one subfolder per part —
 `diffusion_models/`, `text_encoders/`, `vae/`, `loras/`. To keep them
 elsewhere, override the recipe with absolute paths:
@@ -235,16 +236,18 @@ and a setting giq does not honour yet (`profile` on an engine without
 profiles, `residency.gpu`, `residency.default_policy: off`) are all errors, never silently ignored. A
 file of yours that fails is logged as an error and left out — the built-in of
 that name, if there is one, keeps serving — and two of your files defining
-the same instance are both left out, since which one won would be an accident
+the same recipe are both left out, since which one won would be an accident
 of sorting. Recipe files are read at startup; restart giq after changing
 them. `GET /storage` lists the files that were left out with the reason
-(its `instances` block), and the dashboard's Models view shows them as a
+(its `recipes` block), and the dashboard's Recipes view shows them as a
 warning above the catalog.
 
 ## Residency
 
-Every model has a residency policy, set per model in the dashboard's Models
-view or with `POST /control/models/{worker}/{model}` (`{"policy": …}`):
+Every recipe has a residency policy, set in the dashboard's Recipes view or
+with `PUT /recipes/{name}/residency` (`{"policy": …}`; `DELETE` returns it
+to the default). A recipe giq keeps loaded is a *resident* instance; one it
+loads for a job is *on demand*:
 
 - `pinned` (**keep warm**) — kept loaded whenever VRAM allows, reloaded after
   an eviction and on boot.
@@ -253,16 +256,16 @@ view or with `POST /control/models/{worker}/{model}` (`{"policy": …}`):
 - `off` — refuses jobs and cannot load by any path.
 
 Overrides persist in `stats.db` and outrank `config.yaml`'s `residents:`, which
-outranks the instances' `residency.priority` (among the built-ins:
+outranks the recipes' `residency.priority` (among the built-ins:
 `gemma-4-12b`, `whisper-large-v3`, `ecapa-tdnn`).
-Before a load, giq gates on the model's declared VRAM figure (measured on
-real hardware where the catalog says so) plus a margin against the card's
-free VRAM, and evicts keep-warm models on that card when that is what it
-takes.
+Before a load, giq gates on the recipe's declared VRAM figure (measured on
+real hardware where the recipe says so) plus a margin against the card's
+free VRAM, and evicts keep-warm instances on that card when that is what it
+takes. `GET /instances` lists what is running, card by card.
 
 ## Multiple GPUs
 
-Models that name no card run on the **default** card — the biggest one unless
+Recipes that name no card run on the **default** card — the biggest one unless
 you say otherwise, by index or NVML UUID:
 
 ```yaml
@@ -270,15 +273,15 @@ gpu:
   device: GPU-d0fda82c-452e-bbf7-561b-07d3a056ecfd   # or "1", or GIQ_GPU_DEVICE
 ```
 
-**Bind a model to a card** and it is gated against that card's VRAM, loads
+**Bind a recipe to a card** and it is gated against that card's VRAM, loads
 there, gets that card's server port, and can only ever evict residents that
 share it — so a render on one card cannot cost you the LLM on the other:
 
 ```bash
-curl -X POST localhost:8084/control/models/text2image/flux_klein/device \
-  -H 'content-type: application/json' -d '{"device": "1"}'
+curl -X PUT localhost:8084/recipes/flux_klein/card \
+  -H 'content-type: application/json' -d '{"device": 1}'
 
-curl -X POST localhost:8084/control/models/text2image/flux_klein/device \
+curl -X PUT localhost:8084/recipes/flux_klein/card \
   -H 'content-type: application/json' -d '{"device": null}'   # unbind
 ```
 
@@ -286,33 +289,33 @@ Bindings take an index or a UUID and are stored as the UUID; they persist in
 `stats.db`, survive restarts and re-enumeration, and are independent of
 residency (pinning does not bind, unbinding does not unpin). The dashboard
 does the same thing visually: each GPU card lists what is loaded on it, the
-residency budget is drawn per card, and the model catalog's GPU column binds
-a model with one click. A checked-in default
+residency budget is drawn per card, and each recipe card's GPU picker binds
+it with one click. A checked-in default
 lives under `gpu.bind` in `config.yaml`, and `gpu.reserve` leaves headroom on
 a card shared with a desktop.
 
 Every VRAM figure in the API describes one card. `/status`'s `vram_*`
 scalars are the default card's, named in `/status.gpu`; `/status.gpus` lists
 every card in the same terms, and a job waiting for room is judged on the
-card it is bound to (`vram_blocked_gpu`). Each model's `device_name` in
-`/stats/models` names its own card, and `/gpus` adds temperature, power and
+card it is bound to (`vram_blocked_gpu`). Each recipe's `card` in
+`/recipes` names its own, and `/gpus` adds temperature, power and
 the per-process split.
 
-Used VRAM is reported split two ways — `vram_giq_gb` (models giq is holding,
+Used VRAM is reported split two ways — `vram_giq_gb` (instances giq is holding,
 with a per-process `giq[]` breakdown) and `vram_other_gb` (the desktop, other
 CUDA apps, a game). Only the first is something giq can free by unloading, so
 a full card and a full card *giq caused* are shown as different things. The
 dashboard draws it as a two-segment gauge: ours solid, theirs hatched.
 
-Workers are spawned with `CUDA_VISIBLE_DEVICES` set to their card. This matters
+Instances are spawned with `CUDA_VISIBLE_DEVICES` set to their card. This matters
 most for llama.cpp, whose default `-sm layer` otherwise spreads a model's
 layers *and KV cache* across every visible GPU — half your LLM ends up on a
 card giq is not scheduling against.
 
 **Not implemented yet:** two *batch* jobs running at once on different cards.
-Each card holds its own loaded worker, but job dispatch is still serialized,
-so a render on one card and a batch on the other take turns. Resident models
-(the pinned set) serve concurrently throughout, as they always have.
+Each card holds its own on-demand instance, but job dispatch is still
+serialized, so a render on one card and a batch on the other take turns.
+Resident instances (the pinned set) serve concurrently throughout.
 
 ## Systemd service
 

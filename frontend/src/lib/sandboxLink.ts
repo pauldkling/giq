@@ -5,7 +5,7 @@
 import type { Modality } from "../api/types";
 
 /* The address contract between the sandbox and whatever links into it (the
-   Models view's "Test in sandbox"): #/sandbox/<tab>?model=<name>. The hash
+   Recipes view's "Test in sandbox"): #/sandbox/<tab>?model=<name>. The hash
    rather than app state carries it, so the link also works as a bookmark or
    in a new tab. The app's route parser ignores everything after "?", so the
    tab still resolves. The sandbox only preselects the model — it never runs

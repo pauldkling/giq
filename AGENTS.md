@@ -11,20 +11,23 @@ this file; keep agent instructions here, in one place.
 
 ## What giq is
 
-A GPU inference queue: one FastAPI service that owns the GPU(s) and serves LLM,
-image, OCR, depth, multiview, audio and embedding workers behind a job queue
-and an OpenAI-compatible API. `Orchestrator.submit_job`
+A GPU inference queue: one FastAPI service that owns the GPU(s) and serves
+LLM, image, OCR, depth, multiview, audio and embedding recipes behind a job
+queue and an OpenAI-compatible API. The terms — engine, weights, recipe,
+instance, residency, modality — are ADR-003's
+(`docs/ADR-003-domain.md`); use them, one meaning each, in code, API,
+dashboard and docs. `Orchestrator.submit_job`
 (`giq.services.orchestration`) is the single chokepoint — every request path,
 including tool-calling chat, goes through it. Keep it that way.
 
 ## Layout
 
-- `src/giq/api/` — HTTP routers (`router.py` job API, `openai_compat.py`, `stats_api.py`, `access.py`)
+- `src/giq/api/` — HTTP routers (`router.py` job API and `/instances`, `recipes_api.py` `/recipes`, `openai_compat.py`, `openai_responses.py`, `stats_api.py` stats, `/storage` and `/weights`, `access.py`)
 - `src/giq/services/orchestration.py` — `Orchestrator`, the one way into the queue
 - `src/giq/runner.py` — the scheduler: residency, eviction, and the instances it starts and stops
 - `src/giq/recipes/` — the built-in recipes, one YAML file each (`<name>.yaml`: modalities, weights, engine, parameters, residency, measured VRAM, and the reasoning as comments), plus the schema and loader; operator files in `GIQ_RECIPES_DIR` add or replace recipes (ADR-002, ADR-003 for the terms)
 - `src/giq/registry.py` — the catalog: recipes by name (aliases resolved), and the default resident set
-- `src/giq/weights.py` — where a recipe's weights are: its `weights.path`/`weights.parts`, under the models directory, with the env overrides; every worker and the storage catalog ask here
+- `src/giq/weights.py` — where a recipe's weights are: its `weights.path`/`weights.parts`, under the models directory, with the env overrides, and the weights inventory; every adapter and the storage report ask here
 - `src/giq/adapters/` — the engine adapters, one module per engine or modality (`llama_cpp.py`, `vllm.py`, `sdcpp.py`, `stt.py` …); `_*_child.py` run in subprocesses
 - `src/giq/paths.py` — every filesystem location, resolved from env > `config.yaml` `paths:` > `GIQ_HOME` > defaults
 - `deploy/` — the systemd unit and Debian install script (see `docs/deployment.md`)
@@ -69,7 +72,7 @@ cd frontend && npx tsc --noEmit && npm test
   hosts and people. A measurement is welcome as a fact ("Measured on an RTX
   5090: 8.3 GiB peak"), not as a story. Notes meant for the next agent belong
   in this file, not in code or extra markdown files.
-- **VRAM figures are measured, not guessed.** An instance with
+- **VRAM figures are measured, not guessed.** A recipe with
   `vram.measured: true` carries a number observed on real hardware; otherwise
   leave it unmeasured and say it's an estimate.
 - **Frontend:** one component per file (aim under 250 lines), each with its
@@ -81,8 +84,9 @@ cd frontend && npx tsc --noEmit && npm test
   through `dangerouslySetInnerHTML`. API calls go through `src/api/client.ts`;
   shared data comes from the `src/state/` hooks rather than a new poller.
 - **Frontend CSS is global, so class names are namespaced.** A class a view
-  defines carries its view's prefix — `ov-` (overview), `us-` (usage), `md-`
-  (models), `sbx-` (sandbox) — and a new view picks its own. Unprefixed
+  defines carries its view's prefix — `ov-` (overview), `rc-` (recipes),
+  `inv-` (inventory), `us-` (usage), `sbx-` (sandbox) — and a new view picks
+  its own. Unprefixed
   classes belong to `src/components/` (named after the component:
   `.model-label`, `.filebox`) and to `src/styles/` (Nocturne's vocabulary plus
   base.css utilities: `.hint`, `.warn`, `.field-error`, `.error-box`,
