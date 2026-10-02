@@ -132,6 +132,15 @@ async def test_the_token_exemption_does_not_lift_the_host_rule(built_ui, token):
     assert r.status_code == 403
 
 
+def test_the_version_is_the_one_in_pyproject():
+    """A release bumps pyproject.toml; /status must say the same, not an older copy."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+    assert giq.__version__ == pyproject["project"]["version"]
+
+
 @pytest.mark.asyncio
 async def test_status_reports_version_and_uptime():
     async with client() as c:
