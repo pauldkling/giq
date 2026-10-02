@@ -273,6 +273,52 @@ def compute_app_memory(device: str | int | None = None) -> dict[int, float]:
     }
 
 
+def _children() -> dict[int, list[int]]:
+    """ppid -> pids, from /proc. Empty where there is no /proc to read."""
+    out: dict[int, list[int]] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return out
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as f:
+                stat = f.read().decode(errors="replace")
+        except OSError:  # exited between listdir and open, or not ours to read
+            continue
+        # The command name is in parentheses and may itself contain spaces
+        # and parentheses; the fields after the last ")" are fixed: state, ppid.
+        fields = stat.rpartition(")")[2].split()
+        if len(fields) >= 2 and fields[1].isdigit():
+            out.setdefault(int(fields[1]), []).append(int(entry))
+    return out
+
+
+def with_descendants(owned: dict[int, str]) -> dict[int, str]:
+    """``owned`` plus every descendant of each pid, under its ancestor's label.
+
+    The pid giq spawns is not always the one holding the VRAM: vllm's API
+    server keeps none and its engine-core child holds the model, so counting
+    spawned pids alone reported a card running a vllm instance as 0 GB ours.
+    giq's own pid (in the map while STT runs in-process) is not expanded: its
+    descendants are every engine giq runs, each labelled on its own already.
+    """
+    if not owned:
+        return {}
+    children = _children()
+    out = dict(owned)
+    todo = [pid for pid in owned if pid != os.getpid()]
+    while todo:
+        pid = todo.pop()
+        for child in children.get(pid, ()):
+            if child not in out:
+                out[child] = out[pid]
+                todo.append(child)
+    return out
+
+
 def attribute_vram(
     owned: dict[int, str] | None = None, gpus: list[GpuTelemetry] | None = None
 ) -> dict[str, dict[str, Any]]:
@@ -295,7 +341,7 @@ def attribute_vram(
     Pass the same ``gpus`` list you are rendering, so the split describes the
     figures on screen rather than a fresher sample of a moving target.
     """
-    owned = owned or {}
+    owned = with_descendants(owned or {})
     mine: dict[str, float] = {}
     breakdown: dict[str, list[dict[str, Any]]] = {}
     for uuid, pid, gb in compute_apps():

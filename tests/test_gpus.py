@@ -288,3 +288,27 @@ def test_our_share_is_clamped_to_the_cards_used_total(monkeypatch):
     assert card["other_gb"] == 0.0
     # The unclamped per-process truth is still there for the tooltip.
     assert card["giq"][0]["gb"] == pytest.approx(4.78, abs=0.01)
+
+
+def test_vram_held_by_a_child_counts_as_its_parents(monkeypatch):
+    """vllm's engine-core child holds the model, not the pid giq spawned."""
+    from giq import gpus
+
+    card = "GPU-0000"
+    monkeypatch.setattr(gpus, "_children", lambda: {100: [101], 101: [102], 7: [100, 300]})
+    monkeypatch.setattr(gpus, "compute_apps", lambda: [(card, 102, 20.0), (card, 300, 1.0)])
+    monkeypatch.setattr(gpus.os, "getpid", lambda: 7)
+    telemetry = [
+        type(
+            "T",
+            (),
+            {"uuid": card, "vram_used_gb": 22.0, "vram_free_gb": 10.0, "vram_total_gb": 32.0},
+        )()
+    ]
+
+    split = gpus.attribute_vram({100: "qwen3.8-27b-nvfp4", 7: "faster-whisper-tiny"}, telemetry)[
+        card
+    ]
+
+    assert split["giq_gb"] == 20.0 and split["other_gb"] == 2.0
+    assert split["giq"] == [{"pid": 102, "label": "qwen3.8-27b-nvfp4", "gb": 20.0}]
