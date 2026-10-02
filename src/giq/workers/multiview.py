@@ -61,14 +61,14 @@ class MultiviewWorker(SubprocessWorker):
         super().__init__(config, device)
         # The recipe's weights.path, under GIQ_MULTIVIEW_MODELS_DIR when
         # that is set. Unknown model or no weights: fail here, not at spawn.
-        self.weights = require_path("multiview", config.model)
+        self.weights = require_path(config.model)
 
     def child_args(self) -> list[str]:
         return ["--model", self.config.model, "--weights", self.weights]
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "multiview", default=MULTIVIEW_VRAM_GB)
+        return vram_for(self.config.model, default=MULTIVIEW_VRAM_GB)
 
     def _interpreter(self) -> str:
         from giq.engines import require_binary

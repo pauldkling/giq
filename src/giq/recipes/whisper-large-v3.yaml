@@ -9,7 +9,7 @@
 # speaker-diarization-3.1 one would assume, and changing it changes speaker
 # attribution. The ASR snapshot is the one stt/large-v3 loads too.
 name: whisper-large-v3
-worker: audio
+modalities: [audio]
 engine: faster-whisper+pyannote
 detail: "transcribe + diarize"
 weights:

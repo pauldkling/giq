@@ -221,17 +221,16 @@ async def test_v1_models_advertises_every_installed_model(client: AsyncClient):
     It omitted qwen3.8-27b, which was registered and servable — and it
     advertised five models whose GGUFs had been deleted, so a client could
     pick one and llama-server would fail on it. Generated from
-    the registry now and filtered only on whether the weights exist.
+    the recipes now and filtered only on whether the weights exist.
     """
-    from giq.registry import all_specs
+    from giq.registry import all_recipes, recipes_serving, resident_defaults
     from giq.workers.llm import weights_installed
 
     response = await client.get("/v1/models")
     assert response.status_code == 200
     advertised = [m["id"] for m in response.json()["data"]]
 
-    llm = [s for s in all_specs() if s.worker == "llm"]
-    installed = {s.model for s in llm if weights_installed(s.model)}
+    installed = {r.name for r in recipes_serving("llm") if weights_installed(r.name)}
     assert set(advertised) == installed, (
         f"missing {sorted(installed - set(advertised))}, "
         f"phantom {sorted(set(advertised) - installed)}"
@@ -239,18 +238,16 @@ async def test_v1_models_advertises_every_installed_model(client: AsyncClient):
 
     # No audit gate: nothing is withheld for being unaudited or unpopular.
     # If it is on disk it is on the list, whatever we think of it.
-    for spec in llm:
-        if weights_installed(spec.model):
-            assert spec.model in advertised, f"{spec.model} is installed but withheld"
+    for name in installed:
+        assert name in advertised, f"{name} is installed but withheld"
 
     # Chat clients get chat models; /capabilities enumerates every modality.
-    assert not (set(advertised) & {s.model for s in all_specs() if s.worker != "llm"})
+    others = {r.name for r in all_recipes() if not r.serves("llm")}
+    assert not (set(advertised) & others)
 
     # Residents lead, so a client defaulting to data[0] gets the loaded model
     # rather than one that forces an eviction.
-    residents = [
-        s.model for s in llm if s.resident_priority is not None and weights_installed(s.model)
-    ]
+    residents = [name for name in resident_defaults() if name in installed]
     if residents:
         assert advertised[0] in residents
 
@@ -580,10 +577,12 @@ async def test_depth_model_is_the_consumers_choice(
 ):
     # The public registry has one depth model; a second one added for the
     # test shows the query parameter reaches the job rather than the default.
-    from giq.registry import ModelSpec, get_registry
+    from giq.registry import get_recipe
+    from tests._recipes import with_recipes
 
-    spec = ModelSpec("depth", "depth-test-large", 4.0, "transformers")
-    monkeypatch.setitem(get_registry(), spec.key, spec)
+    small = get_recipe("depth-anything-v2-small")
+    assert small is not None
+    with_recipes(monkeypatch, small.model_copy(update={"name": "depth-test-large"}))
     r = await client.post(
         "/depth",
         params={"model": "depth-test-large"},
@@ -700,10 +699,12 @@ async def test_multiview_options_and_refusals(
 ):
     # A second multiview model added for the test (the public registry has
     # only da3-base) shows the query parameter reaches the job.
-    from giq.registry import ModelSpec, get_registry
+    from giq.registry import get_recipe
+    from tests._recipes import with_recipes
 
-    spec = ModelSpec("multiview", "da3-test-large", 12.0, "da3")
-    monkeypatch.setitem(get_registry(), spec.key, spec)
+    base = get_recipe("da3-base")
+    assert base is not None
+    with_recipes(monkeypatch, base.model_copy(update={"name": "da3-test-large"}))
     r = await client.post(
         "/multiview",
         params={"model": "da3-test-large", "process_res": 756, "use_ray_pose": "true"},

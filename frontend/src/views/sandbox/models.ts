@@ -63,7 +63,7 @@ export function sandboxModels(
   const of = (pred: (m: CatalogModel) => boolean) => models.filter(pred).map((m) => option(m, disk));
   /* Every LLM that can load is selectable (the panel was once pinned to one
      model, so "test" on any other LLM card had nowhere to land). */
-  const llms = models.filter((m) => m.worker === "llm");
+  const llms = models.filter((m) => serves(m, "llm"));
   /* Default to whatever answers soonest: already loaded, else kept warm,
      else the registry's intended resident. Alphabetical order (the
      fallback) picks an 18 GB model nobody asked for. */
@@ -75,8 +75,8 @@ export function sandboxModels(
   return {
     ready: true,
     chat: llms.map((m) => option(m, disk)),
-    t2i: of((m) => m.worker === "text2image"),
-    edit: of((m) => m.worker === "image_edit"),
+    t2i: of((m) => serves(m, "text2image")),
+    edit: of((m) => serves(m, "image_edit")),
     vision: of((m) => m.vision),
     chatDefault: preferred?.model ?? null,
     toolsAvailable: llms.some((m) => m.model === TOOLS_MODEL && m.policy !== "off"),
@@ -93,4 +93,10 @@ export function disabledTabs(m: SandboxModels): Set<Tab> {
   if (!m.edit.length) off.add("edit");
   if (!m.vision.length) off.add("vision");
   return off;
+}
+
+/* A recipe can serve several modalities (ADR-003): flux_klein renders and
+   edits from one process, so it belongs in both image tabs. */
+function serves(m: CatalogModel, modality: CatalogModel["worker"]): boolean {
+  return (m.modalities ?? [m.worker]).includes(modality);
 }

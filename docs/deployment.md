@@ -180,7 +180,7 @@ It never downloads models and never overwrites `config.yaml` or `giq.env`.
 It warns when no `llama-server` is found in `engines/` or on PATH.
 
 Models go under `$GIQ_HOME/models` (paths as the recipe files name them;
-see [configuration.md](configuration.md#instances)). Weights loaded by library name —
+see [configuration.md](configuration.md#recipes)). Weights loaded by library name —
 faster-whisper, pyannote, speechbrain, kokoro — live in
 `$GIQ_HOME/cache/huggingface`. The unit sets `HF_HUB_OFFLINE=1`, so fetch
 them beforehand as a user who can write there, with

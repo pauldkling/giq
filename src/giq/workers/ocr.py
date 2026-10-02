@@ -54,7 +54,7 @@ _GIQ_SRC = str(Path(__file__).resolve().parents[2])
 
 
 def _instance(model: str):
-    recipe = recipe_of("ocr", model)
+    recipe = recipe_of(model)
     if recipe is None:
         raise ValueError(f"unknown OCR model {model!r}: no recipe file defines it")
     return recipe
@@ -85,9 +85,9 @@ class OCRWorker(SubprocessWorker):
                 f"ocr/{config.model}: no OCR child runs engine {self.engine!r} "
                 f"(one of {', '.join(sorted(CHILD_OF_ENGINE))})"
             ) from None
-        self.weights = require_path("ocr", config.model)
+        self.weights = require_path(config.model)
         self.parts = {
-            part: require_path("ocr", config.model, part)
+            part: require_path(config.model, part)
             for part in PARTS_OF_CHILD.get(self.child_module, ())
         }
 
@@ -99,7 +99,7 @@ class OCRWorker(SubprocessWorker):
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "ocr", default=OCR_VRAM_GB)
+        return vram_for(self.config.model, default=OCR_VRAM_GB)
 
     def _own_interpreter(self) -> bool:
         # giq's own interpreter runs the engines ENGINE_OF_BACKEND maps to it.

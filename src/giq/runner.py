@@ -17,9 +17,10 @@ from giq.models import ImageResult, JobRequest, JobStatus, LLMResult, Modality
 from giq.paths import inflight_log
 from giq.privacy import safe_extra
 from giq.queue import Job, JobQueue, get_queue
-from giq.registry import lane_width_for
+from giq.recipes.schema import VllmParams
+from giq.registry import get_recipe, lane_width_for
 from giq.vram import get_free_vram, wait_for_vram
-from giq.workers.engine import ServedLLM, context_size, engine_for
+from giq.workers.engine import ServedLLM, context_size
 from giq.workers.llm import LLMWorker, LLMWorkerConfig
 from giq.workers.stt import STTWorker
 
@@ -185,26 +186,25 @@ def _job_timeout(modality: Modality, job: "Job | None" = None) -> float:
 DEFAULT_START_BUDGET_SECONDS = 300.0
 
 
-def start_budget(modality: Modality, model: str) -> float:
-    """How long ``modality/model`` may take to start, from its engine or recipe.
+def start_budget(model: str) -> float:
+    """How long recipe ``model`` may take to start, from its engine or recipe.
 
     A start is not part of a job's run time — ``_job_timeout`` only begins
     once the worker is up — but a caller waiting on the job sits through it.
     vllm needs minutes (192 s cold on an RTX 5090, CUDA graph capture
     included), llama.cpp seconds to minutes depending on the disk; each
-    engine says so, and a recipe file can say more.
+    engine says so, and a recipe can say more.
     """
-    if modality == Modality.llm:
-        if engine_for(model) == "vllm":
-            from giq.workers.vllm import recipe_for
-
-            recipe = recipe_for(model)
-            if recipe is not None:
-                return float(recipe.params.ready_timeout)
+    recipe = get_recipe(model)
+    if recipe is None:
+        return DEFAULT_START_BUDGET_SECONDS
+    if isinstance(recipe.params, VllmParams):
+        return float(recipe.params.ready_timeout)
+    if recipe.engine == "llama.cpp":
         from giq.workers.llm import DEFAULT_READY_TIMEOUT, MODEL_READY_TIMEOUT
 
-        return float(MODEL_READY_TIMEOUT.get(model, DEFAULT_READY_TIMEOUT))
-    if modality in (Modality.text2image, Modality.image_edit):
+        return float(MODEL_READY_TIMEOUT.get(recipe.name, DEFAULT_READY_TIMEOUT))
+    if recipe.engine == "sd.cpp":
         from giq.workers.sdcpp import READY_TIMEOUT_SECONDS
 
         return READY_TIMEOUT_SECONDS
@@ -222,7 +222,7 @@ def wait_budget(job: Job) -> float:
     a too-short one doesn't cost more.
     """
     modality = Modality(job.request.modality)
-    return start_budget(modality, job.request.model) + _job_timeout(modality, job)
+    return start_budget(job.request.model) + _job_timeout(modality, job)
 
 
 def _context_budget(request: JobRequest) -> int | None:
@@ -255,7 +255,7 @@ VRAM_WAIT_CAP_SECONDS = 180.0
 # residents cheapest-first until the requirement fits, and the resident loop
 # reloads them once the queue drains. Passed via get_runner()/constructor;
 # tests construct Runner without it and see the legacy batch-only behavior.
-def _residents_default() -> list[tuple[Modality, str]]:
+def _residents_default() -> list[str]:
     """The configured resident set, in reload-priority order.
 
     Sourced from giq.registry (config.yaml `residents:` overriding the
@@ -265,7 +265,7 @@ def _residents_default() -> list[tuple[Modality, str]]:
     """
     from giq.registry import resident_defaults
 
-    return [(Modality(worker), model) for worker, model in resident_defaults()]
+    return resident_defaults()
 
 
 RESIDENTS_DEFAULT = _residents_default()
@@ -315,10 +315,10 @@ def _declared_size(res: "_Resident") -> float:
 
 
 def _choose_victims(
-    loaded: list[tuple[tuple[Modality, str], "_Resident"]],
+    loaded: list[tuple[str, "_Resident"]],
     deficit: float,
     size_of: Callable[["_Resident"], float] = _declared_size,
-) -> list[tuple[tuple[Modality, str], "_Resident"]]:
+) -> list[tuple[str, "_Resident"]]:
     """Pick the least disruptive set of residents to evict for ``deficit`` GB.
 
     Fewest residents first, then least VRAM freed. Evicting a resident is not
@@ -399,7 +399,7 @@ class Worker(Protocol):
 # serial. The figures live in registry.DEFAULT_LANE_WIDTH.
 
 
-def _lane_width(modality: Modality, model: str, worker: Any) -> int:
+def _lane_width(model: str, worker: Any) -> int:
     """How many jobs a resident runs at once.
 
     An engine that schedules requests itself says how many it takes (ADR-002,
@@ -409,7 +409,7 @@ def _lane_width(modality: Modality, model: str, worker: Any) -> int:
     """
     if isinstance(worker, ServedLLM) and worker.lanes_from_engine:
         return max(1, worker.concurrency().max_parallel)
-    return lane_width_for(modality.value, model)
+    return lane_width_for(model)
 
 
 class _Resident:
@@ -452,15 +452,21 @@ class _Slot:
     ever *running* a job.
     """
 
-    def __init__(self, worker: Worker, modality: Modality, model: str, device: str | None):
+    def __init__(self, worker: Worker, model: str, device: str | None):
         self.worker = worker
-        self.modality = modality
+        # The recipe name: the slot's key, and what its jobs ask for.
         self.model = model
         self.device = device
 
     @property
-    def key(self) -> tuple[Modality, str]:
-        return (self.modality, self.model)
+    def modality(self) -> Modality:
+        """The recipe's first modality, as the status scalars report a slot."""
+        recipe = get_recipe(self.model)
+        return Modality(recipe.modality) if recipe is not None else Modality.llm
+
+    @property
+    def key(self) -> str:
+        return self.model
 
 
 class Runner:
@@ -469,7 +475,7 @@ class Runner:
     def __init__(
         self,
         queue: JobQueue | None = None,
-        residents: list[tuple[Modality, str]] | None = None,
+        residents: list[str] | None = None,
         use_policy: bool = False,
     ):
         # `JobQueue` is falsy when empty (defines __len__), so `queue or …`
@@ -487,7 +493,7 @@ class Runner:
         # the legacy path and what tests construct.
         self._use_policy = use_policy
         self._static_residents = list(residents or [])
-        self._residents: dict[tuple[Modality, str], _Resident] = {}
+        self._residents: dict[str, _Resident] = {}
         self._resident_task: asyncio.Task | None = None
         self._resident_jobs: set[asyncio.Task] = set()
         self._queue_empty_since: float | None = None
@@ -500,15 +506,15 @@ class Runner:
         self._worker_lock = asyncio.Lock()
 
     @property
-    def _resident_keys(self) -> list[tuple[Modality, str]]:
+    def _resident_keys(self) -> list[str]:
         """Models that should be resident right now, in reload-priority order."""
         if not self._use_policy:
             return self._static_residents
         from giq.policy import get_policy_store
 
-        return [(Modality(w), m) for w, m in get_policy_store().residents()]
+        return get_policy_store().residents()
 
-    def _policy_for(self, modality: Modality, model: str) -> str:
+    def _policy_for(self, model: str) -> str:
         """This model's policy.
 
         Consulted regardless of ``use_policy``: that flag decides whether the
@@ -519,23 +525,23 @@ class Runner:
         """
         from giq.policy import get_policy_store
 
-        return get_policy_store().policy_for(str(modality), model)
+        return get_policy_store().policy_for(model)
 
-    def is_disabled(self, modality: Modality, model: str) -> bool:
-        """True when policy forbids this model from loading at all."""
-        return self._policy_for(modality, model) == "off"
+    def is_disabled(self, model: str) -> bool:
+        """True when policy forbids this recipe from loading at all."""
+        return self._policy_for(model) == "off"
 
-    def _device_for(self, modality: Modality, model: str) -> str | None:
-        """UUID of the card this model is bound to (None = no GPU visible)."""
+    def _device_for(self, model: str) -> str | None:
+        """UUID of the card this recipe is bound to (None = no GPU visible)."""
         from giq.policy import device_of
 
-        gpu = device_of(str(modality), model)
+        gpu = device_of(model)
         return gpu.uuid if gpu else None
 
-    def _slot_for(self, modality: Modality, model: str) -> _Slot | None:
+    def _slot_for(self, model: str) -> _Slot | None:
         """The loaded sleepy worker for this model, if it is loaded."""
-        slot = self._slots.get(self._device_for(modality, model))
-        if slot and slot.key == (modality, model):
+        slot = self._slots.get(self._device_for(model))
+        if slot and slot.key == model:
             return slot
         return None
 
@@ -570,34 +576,26 @@ class Runner:
 
     @property
     def resident_models(self) -> dict[str, bool]:
-        """{worker/model: ready} for configured residents (for /status)."""
+        """{recipe: ready} for configured residents (for /status)."""
         out = {}
         for key in self._resident_keys:
             res = self._residents.get(key)
-            out[f"{key[0]}/{key[1]}"] = bool(res and res.worker.is_ready)
+            out[key] = bool(res and res.worker.is_ready)
         return out
 
-    def loaded_keys(self) -> set[tuple[str, str]]:
-        """(worker, model) of every ready worker, resident or on a card's slot.
+    def loaded_keys(self) -> set[str]:
+        """The recipe of every ready worker, resident or on a card's slot.
 
         A job for one of these needs no VRAM to start, which is what tells a
         job that is waiting its turn from one that is waiting for room.
         """
-        keys = {
-            (str(k[0]), k[1])
-            for k, res in self._residents.items()
-            if getattr(res.worker, "is_ready", False)
-        }
-        keys |= {
-            (str(s.modality), s.model)
-            for s in self._slots.values()
-            if getattr(s.worker, "is_ready", False)
-        }
+        keys = {k for k, res in self._residents.items() if getattr(res.worker, "is_ready", False)}
+        keys |= {s.model for s in self._slots.values() if getattr(s.worker, "is_ready", False)}
         return keys
 
     @property
     def owned_pids(self) -> dict[int, str]:
-        """{pid: worker/model} for every process giq is holding VRAM through.
+        """{pid: recipe} for every process giq is holding VRAM through.
 
         Includes giq's own pid: STT is the one worker that still loads in this
         process, so when it is up, part of the card is ours through no child
@@ -608,23 +606,23 @@ class Runner:
         for key, res in self._residents.items():
             pid = getattr(res.worker, "pid", None)
             if pid:
-                owned[pid] = f"{key[0]}/{key[1]}"
+                owned[pid] = key
         for slot in self._slots.values():
             pid = getattr(slot.worker, "pid", None)
             if pid:
-                owned[pid] = f"{slot.modality}/{slot.model}"
+                owned[pid] = f"{slot.model}"
             elif isinstance(slot.worker, STTWorker):
-                owned[os.getpid()] = f"{slot.modality}/{slot.model}"
+                owned[os.getpid()] = f"{slot.model}"
         return owned
 
     @property
     def resident_devices(self) -> dict[str, str | None]:
-        """{worker/model: GPU UUID} for residents that are currently loaded.
+        """{recipe: GPU UUID} for residents that are currently loaded.
 
         Where they *are*, not where they belong — during a rebind those differ
         for a tick, and what a caller sizing a card wants is the truth.
         """
-        return {f"{key[0]}/{key[1]}": res.device for key, res in self._residents.items()}
+        return {key: res.device for key, res in self._residents.items()}
 
     @property
     def llm_base_url(self) -> str | None:
@@ -642,7 +640,7 @@ class Runner:
 
     def _llm_base_url(self, model: str | None) -> str | None:
         for key, res in self._residents.items():
-            if model is not None and key[1] != model:
+            if model is not None and key != model:
                 continue
             if isinstance(res.worker, ServedLLM) and res.worker.is_ready:
                 return res.worker.base_url
@@ -653,8 +651,8 @@ class Runner:
                 return slot.worker.base_url
         return None
 
-    def is_resident_key(self, modality: Modality, model: str) -> bool:
-        return (modality, model) in self._resident_keys
+    def is_resident_key(self, model: str) -> bool:
+        return model in self._resident_keys
 
     # --- Pause ---------------------------------------------------------------
 
@@ -727,7 +725,7 @@ class Runner:
                     self._residents.pop(key, None)
                 except Exception as e:
                     logger.error(f"Failed to stop resident {key} for pause: {e}")
-                    warnings.append(f"{key[0]}/{key[1]} still loaded: {e}")
+                    warnings.append(f"{key} still loaded: {e}")
 
         from giq.stats import get_stats
 
@@ -856,7 +854,7 @@ class Runner:
                     continue
                 job = await self._queue.get_next()
                 if job:
-                    key = (job.request.modality, job.request.model)
+                    key = job.request.model
                     if key in self._resident_keys:
                         # Claim the job SYNCHRONOUSLY before create_task: the
                         # spawned task may not run for a while, and get_next()
@@ -890,18 +888,16 @@ class Runner:
         job.started_at = datetime.now()
         self._processing_job = True
 
-        device = self._device_for(job.request.modality, job.request.model)
+        device = self._device_for(job.request.model)
         try:
             # Sleepy-model job: free enough resident VRAM first, on THIS card
             # (waits for in-flight resident sessions, capped so this job can't
             # starve). Residents on other cards are not candidates — evicting
             # them would free memory the load cannot use.
-            await self._evict_residents_for(job.request.modality, job.request.model)
+            await self._evict_residents_for(job.request.model)
 
             # Ensure correct worker is loaded
-            worker = await self._ensure_worker(
-                job.request.modality, job.request.model, job.request.model_path
-            )
+            worker = await self._ensure_worker(job.request.model, job.request.model_path)
 
             # Run the job with a timeout to prevent infinite hangs
             timeout = _job_timeout(job.request.modality, job)
@@ -999,16 +995,24 @@ class Runner:
 
     # --- Resident machinery -------------------------------------------------
 
-    def _build_worker(self, modality: Modality, model: str, model_path: str | None = None):
-        """Construct (but don't start) a worker for the given type/model.
+    def _build_worker(self, model: str, model_path: str | None = None):
+        """Construct (but don't start) the worker that runs recipe ``model``.
 
-        Every worker is handed the card its model is bound to. That is what
-        makes a binding real: it decides CUDA_VISIBLE_DEVICES for the child,
-        and for the server backends the port as well, so two cards can each
-        run their own llama-server or sd-server.
+        Chosen by the recipe's engine and its first modality: a recipe serving
+        several (flux_klein) runs them all in one process, so any of them
+        picks the same worker. Every worker is handed the card its recipe is
+        bound to. That is what makes a binding real: it decides
+        CUDA_VISIBLE_DEVICES for the child, and for the server backends the
+        port as well, so two cards can each run their own llama-server or
+        sd-server.
         """
-        device = self._device_for(modality, model)
-        if modality == Modality.llm and engine_for(model) == "vllm":
+        recipe = get_recipe(model)
+        if recipe is None:
+            raise ValueError(f"unknown recipe {model!r}")
+        model = recipe.name
+        modality = Modality(recipe.modality)
+        device = self._device_for(model)
+        if recipe.engine == "vllm":
             from giq.workers.vllm import VLLMWorker, VLLMWorkerConfig
 
             if model_path:
@@ -1032,9 +1036,7 @@ class Runner:
             # sd.cpp is the one image runtime; the recipe schema admits no other.
             from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
 
-            return SdCppWorker(
-                config=SdCppWorkerConfig(model=model, device=device, worker=str(modality))
-            )
+            return SdCppWorker(config=SdCppWorkerConfig(model=model, device=device))
         if modality == Modality.tts:
             from giq.workers.tts import TTSWorker, TTSWorkerConfig
 
@@ -1055,13 +1057,13 @@ class Runner:
             from giq.workers.multiview import MultiviewWorker, MultiviewWorkerConfig
 
             return MultiviewWorker(config=MultiviewWorkerConfig(model=model), device=device)
-        raise ValueError(f"Worker type not implemented: {modality}")
+        raise ValueError(f"no worker for {model}'s modality {modality}")
 
-    async def _process_resident_job(self, job: Job, key: tuple[Modality, str]) -> None:
+    async def _process_resident_job(self, job: Job, key: str) -> None:
         """Run one job on a resident's lane (concurrent with other lanes)."""
         # status/started_at are set by the dispatch loop before this task is
         # created (see _run_loop's claim-before-create_task comment).
-        logger.info(f"Resident job {job.job_id}: {key[0]}/{key[1]}")
+        logger.info(f"Resident job {job.job_id}: {key}")
         _log_inflight("start", job)
         try:
             while True:
@@ -1076,7 +1078,7 @@ class Runner:
                 res.active_count += 1
                 res.last_active = monotonic()
                 try:
-                    timeout = _job_timeout(key[0], job)
+                    timeout = _job_timeout(job.request.modality, job)
                     if job.request.chat_request is not None:
                         if not isinstance(res.worker, ServedLLM):
                             raise RuntimeError("chat_request requires LLM worker")
@@ -1121,7 +1123,7 @@ class Runner:
             return
         except TimeoutError:
             job.status = JobStatus.failed
-            job.error = f"Job timed out after {_job_timeout(key[0], job):.0f}s"
+            job.error = f"Job timed out after {_job_timeout(job.request.modality, job):.0f}s"
         except asyncio.CancelledError:
             job.status = JobStatus.failed
             job.error = "Cancelled (giq paused)" if self._paused else "Cancelled (runner shutdown)"
@@ -1155,7 +1157,7 @@ class Runner:
 
                 await get_stats().record_job(job)
 
-    async def _wait_resident_ready(self, key: tuple[Modality, str]) -> _Resident:
+    async def _wait_resident_ready(self, key: str) -> _Resident:
         """Wait for a resident to be loaded and ready (it may be evicted for
         an image batch; the residents loop reloads it once the batch drains)."""
         started = monotonic()
@@ -1167,10 +1169,10 @@ class Runner:
             # fail now instead of waiting out the full timeout. The job is not
             # lost — the caller retries it through the batch path.
             if key not in self._resident_keys:
-                raise ResidentDemoted(f"{key[0]}/{key[1]} is no longer resident")
+                raise ResidentDemoted(f"{key} is no longer resident")
             if monotonic() - started >= RESIDENT_WAIT_TIMEOUT_SECONDS:
                 raise TimeoutError(
-                    f"resident {key[0]}/{key[1]} unavailable after "
+                    f"resident {key} unavailable after "
                     f"{RESIDENT_WAIT_TIMEOUT_SECONDS:.0f}s (evicted for batch work?)"
                 )
             await asyncio.sleep(0.5)
@@ -1194,11 +1196,7 @@ class Runner:
                     continue
                 await self._release_demoted_residents()
                 pending = await self._queue.get_pending()
-                sleepy = [
-                    j
-                    for j in pending
-                    if (j.request.modality, j.request.model) not in self._resident_keys
-                ]
+                sleepy = [j for j in pending if j.request.model not in self._resident_keys]
                 if sleepy:
                     self._queue_empty_since = None
                     continue
@@ -1224,10 +1222,7 @@ class Runner:
                     if self._processing_job:
                         break
                     pending = await self._queue.get_pending()
-                    if any(
-                        (j.request.modality, j.request.model) not in self._resident_keys
-                        for j in pending
-                    ):
+                    if any(j.request.model not in self._resident_keys for j in pending):
                         break
                     await self._load_resident(key)
             except asyncio.CancelledError:
@@ -1250,11 +1245,11 @@ class Runner:
         in-flight lane jobs finish first.
         """
         wanted = set(self._resident_keys)
-        demoted: list[tuple[tuple[Modality, str], str]] = []
+        demoted: list[tuple[str, str]] = []
         for key, res in self._residents.items():
             if key not in wanted:
-                demoted.append((key, f"policy is now {self._policy_for(*key)}"))
-            elif res.device != self._device_for(*key):
+                demoted.append((key, f"policy is now {self._policy_for(key)}"))
+            elif res.device != self._device_for(key):
                 demoted.append((key, "rebound to another card"))
         if not demoted:
             return
@@ -1270,24 +1265,24 @@ class Runner:
                 async with self._worker_lock:
                     if self._residents.get(key) is not res:
                         continue
-                    logger.info(f"unloading {key[0]}/{key[1]} — {why}")
+                    logger.info(f"unloading {key} — {why}")
                     await res.worker.stop()
                     self._residents.pop(key, None)
-                    await get_stats().record_event("unload", f"{key[0]}/{key[1]} ({why})")
+                    await get_stats().record_event("unload", f"{key} ({why})")
             except Exception as e:
                 logger.error(f"Failed to unload demoted resident {key}: {e}")
             finally:
                 res.release_all()
 
-    async def _load_resident(self, key: tuple[Modality, str]) -> None:
-        modality, model = key
+    async def _load_resident(self, key: str) -> None:
+        model = key
         async with self._worker_lock:
             # Re-check under the lock: a pause may have landed while this tick
             # was waiting for VRAM or for the lock, and loading now would put
             # the card straight back under load.
             if self._paused:
                 return
-            if self.is_disabled(*key):
+            if self.is_disabled(key):
                 return
             res = self._residents.get(key)
             if res and res.worker.is_ready:
@@ -1303,20 +1298,19 @@ class Runner:
             # Residents get a reduced margin: the set is validated to coexist,
             # and the full spike margin can wedge the reload forever when free
             # VRAM sits just inside the margin window (see wait_for_vram).
-            device = self._device_for(modality, model)
+            device = self._device_for(model)
             vram_ok = await wait_for_vram(
-                modality.value,
                 model,
                 timeout=POST_UNLOAD_VRAM_GRACE_SECONDS,
                 margin_gb=0.5,
                 device=device,
             )
             if not vram_ok:
-                logger.info(f"resident {modality}/{model}: VRAM not free yet, retry next tick")
+                logger.info(f"resident {model}: VRAM not free yet, retry next tick")
                 return
-            logger.info(f"resident: loading {modality}/{model}")
-            worker = self._build_worker(modality, model)
-            width = _lane_width(modality, model, worker)
+            logger.info(f"resident: loading {model}")
+            worker = self._build_worker(model)
+            width = _lane_width(model, worker)
             resident = _Resident(worker, width, device)
             self._residents[key] = resident
             try:
@@ -1327,9 +1321,9 @@ class Runner:
                 raise
             from giq.stats import get_stats
 
-            await get_stats().record_event("reload", f"{modality}/{model}")
+            await get_stats().record_event("reload", model)
 
-    async def _evict_residents_for(self, modality: Modality, model: str) -> None:
+    async def _evict_residents_for(self, model: str) -> None:
         """Free enough resident VRAM on this model's card for it to load.
 
         Victims are drawn only from residents on that same card: freeing VRAM
@@ -1345,11 +1339,11 @@ class Runner:
         """
         from giq.vram import get_vram_requirement, margin_for, reserve_for
 
-        if not self._residents or (modality, model) in self._resident_keys:
+        if not self._residents or model in self._resident_keys:
             return
 
-        device = self._device_for(modality, model)
-        base = get_vram_requirement(modality.value, model)
+        device = self._device_for(model)
+        base = get_vram_requirement(model)
         required = base + margin_for(base) + reserve_for(device)
         free = get_free_vram(device)
         if free >= required:
@@ -1364,7 +1358,7 @@ class Runner:
         loaded = sorted(on_card, key=lambda kv: size_of(kv[1]))
         victims = _choose_victims(loaded, deficit, size_of)
 
-        await self._defer_while_busy(victims, modality, model)
+        await self._defer_while_busy(victims, model)
 
         from giq.stats import get_stats
 
@@ -1374,12 +1368,10 @@ class Runner:
                 async with self._worker_lock:
                     if self._residents.get(key) is not res:
                         continue
-                    logger.info(f"evicting resident {key[0]}/{key[1]} for {modality}/{model}")
+                    logger.info(f"evicting resident {key} for {model}")
                     await res.worker.stop()
                     self._residents.pop(key, None)
-                    await get_stats().record_event(
-                        "evict", f"{key[0]}/{key[1]} for {modality}/{model}"
-                    )
+                    await get_stats().record_event("evict", f"{key} for {model}")
             finally:
                 res.release_all()
 
@@ -1417,8 +1409,7 @@ class Runner:
 
     async def _defer_while_busy(
         self,
-        victims: list[tuple[tuple[Modality, str], "_Resident"]],
-        modality: Modality,
+        victims: list[tuple[str, "_Resident"]],
         model: str,
     ) -> None:
         """Wait until every victim has been quiet for EVICT_IDLE_GRACE_SECONDS.
@@ -1448,7 +1439,7 @@ class Runner:
                 return
             if monotonic() - started >= EVICT_DEFER_CAP_SECONDS:
                 logger.warning(
-                    f"Evicting busy residents for {modality}/{model}: "
+                    f"Evicting busy residents for {model}: "
                     f"deferral cap ({EVICT_DEFER_CAP_SECONDS:.0f}s) reached"
                 )
                 return
@@ -1456,7 +1447,6 @@ class Runner:
 
     async def _ensure_worker(
         self,
-        modality: Modality,
         model: str,
         model_path: str | None = None,
     ) -> Worker | None:
@@ -1475,26 +1465,24 @@ class Runner:
             # Policy is enforced at submit, but re-check here: a model can be
             # turned off between dispatch and load, and `off` must mean no
             # load path at all, not just no new submissions.
-            if self.is_disabled(modality, model):
-                raise RuntimeError(f"{modality}/{model} is disabled (policy: off)")
+            if self.is_disabled(model):
+                raise RuntimeError(f"{model} is disabled (policy: off)")
 
-            device = self._device_for(modality, model)
+            device = self._device_for(model)
             # Check if we already have the right worker AND it's ready
             slot = self._slots.get(device)
-            if slot and slot.key == (modality, model) and slot.worker.is_ready:
+            if slot and slot.key == model and slot.worker.is_ready:
                 return slot.worker
 
             # Unload whatever else holds this card's slot (free VRAM first)
             await self._unload_worker(device)
 
-            worker_name = modality.value
             # Bounded wait for VRAM to actually drop after unload/eviction.
             # CUDA context teardown lags process exit, so nvidia-smi may still
             # show memory used for a second or two. If the grace window
             # expires, keep waiting up to VRAM_WAIT_CAP_SECONDS, then fail
             # the job loudly rather than wedge the queue.
             vram_ok = await wait_for_vram(
-                worker_name,
                 model,
                 timeout=POST_UNLOAD_VRAM_GRACE_SECONDS,
                 poll_interval=0.5,
@@ -1503,27 +1491,22 @@ class Runner:
             if not vram_ok:
                 logger.warning(
                     f"VRAM still blocked {POST_UNLOAD_VRAM_GRACE_SECONDS}s after unload, "
-                    f"waiting up to {VRAM_WAIT_CAP_SECONDS:.0f}s for {worker_name}/{model}"
+                    f"waiting up to {VRAM_WAIT_CAP_SECONDS:.0f}s for {model}"
                 )
-                vram_ok = await wait_for_vram(
-                    worker_name, model, timeout=VRAM_WAIT_CAP_SECONDS, device=device
-                )
+                vram_ok = await wait_for_vram(model, timeout=VRAM_WAIT_CAP_SECONDS, device=device)
                 if not vram_ok:
                     raise RuntimeError(
-                        f"VRAM never became available for {worker_name}/{model} "
+                        f"VRAM never became available for {model} "
                         f"within {VRAM_WAIT_CAP_SECONDS:.0f}s"
                     )
 
-            logger.info(
-                f"VRAM available ({get_free_vram(device):.1f}GB free), "
-                f"loading {worker_name}/{model}"
-            )
+            logger.info(f"VRAM available ({get_free_vram(device):.1f}GB free), loading {model}")
 
-            worker = self._build_worker(modality, model, model_path)
+            worker = self._build_worker(model, model_path)
 
             # Publish the worker BEFORE start() so that _unload_worker can reap
             # it if start() raises (including CancelledError during load).
-            self._slots[device] = _Slot(worker, modality, model, device)
+            self._slots[device] = _Slot(worker, model, device)
             try:
                 await worker.start()
             except BaseException:
@@ -1575,8 +1558,9 @@ class Runner:
     def _contested_slots(self, pending: list[Job]) -> list[_Slot]:
         """Loaded slots a pending job needs for a *different* model.
 
-        Keep-warm key is (modality, model): a pending job that matches both
-        will be served by the loaded worker, so it stays warm. A job that wants
+        Keep-warm key is the recipe: a pending job for it is served by the
+        loaded worker, whichever of the recipe's modalities it asks for, so it
+        stays warm. A job that wants
         the same card for something else is what makes unloading urgent — and
         a job destined for another card is not, which is the whole point of
         having a slot per card.
@@ -1584,10 +1568,10 @@ class Runner:
         contested = []
         for slot in self._slots.values():
             for job in pending:
-                key = (job.request.modality, job.request.model)
+                key = job.request.model
                 if key == slot.key:
                     continue
-                if self._device_for(*key) == slot.device:
+                if self._device_for(key) == slot.device:
                     contested.append(slot)
                     break
         return contested
@@ -1616,7 +1600,7 @@ class Runner:
                     pending = await self._queue.get_pending()
                     for slot in self._contested_slots(pending):
                         logger.info(
-                            f"Unloading {slot.modality}/{slot.model} immediately: "
+                            f"Unloading {slot.model} immediately: "
                             "a queued job needs its card for another model"
                         )
                         await self._unload_worker(slot.device)
@@ -1653,7 +1637,7 @@ _runner: Runner | None = None
 
 
 def get_runner(
-    residents: list[tuple[Modality, str]] | None = None,
+    residents: list[str] | None = None,
     use_policy: bool = False,
 ) -> Runner:
     """Get or create global runner.

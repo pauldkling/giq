@@ -75,7 +75,7 @@ def tables_of(declared: Iterable[Recipe]) -> dict[str, dict]:
     Sparse like the tables: a model appears in one only when its file sets
     that parameter, so everything unset keeps taking the DEFAULT_*.
     """
-    llm = [i for i in declared if i.worker == "llm" and isinstance(i.params, LlamaCppParams)]
+    llm = [i for i in declared if i.serves("llm") and isinstance(i.params, LlamaCppParams)]
 
     def given(param: str) -> dict:
         return {i.name: i.params.given()[param] for i in llm if param in i.params.given()}
@@ -421,9 +421,9 @@ class LLMWorkerConfig:
 
     def __post_init__(self):
         if self.device is None:
-            from giq.vram import device_for_model
+            from giq.vram import device_for_recipe
 
-            self.device = device_for_model("llm", self.model)
+            self.device = device_for_recipe(self.model)
         if self.port is None:
             self.port = device_port(INTERNAL_LLM_PORT, self.device)
         if self.model_path is None:
@@ -447,10 +447,10 @@ class LLMWorkerConfig:
         if self.spec_type is None:
             self.spec_type = MODEL_SPEC_TYPE.get(self.model, DEFAULT_SPEC_TYPE)
         if self.mmproj is None:
-            from giq.registry import get_spec
+            from giq.registry import get_recipe
 
-            spec = get_spec("llm", self.model)
-            self.mmproj = spec.mmproj if spec else None
+            recipe = get_recipe(self.model)
+            self.mmproj = recipe.mmproj if recipe else None
         if self.mmproj:
             self.mmproj = resolve_path(self.mmproj)
         if self.parallel is None:
@@ -493,7 +493,7 @@ class LLMWorker(ServedLLM):
     @property
     def estimated_vram_gb(self) -> float:
         """Estimated VRAM usage for this model."""
-        return vram_for(self.config.model, "llm", default=15.0)
+        return vram_for(self.config.model, default=15.0)
 
     @property
     def base_url(self) -> str:

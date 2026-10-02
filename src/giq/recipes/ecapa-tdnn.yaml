@@ -5,7 +5,7 @@
 # ECAPA speaker embeddings, the third member of the resident set. Loads by
 # repository from the HF cache; GIQ_EMBED_MODEL overrides it.
 name: ecapa-tdnn
-worker: embed
+modalities: [embed]
 engine: speechbrain
 detail: "speaker voiceprints"
 weights:

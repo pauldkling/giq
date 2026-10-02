@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: gemma-4-26b-a4b-it
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 weights:
   path: unsloth-gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf

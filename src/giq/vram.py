@@ -16,7 +16,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from giq.registry import get_spec
+from giq.registry import get_recipe
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +59,17 @@ def margin_for(required_gb: float) -> float:
     return min(VRAM_SAFETY_MARGIN, max(0.5, required_gb * 0.5))
 
 
-def get_vram_requirement(worker: str, model: str) -> float:
-    """VRAM needed by a worker/model pair, from the registry.
+def get_vram_requirement(name: str) -> float:
+    """VRAM recipe ``name`` needs, from its recipe file.
 
-    Unregistered pairs fall back to DEFAULT_VRAM_REQUIREMENT, which exceeds a
-    16GB card once the margin is added — so an unregistered model fails fast
+    An unknown name falls back to DEFAULT_VRAM_REQUIREMENT, which exceeds a
+    16GB card once the margin is added — so an unknown model fails fast
     rather than loading against an unknown footprint. That is deliberate, but
-    it means "forgot to register it" and "genuinely too big" look identical;
-    register models you intend to run (see giq.registry).
+    it means "forgot the recipe" and "genuinely too big" look identical;
+    give a model you intend to run a recipe file (see giq.registry).
     """
-    spec = get_spec(worker, model)
-    return spec.vram_gb if spec else DEFAULT_VRAM_REQUIREMENT
+    recipe = get_recipe(name)
+    return recipe.vram_gb if recipe else DEFAULT_VRAM_REQUIREMENT
 
 
 def get_vram_status(device: str | int | None = None) -> VRAMStatus:
@@ -137,30 +137,30 @@ def reserve_for(device: str | int | None) -> float:
     return 0.0
 
 
-def device_for_model(worker: str, model: str) -> str | None:
-    """UUID of the card this model loads on. None when no GPU is visible."""
+def device_for_recipe(name: str) -> str | None:
+    """UUID of the card recipe ``name`` loads on. None when no GPU is visible."""
     try:
         from giq.policy import device_of
 
-        gpu = device_of(worker, model)
+        gpu = device_of(name)
         return gpu.uuid if gpu else None
     except Exception as e:  # a broken policy store must not blind the gate
-        logger.warning(f"device lookup failed for {worker}/{model}: {e}")
+        logger.warning(f"device lookup failed for {name}: {e}")
         from giq.gpus import selected_device
 
         gpu = selected_device()
         return gpu.uuid if gpu else None
 
 
-def can_load_model(worker: str, model: str, device: str | int | None = None) -> tuple[bool, str]:
-    """Check if we have enough VRAM to load a model on its bound card.
+def can_load(name: str, device: str | int | None = None) -> tuple[bool, str]:
+    """Check if we have enough VRAM to load recipe ``name`` on its bound card.
 
     Returns:
         Tuple of (can_load, reason)
     """
     if device is None:
-        device = device_for_model(worker, model)
-    required = get_vram_requirement(worker, model)
+        device = device_for_recipe(name)
+    required = get_vram_requirement(name)
     status = get_vram_status(device)
     reserve = reserve_for(device)
     needed = required + margin_for(required) + reserve
@@ -183,18 +183,16 @@ def can_load_model(worker: str, model: str, device: str | int | None = None) -> 
 
 
 async def wait_for_vram(
-    worker: str,
-    model: str,
+    name: str,
     timeout: float = 300.0,
     poll_interval: float = 5.0,
     margin_gb: float | None = None,
     device: str | int | None = None,
 ) -> bool:
-    """Wait until enough VRAM is available on this model's card.
+    """Wait until enough VRAM is available on this recipe's card.
 
     Args:
-        worker: Worker type
-        model: Model name
+        name: Recipe name
         timeout: Max seconds to wait (0 = no timeout)
         poll_interval: Seconds between checks
         margin_gb: Override the scaled safety margin. Resident reloads pass a
@@ -209,8 +207,8 @@ async def wait_for_vram(
         True if VRAM became available, False if timeout
     """
     if device is None:
-        device = device_for_model(worker, model)
-    required = get_vram_requirement(worker, model)
+        device = device_for_recipe(name)
+    required = get_vram_requirement(name)
     needed = (
         required
         + (margin_gb if margin_gb is not None else margin_for(required))
@@ -225,7 +223,7 @@ async def wait_for_vram(
     total = get_vram_status(device).total_gb
     if needed > total:
         logger.error(
-            f"VRAM requirement impossible for {worker}/{model} on its card: "
+            f"VRAM requirement impossible for {name} on its card: "
             f"{needed:.1f}GB needed > {total:.1f}GB total — failing fast"
         )
         return False

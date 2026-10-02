@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: qwen3.5-35b-a3b
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 weights:
   path: unsloth-Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf

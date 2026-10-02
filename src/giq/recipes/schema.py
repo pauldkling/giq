@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""What a recipe file may say (ADR-002).
+"""What a recipe file may say (ADR-002; the terms are ADR-003's).
 
 A recipe is one servable model: a name clients send, the weights it runs,
 the engine that runs them, that engine's parameters, residency defaults and
@@ -20,6 +20,7 @@ so a snapshot handed out stays what it was when it was validated.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -36,6 +37,8 @@ from pydantic import (
 from giq.engines import ENGINE_ALIASES, ENGINE_OF_BACKEND, canonical_engine
 from giq.models import Modality
 
+logger = logging.getLogger(__name__)
+
 # Names are what clients send and what log lines, file names and the
 # /control routes carry, so they stay path- and flag-safe: no slash, no
 # leading dash or dot.
@@ -48,7 +51,7 @@ Arg = Annotated[str, Field(min_length=1, pattern=r"^[^-]")]
 # Which engines can serve which worker. The workers are written against one
 # runtime each (ocr against two), so a recipe that pairs a
 # worker with a foreign engine could never load.
-WORKER_ENGINES: dict[str, frozenset[str]] = {
+MODALITY_ENGINES: dict[str, frozenset[str]] = {
     "llm": frozenset({"llama.cpp", "vllm"}),
     "text2image": frozenset({"sd.cpp"}),
     "image_edit": frozenset({"sd.cpp"}),
@@ -66,6 +69,11 @@ KvCacheType = Literal["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q
 
 Capability = Literal["chat", "vision"]
 
+# Concurrent jobs allowed on a resident's lane, by modality. llm matches
+# llama-server's 4 slots, so a client fanning out a few chat calls at once
+# gets them served in parallel; embed takes 2; audio is GPU-heavy and serial.
+DEFAULT_LANE_WIDTH: dict[str, int] = {"llm": 4, "audio": 1, "embed": 2}
+
 # Request-body values: the sampler fields llama-server reads are scalars.
 RequestValue = bool | int | float | str
 
@@ -80,9 +88,9 @@ class _Strict(BaseModel):
 # file, a log line and an error.
 PartName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=64)]
 
-# The parts each worker's code reads. A part it does not know would be a
+# The parts each modality's adapter reads. A part it does not know would be a
 # file written down and never loaded, so it is refused like an unknown key.
-WORKER_PARTS: dict[str, frozenset[str]] = {
+MODALITY_PARTS: dict[str, frozenset[str]] = {
     "text2image": frozenset({"diffusion", "text_encoder", "vae", "lora"}),
     "image_edit": frozenset({"diffusion", "text_encoder", "vae", "lora"}),
     "ocr": frozenset({"layout"}),
@@ -380,7 +388,9 @@ class Recipe(_Strict):
     """One servable model, as a recipe file declares it."""
 
     name: Name
-    worker: str
+    # The kinds of job this recipe serves (ADR-003). Usually one; flux_klein
+    # serves text2image and image_edit from one sd-server.
+    modalities: tuple[str, ...] = Field(min_length=1)
     engine: str
     label: str = ""
     detail: str = ""
@@ -396,20 +406,40 @@ class Recipe(_Strict):
     vram: Vram
     # Other names clients may send for this recipe.
     aliases: tuple[Name, ...] = ()
-    # Concurrent jobs on a resident's lane; unset = the worker's default.
+    # Concurrent jobs on a resident's lane; unset = the modality's default.
     lane_width: int | None = Field(default=None, ge=1)
-    max_batch: int | None = Field(default=None, ge=1)
+    # Tasks per job: one figure, or one per modality where they differ (an
+    # edit carries a reference image a render does not).
+    max_batch: Annotated[int, Field(ge=1)] | dict[str, Annotated[int, Field(ge=1)]] | None = None
     voices: tuple[str, ...] = ()
 
-    @field_validator("worker")
+    @model_validator(mode="before")
     @classmethod
-    def _known_worker(cls, v: str) -> str:
-        try:
-            return Modality(v).value
-        except ValueError:
+    def _old_worker_key(cls, data: Any) -> Any:
+        # Before ADR-003 a recipe named one `worker`; an operator's file
+        # written then still loads, as a recipe serving that one modality.
+        if isinstance(data, dict) and "worker" in data and "modalities" not in data:
+            worker = data["worker"]
+            logger.warning(
+                f"recipe {data.get('name')!r}: `worker: {worker}` is now "
+                f"`modalities: [{worker}]` (ADR-003)"
+            )
+            data = {k: v for k, v in data.items() if k != "worker"}
+            data["modalities"] = [worker]
+        return data
+
+    @field_validator("modalities")
+    @classmethod
+    def _known_modalities(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        known = {m.value for m in Modality}
+        if unknown := [m for m in v if m not in known]:
             raise ValueError(
-                f"unknown worker {v!r} (known: {', '.join(w.value for w in Modality)})"
-            ) from None
+                f"unknown modality {', '.join(map(repr, unknown))} "
+                f"(known: {', '.join(sorted(known))})"
+            )
+        if len(set(v)) != len(v):
+            raise ValueError("modalities repeat")
+        return tuple(Modality(m).value for m in v)
 
     @field_validator("engine")
     @classmethod
@@ -469,12 +499,18 @@ class Recipe(_Strict):
 
     @model_validator(mode="after")
     def _consistent(self) -> Recipe:
-        engines = WORKER_ENGINES.get(self.worker, frozenset())
-        if self.engine not in engines:
-            raise ValueError(
-                f"engine {self.engine!r} cannot serve worker {self.worker!r} "
-                f"(it takes: {', '.join(sorted(engines))})"
-            )
+        for modality in self.modalities:
+            engines = MODALITY_ENGINES.get(modality, frozenset())
+            if self.engine not in engines:
+                raise ValueError(
+                    f"engine {self.engine!r} cannot serve modality {modality!r} "
+                    f"(it takes: {', '.join(sorted(engines))})"
+                )
+        if isinstance(self.max_batch, dict):
+            if stray := sorted(set(self.max_batch) - set(self.modalities)):
+                raise ValueError(
+                    f"max_batch names {', '.join(stray)}, which this recipe does not serve"
+                )
         if self.profile is not None:
             profiles = ENGINE_PROFILES.get(self.engine)
             if not profiles:
@@ -488,10 +524,12 @@ class Recipe(_Strict):
         ):
             raise ValueError("vram.weights_gb and vram.overhead_gb are for engine vllm")
         if self.weights is not None and self.weights.parts:
-            readable = WORKER_PARTS.get(self.worker, frozenset())
+            readable = frozenset().union(
+                *(MODALITY_PARTS.get(m, frozenset()) for m in self.modalities)
+            )
             if unknown := sorted(set(self.weights.parts) - readable):
                 raise ValueError(
-                    f"weights.parts {', '.join(unknown)}: worker {self.worker!r} reads "
+                    f"weights.parts {', '.join(unknown)}: {', '.join(self.modalities)} reads "
                     + (f"only {', '.join(sorted(readable))}" if readable else "no parts")
                 )
         if self.name in self.aliases:
@@ -555,14 +593,60 @@ class Recipe(_Strict):
                     "config.json declares none"
                 )
 
-    @property
-    def key(self) -> tuple[str, str]:
-        return (self.worker, self.name)
+    # --- what the catalog, the scheduler and the dashboard read -----------
 
     @property
-    def ref(self) -> str:
-        """``worker/name``, as log lines and config.yaml write it."""
-        return f"{self.worker}/{self.name}"
+    def modality(self) -> str:
+        """The first modality: the one that picks the adapter and the defaults.
+
+        A recipe serving several (flux_klein) runs one process for all of
+        them, so any one of them would pick the same adapter.
+        """
+        return self.modalities[0]
+
+    def serves(self, modality: str) -> bool:
+        return str(modality) in self.modalities
+
+    def max_batch_for(self, modality: str) -> int | None:
+        if isinstance(self.max_batch, dict):
+            return self.max_batch.get(str(modality))
+        return self.max_batch
+
+    @property
+    def vram_gb(self) -> float:
+        return self.vram.gb
+
+    @property
+    def measured(self) -> bool:
+        """The VRAM figure was observed on real hardware, not estimated."""
+        return self.vram.measured
+
+    @property
+    def vision(self) -> bool:
+        """The recipe takes images alongside text: a capability of an LLM recipe."""
+        return "vision" in self.capabilities
+
+    @property
+    def mmproj(self) -> str | None:
+        """llama.cpp's projector file, without which the weights are text-only."""
+        return self.params.mmproj if isinstance(self.params, LlamaCppParams) else None
+
+    @property
+    def lanes(self) -> int:
+        """Concurrent jobs on this recipe's resident lane.
+
+        vllm's max_num_seqs is how many requests it really runs at once (D8);
+        llama.cpp keeps its separate lane width until its -np is aligned.
+        """
+        if isinstance(self.params, VllmParams):
+            return self.params.max_num_seqs
+        if self.lane_width is not None:
+            return self.lane_width
+        return DEFAULT_LANE_WIDTH.get(self.modality, 1)
+
+    @property
+    def display(self) -> str:
+        return self.label or self.name
 
 
 def _derived_vram(vram: dict[str, Any], params: VllmParams) -> float:

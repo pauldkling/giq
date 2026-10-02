@@ -5,11 +5,11 @@
 # faster-whisper on the batch path, distinct from the resident audio stack
 # (audio/whisper-large-v3). Loads by repository from the HF cache; a
 # weights.path to a converted CTranslate2 directory would load that instead.
-name: small
-worker: stt
+name: medium
+modalities: [stt]
 engine: faster-whisper
 weights:
-  source: hf:Systran/faster-whisper-small
+  source: hf:Systran/faster-whisper-medium
 vram:
-  gb: 1.0
+  gb: 2.0
   measured: false

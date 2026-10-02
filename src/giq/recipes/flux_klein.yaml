@@ -2,8 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# FLUX.2 klein 4B distilled (Apache-2.0), under sd.cpp. image_edit/flux_klein
-# is the same weights serving edits.
+# FLUX.2 klein 4B distilled (Apache-2.0), under sd.cpp. One recipe for both
+# modalities: klein does kontext-style reference edits through the same
+# sd-server (an edit is a txt2img call with extra_images), so renders and
+# edits share one process and alternating between them costs no reload.
 #
 # Image files are single safetensors, one subfolder per part
 # (diffusion_models/, text_encoders/, vae/, loras/) under GIQ_MODELS_DIR.
@@ -15,7 +17,7 @@
 # Image figures plus the gate's margin must stay under a 16 GB card's
 # 15.93 GB, or these models can never load there.
 name: flux_klein
-worker: text2image
+modalities: [text2image, image_edit]
 engine: sd.cpp
 weights:
   licence: apache-2.0
@@ -34,4 +36,8 @@ vram:
   # activations).
   gb: 8.0
   measured: true
-max_batch: 8
+# An edit carries a reference image a render does not; half the batch keeps
+# the pair inside the same VRAM figure.
+max_batch:
+  text2image: 8
+  image_edit: 4

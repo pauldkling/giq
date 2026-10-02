@@ -72,9 +72,9 @@ async def _prime_warm_worker(runner: Runner, modality: Modality, model: str):
     """Set runner state as if a job for (modality, model) just finished."""
     from giq.runner import _Slot
 
-    device = runner._device_for(modality, model)
+    device = runner._device_for(model)
     worker = AsyncMock()  # _unload_worker calls .stop()
-    runner._slots[device] = _Slot(worker, modality, model, device)
+    runner._slots[device] = _Slot(worker, model, device)
     runner._processing_job = False
 
 
@@ -130,10 +130,37 @@ async def test_warm_timeout_evicts_for_different_worker_type(queue: JobQueue, ru
     assert runner._slots == {}
 
 
+@pytest.mark.asyncio
+async def test_warm_timeout_keeps_a_recipe_warm_for_its_other_modality(
+    queue: JobQueue, runner: Runner
+):
+    """flux_klein renders and edits from one sd-server (ADR-003): an edit
+    queued behind a render is served by the loaded process, not a reload."""
+    import asyncio
+
+    await _prime_warm_worker(runner, Modality.text2image, "flux_klein")
+    job = Job(
+        job_id="edit1",
+        request=JobRequest(
+            modality=Modality.image_edit,
+            model="flux_klein",
+            tasks=[{"id": "t1", "prompt": "a hat", "image_b64": "x"}],
+        ),
+    )
+    await queue.add(job)
+
+    try:
+        await asyncio.wait_for(runner._warm_timeout_check(), timeout=0.5)
+    except TimeoutError:
+        pass  # reached the warm sleep: no eager unload
+
+    assert runner.active_model == "flux_klein"
+
+
 RESIDENTS = [
-    (Modality.llm, "gemma-4-12b"),
-    (Modality.audio, "whisper-large-v3"),
-    (Modality.embed, "ecapa-tdnn"),
+    "gemma-4-12b",
+    "whisper-large-v3",
+    "ecapa-tdnn",
 ]
 
 
@@ -146,7 +173,7 @@ def _prime_resident(runner: Runner, key, vram_gb: float, width: int = 1):
     worker.estimated_vram_gb = vram_gb
     # Same card the model would really load on, so eviction (which only
     # considers residents sharing the incoming model's card) sees them.
-    res = _Resident(worker, width, runner._device_for(*key))
+    res = _Resident(worker, width, runner._device_for(key))
     res.last_active = 0.0  # long quiet — eviction grace already satisfied
     runner._residents[key] = res
     return res
@@ -154,9 +181,9 @@ def _prime_resident(runner: Runner, key, vram_gb: float, width: int = 1):
 
 def test_resident_key_detection(queue: JobQueue):
     runner = Runner(queue, residents=RESIDENTS)
-    assert runner.is_resident_key(Modality.llm, "gemma-4-12b")
-    assert not runner.is_resident_key(Modality.text2image, "flux_klein")
-    assert not runner.is_resident_key(Modality.llm, "qwen3.6-27b")
+    assert runner.is_resident_key("gemma-4-12b")
+    assert not runner.is_resident_key("flux_klein")
+    assert not runner.is_resident_key("qwen3.6-27b")
 
 
 @pytest.mark.asyncio
@@ -175,7 +202,7 @@ async def test_eviction_picks_minimal_single_victim(
     # covers it (smallest single ≥ deficit); embed and gemma keep serving.
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.4)
 
-    await runner._evict_residents_for(Modality.llm, "llama-3.2-3b")
+    await runner._evict_residents_for("llama-3.2-3b")
 
     assert RESIDENTS[0] in runner._residents  # gemma survives
     assert RESIDENTS[1] not in runner._residents  # audio evicted
@@ -196,7 +223,7 @@ async def test_eviction_flux_takes_gemma_only(queue: JobQueue, monkeypatch: pyte
     # 2.5GB free; flux_klein needs 9+2=11 → deficit 8.5 → gemma (9.5) alone.
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.5)
 
-    await runner._evict_residents_for(Modality.text2image, "flux_klein")
+    await runner._evict_residents_for("flux_klein")
 
     assert RESIDENTS[0] not in runner._residents  # gemma evicted
     assert RESIDENTS[1] in runner._residents  # audio survives
@@ -217,7 +244,7 @@ async def test_eviction_cumulative_fallback_takes_everything(
         _prime_resident(runner, key, vram_gb=gb)
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 0.5)
 
-    await runner._evict_residents_for(Modality.text2image, "zimage")
+    await runner._evict_residents_for("zimage")
 
     assert not runner._residents
 
@@ -228,7 +255,7 @@ async def test_eviction_noop_for_resident_job_key(queue: JobQueue):
     runner = Runner(queue, residents=RESIDENTS)
     _prime_resident(runner, RESIDENTS[0], vram_gb=9.5)
     # No monkeypatched VRAM: must return before ever reading free VRAM.
-    await runner._evict_residents_for(*RESIDENTS[0])
+    await runner._evict_residents_for(RESIDENTS[0])
     assert RESIDENTS[0] in runner._residents
 
 
@@ -269,7 +296,7 @@ async def test_eviction_waits_for_in_flight_lane(queue: JobQueue, monkeypatch: p
     await embed.lane.acquire()
     embed.active_count = 1
 
-    evict = asyncio.create_task(runner._evict_residents_for(Modality.embed, "other-embed"))
+    evict = asyncio.create_task(runner._evict_residents_for("other-embed"))
     await asyncio.sleep(0.1)
     assert RESIDENTS[2] in runner._residents  # not evicted while in flight
 

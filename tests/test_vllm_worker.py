@@ -281,18 +281,18 @@ def test_a_null_ceiling_means_none(monkeypatch):
 
 
 def test_an_operator_instance_on_vllm(operator_dir, tmp_path):
-    from giq.registry import get_spec, reload_registry
+    from giq.registry import get_recipe, reload_registry
     from giq.workers.llm import MODEL_PATHS, weights_installed
 
     weights = make_checkpoint(tmp_path)
     (operator_dir / "big.yaml").write_text(
-        "name: qwen-big\nworker: llm\nengine: vllm\nprofile: throughput\n"
+        "name: qwen-big\nmodalities: [llm]\nengine: vllm\nprofile: throughput\n"
         f"weights: {{path: {weights}, format: modelopt}}\n"
         "params: {kv_cache_memory: 24G, max_model_len: 131072, max_num_seqs: 64}\n"
         "vram: {weights_gb: 19.92, overhead_gb: 3.5}\n"
     )
     reload_registry()
-    spec = get_spec("llm", "qwen-big")
+    spec = get_recipe("qwen-big")
     assert spec.vram_gb == pytest.approx(47.42) and spec.lanes == 64
     assert weights_installed("qwen-big")
     assert "qwen-big" not in MODEL_PATHS, "llama.cpp's tables stay llama.cpp's"
@@ -308,24 +308,24 @@ def test_runner_builds_a_vllm_worker_for_engine_vllm(operator_dir, tmp_path, mon
 
     weights = make_checkpoint(tmp_path)
     (operator_dir / "served.yaml").write_text(
-        "name: served\nworker: llm\nengine: vllm\nprofile: throughput\n"
+        "name: served\nmodalities: [llm]\nengine: vllm\nprofile: throughput\n"
         f"weights: {{path: {weights}, format: modelopt}}\n"
         "params: {kv_cache_memory: 6G, max_model_len: 65536}\n"
         "vram: {weights_gb: 19.92, overhead_gb: 3.5}\n"
     )
     reload_registry()
     runner = Runner(JobQueue())
-    monkeypatch.setattr(runner, "_device_for", lambda modality, model: "GPU-test")
+    monkeypatch.setattr(runner, "_device_for", lambda model: "GPU-test")
 
-    worker = runner._build_worker(Modality.llm, "served")
+    worker = runner._build_worker("served")
     assert isinstance(worker, VLLMWorker) and isinstance(worker, ServedLLM)
     assert worker.config.device == "GPU-test"
-    assert _lane_width(Modality.llm, "served", worker) == 32
+    assert _lane_width("served", worker) == 32
     assert engine_for("served") == "vllm" and context_size("served") == 65536
 
-    llama = runner._build_worker(Modality.llm, "qwen3.8-27b")
+    llama = runner._build_worker("qwen3.8-27b")
     assert isinstance(llama, LLMWorker) and isinstance(llama, ServedLLM)
-    assert _lane_width(Modality.llm, "qwen3.8-27b", llama) == 4, "llama.cpp lanes unchanged"
+    assert _lane_width("qwen3.8-27b", llama) == 4, "llama.cpp lanes unchanged"
     assert engine_for("qwen3.8-27b") == "llama.cpp"
 
 
@@ -333,7 +333,7 @@ def test_lanes_follow_max_num_seqs(tmp_path):
     from giq.runner import _lane_width
 
     worker = worker_for(make_recipe(make_checkpoint(tmp_path), "interactive"))
-    assert _lane_width(Modality.llm, NAME, worker) == 4
+    assert _lane_width(NAME, worker) == 4
     c = worker.concurrency()
     assert (c.max_parallel, c.per_request_context, c.shared_kv) == (4, 131072, True)
 

@@ -177,10 +177,9 @@ class SubprocessWorker:
         """Child environment, with CUDA_VISIBLE_DEVICES pinned to one card."""
         device = self.device
         if device is None:
-            from giq.vram import device_for_model
+            from giq.vram import device_for_recipe
 
-            worker = getattr(self, "modality", "") or ""
-            device = device_for_model(worker, getattr(self.config, "model", ""))
+            device = device_for_recipe(getattr(self.config, "model", ""))
         return device_env(device)
 
     def _command(self) -> list[str]:

@@ -12,7 +12,7 @@
 # same GGUF is how that speedup would be served (see the speculative-decoding
 # notes in workers/llm.py); it goes in with its own measurement.
 name: qwen3.8-27b
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 detail: "chat + vision · 128k ctx"
 weights:

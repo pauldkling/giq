@@ -62,20 +62,19 @@ class SdCppWorkerConfig:
     # the port that follows from it — one sd-server per card is possible now.
     device: str | None = None
     port: int | None = None
-    worker: str = "text2image"
 
     def __post_init__(self):
         if self.device is None:
-            from giq.vram import device_for_model
+            from giq.vram import device_for_recipe
 
-            self.device = device_for_model(self.worker, self.model)
+            self.device = device_for_recipe(self.model)
         if self.port is None:
             self.port = device_port(INTERNAL_SD_PORT, self.device)
         if not self.diffusion:
             from giq.config import get_config
             from giq.weights import image_files
 
-            cfg = image_files(self.worker, self.model)
+            cfg = image_files(self.model)
             self.diffusion = cfg.diffusion
             self.text_encoder = cfg.text_encoder
             self.vae = cfg.vae
@@ -113,7 +112,7 @@ class SdCppWorker:
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "text2image", "image_edit", default=12.0)
+        return vram_for(self.config.model, default=12.0)
 
     @property
     def base_url(self) -> str:

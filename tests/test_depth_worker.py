@@ -92,7 +92,7 @@ def second_model(tmp_path, monkeypatch):
 
     monkeypatch.setenv("GIQ_RECIPES_DIR", str(tmp_path))
     (tmp_path / "large.yaml").write_text(
-        "name: depth-test-large\nworker: depth\nengine: transformers\n"
+        "name: depth-test-large\nmodalities: [depth]\nengine: transformers\n"
         "weights: {path: depth-test-large-hf}\nvram: {gb: 4.0}\n"
     )
     reload_registry()

@@ -16,7 +16,7 @@
 # a licence that unclear is not one to offer for commercial use.
 name: da3-base
 label: Depth Anything 3 Base
-worker: multiview
+modalities: [multiview]
 engine: da3
 detail: "any-view depth + poses · ViT-B 0.12B · Apache-2.0 · ≤32 views"
 weights:

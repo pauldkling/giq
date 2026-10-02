@@ -180,11 +180,11 @@ def test_the_builtin_instances():
 
 
 def test_the_catalog_lists_them_with_derived_lanes():
-    from giq.registry import get_spec
+    from giq.registry import get_recipe
 
-    spec = get_spec("llm", NAME)
-    assert spec is not None and spec.backend == "vllm"
-    assert spec.lanes == 32, "max_num_seqs, not the llm default of 4"
-    assert get_spec("llm", f"{NAME}-chat").lanes == 4
+    recipe = get_recipe(NAME)
+    assert recipe is not None and recipe.engine == "vllm"
+    assert recipe.lanes == 32, "max_num_seqs, not the llm default of 4"
+    assert get_recipe(f"{NAME}-chat").lanes == 4
     assert engine_for(NAME) == "vllm" and engine_for("qwen3.8-27b") == "llama.cpp"
     assert context_size(NAME) == 131072

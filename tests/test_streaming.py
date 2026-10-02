@@ -23,7 +23,7 @@ import pytest
 
 from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import STREAM_BUFFER_CHUNKS, Job, JobStream
-from giq.registry import get_spec
+from giq.registry import get_recipe
 from giq.runner import FLOOR_TOKENS_PER_SECOND, JOB_TIMEOUT_SECONDS, _job_timeout
 from giq.workers.llm import LLMWorker, LLMWorkerConfig
 
@@ -688,19 +688,23 @@ def test_the_job_timeout_still_fires_before_the_http_one():
 @pytest.fixture
 def mtp_pair(monkeypatch):
     """A vision profile and its text-only speculative sibling, one GGUF."""
-    from dataclasses import replace
-
-    from giq import registry
     from giq.workers import llm
+    from tests._recipes import with_recipes
 
-    base = get_spec("llm", "qwen3.8-27b")
+    base = get_recipe("qwen3.8-27b")
+    assert base is not None
     vision, fast = "pair-vision", "pair-vision-fast"
-    specs = registry.get_registry()
-    monkeypatch.setitem(specs, ("llm", vision), replace(base, model=vision, label=None))
-    monkeypatch.setitem(
-        specs,
-        ("llm", fast),
-        replace(base, model=fast, label=None, vision=False, mmproj=None),
+    with_recipes(
+        monkeypatch,
+        base.model_copy(update={"name": vision, "label": ""}),
+        base.model_copy(
+            update={
+                "name": fast,
+                "label": "",
+                "capabilities": tuple(c for c in base.capabilities if c != "vision"),
+                "params": base.params.model_copy(update={"mmproj": None}),
+            }
+        ),
     )
     for name in (vision, fast):
         monkeypatch.setitem(llm.MODEL_PATHS, name, "pair/model-Q6_K.gguf")
@@ -745,7 +749,7 @@ def test_profiles_over_one_file_differ_only_in_vision_and_speculation():
     exists for."""
     for vision, fast in _profile_pairs():
         assert _profile_drift(vision, fast) == [], f"{vision} / {fast} drifted apart"
-        assert not get_spec("llm", fast).mmproj, f"{fast} must be text-only"
+        assert not get_recipe(fast).mmproj, f"{fast} must be text-only"
 
 
 def test_the_pair_is_recognised_and_consistent(mtp_pair):
@@ -806,8 +810,8 @@ def _unexempted_vision_speedup(allowed: set[str]) -> list[str]:
 
     offenders = []
     for model in MODEL_SPEC_TYPE:
-        spec = get_spec("llm", model)
-        assert spec is not None, f"{model} runs with --spec-type but is unregistered"
+        spec = get_recipe(model)
+        assert spec is not None, f"{model} runs with --spec-type but has no recipe"
         if model not in allowed and (spec.mmproj or spec.vision):
             offenders.append(model)
     return offenders
@@ -837,7 +841,7 @@ def test_the_vision_speedup_exception_list_is_honest():
 
     for model in SPEC_TYPE_WITH_VISION_ALLOWED:
         assert model in MODEL_SPEC_TYPE, f"{model} is exempted but runs no --spec-type"
-        spec = get_spec("llm", model)
+        spec = get_recipe(model)
         assert spec is not None and spec.mmproj, (
             f"{model} is exempted but carries no mmproj -- remove it from the list"
         )

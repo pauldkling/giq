@@ -7,14 +7,18 @@
 Two sources, read in order:
 
 - the built-in recipes, one file each next to this module
-  (``<worker>.<name>.yaml``), shipped in the package;
+  (``<name>.yaml``), shipped in the package;
 - the operator's, ``*.yaml``/``*.yml`` directly in
-  :func:`giq.paths.recipes_dir`, which add recipes or replace a built-in
-  that has the same worker and name.
+  :func:`giq.paths.recipes_dir`, which add recipes or replace the built-in
+  of the same name.
+
+A recipe's name is what a client sends as ``model`` and the key every other
+part of giq uses for it, so names — and aliases — are unique across
+modalities (ADR-003).
 
 They are validated into one immutable :class:`Snapshot`. Consumers read the
 current snapshot and never hold on to its parts across a reload: the
-registry turns it into ModelSpecs, the llm worker into its per-model tables.
+registry serves it as the catalog, the llm adapter keeps its per-model tables.
 
 The two sources fail differently. A broken built-in is a bug in giq — it
 raises, and the test suite catches it. A broken operator file must not take
@@ -45,7 +49,8 @@ logger = logging.getLogger(__name__)
 BUILTIN_DIR = Path(__file__).parent
 SUFFIXES = (".yaml", ".yml")
 
-Key = tuple[str, str]
+# A recipe's name: unique across modalities (ADR-003).
+Key = str
 
 
 class RecipeError(ValueError):
@@ -123,14 +128,13 @@ def _files(directory: Path) -> list[Path]:
 
 def _alias_clashes(recipes: Iterable[Recipe]) -> list[str]:
     """Names a client could send that would mean two recipes."""
-    owner: dict[Key, str] = {}
+    owner: dict[str, str] = {}
     clashes = []
     for recipe in recipes:
         for name in (recipe.name, *recipe.aliases):
-            key = (recipe.worker, name)
-            if key in owner and owner[key] != recipe.ref:
-                clashes.append(f"{recipe.worker}/{name} names both {owner[key]} and {recipe.ref}")
-            owner.setdefault(key, recipe.ref)
+            if name in owner and owner[name] != recipe.name:
+                clashes.append(f"{name} names both {owner[name]} and {recipe.name}")
+            owner.setdefault(name, recipe.name)
     return clashes
 
 
@@ -140,11 +144,9 @@ def builtin() -> Mapping[Key, tuple[Recipe, Path]]:
     found: dict[Key, tuple[Recipe, Path]] = {}
     for path in _files(BUILTIN_DIR):
         recipe = load_file(path)
-        if path.stem != f"{recipe.worker}.{recipe.name}":
-            raise _file_error(path, "a built-in is named <worker>.<name>.yaml")
-        if recipe.key in found:
-            raise _file_error(path, f"{recipe.ref} is already defined in {found[recipe.key][1]}")
-        found[recipe.key] = (recipe, path)
+        if path.stem != recipe.name:
+            raise _file_error(path, "a built-in is named <name>.yaml")
+        found[recipe.name] = (recipe, path)
     if clashes := _alias_clashes(recipe for recipe, _ in found.values()):
         raise RecipeError(f"built-in recipes: {'; '.join(clashes)}")
     return MappingProxyType(found)
@@ -166,13 +168,13 @@ def _operator(directory: Path, errors: list[LoadError]) -> dict[Key, tuple[Recip
         except RecipeError as e:
             errors.append(LoadError(str(e.file or path), e.detail))
             continue
-        loaded.setdefault(recipe.key, []).append((recipe, path))
+        loaded.setdefault(recipe.name, []).append((recipe, path))
     found: dict[Key, tuple[Recipe, Path]] = {}
     for key, entries in loaded.items():
         if len(entries) > 1:
             # Neither file wins: which one would is an accident of sorting.
             where = ", ".join(str(p) for _, p in entries)
-            errors.append(LoadError(None, f"{key[0]}/{key[1]} is defined more than once: {where}"))
+            errors.append(LoadError(None, f"{key} is defined more than once: {where}"))
             continue
         found[key] = entries[0]
     return found
@@ -192,11 +194,18 @@ class Snapshot:
     # The operator directory this snapshot read; None if none was given.
     operator_dir: Path | None = None
 
-    def get(self, worker: str, name: str) -> Recipe | None:
-        return self.recipes.get((worker, name))
+    def get(self, name: str) -> Recipe | None:
+        """The recipe a client means by ``name``: its own name or an alias."""
+        recipe = self.recipes.get(str(name))
+        if recipe is not None:
+            return recipe
+        return next((r for r in self.recipes.values() if name in r.aliases), None)
 
-    def of_worker(self, worker: str) -> list[Recipe]:
-        return [i for i in self.recipes.values() if i.worker == worker]
+    def serving(self, modality: str) -> list[Recipe]:
+        """Every recipe that serves ``modality``, by name."""
+        return sorted(
+            (r for r in self.recipes.values() if r.serves(modality)), key=lambda r: r.name
+        )
 
 
 def load(operator_dir: Path | None = None) -> Snapshot:
@@ -213,9 +222,9 @@ def load(operator_dir: Path | None = None) -> Snapshot:
             errors.append(LoadError(str(path), "; ".join(clashes)))
             continue
         if key in merged:
-            logger.info(f"recipes: {recipe.ref} from {path} replaces the built-in")
+            logger.info(f"recipes: {recipe.name} from {path} replaces the built-in")
         else:
-            logger.info(f"recipes: {recipe.ref} from {path}")
+            logger.info(f"recipes: {recipe.name} from {path}")
         merged[key] = (recipe, path)
     for problem in errors:
         logger.error(f"recipes: ignoring {problem}")
@@ -239,8 +248,8 @@ def describe(snapshot: Snapshot) -> dict:
     files = [
         {
             "file": str(path),
-            "worker": key[0],
-            "name": key[1],
+            "name": key,
+            "modalities": list(snapshot.recipes[key].modalities),
             "replaces_builtin": key in shipped,
         }
         for key, path in sorted(snapshot.sources.items(), key=lambda kv: str(kv[1]))
@@ -250,7 +259,7 @@ def describe(snapshot: Snapshot) -> dict:
         "dir": str(snapshot.operator_dir) if snapshot.operator_dir is not None else None,
         "builtin_dir": str(BUILTIN_DIR),
         "files": files,
-        "overrides": [f"{f['worker']}/{f['name']}" for f in files if f["replaces_builtin"]],
+        "overrides": [f["name"] for f in files if f["replaces_builtin"]],
         "errors": [{"file": p.file, "message": p.message} for p in snapshot.problems],
     }
 

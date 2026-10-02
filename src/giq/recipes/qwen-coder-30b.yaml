@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: qwen-coder-30b
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 weights:
   path: ~/.lmstudio/models/lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf

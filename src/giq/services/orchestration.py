@@ -45,6 +45,31 @@ class Orchestrator:
         )
 
     @staticmethod
+    def _resolve_recipe(request: JobRequest) -> None:
+        """Name the job by its recipe, and refuse a modality the recipe does not serve.
+
+        Clients may send an alias; everything after this point — policy, the
+        VRAM gate, the runner's residents and slots, the stats — keys on the
+        recipe's own name, so the alias is resolved once, here (ADR-003). An
+        unknown name passes through: the catalog is not a whitelist, and the
+        VRAM gate's default makes an unknown model fail loudly on its own.
+        """
+        from giq.registry import get_recipe
+
+        recipe = get_recipe(request.model)
+        if recipe is None:
+            return
+        if not recipe.serves(request.modality):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{recipe.name} does not serve {request.modality} "
+                    f"(it serves: {', '.join(recipe.modalities)})"
+                ),
+            )
+        request.model = recipe.name
+
+    @staticmethod
     def _reject_if_disabled(request: JobRequest) -> None:
         """503 submissions for a model the operator has switched off.
 
@@ -54,13 +79,12 @@ class Orchestrator:
         """
         from giq.policy import get_policy_store
 
-        worker, model = str(request.modality), request.model
-        if not get_policy_store().is_off(worker, model):
+        model = request.model
+        if not get_policy_store().is_off(model):
             return
-        record = get_policy_store().record_for(worker, model)
+        record = get_policy_store().record_for(model)
         detail = (
-            f"{worker}/{model} is switched off — it will not load until it is "
-            "set back to pinned or auto"
+            f"{model} is switched off — it will not load until it is set back to pinned or auto"
         )
         if record.reason:
             detail += f": {record.reason}"
@@ -72,6 +96,7 @@ class Orchestrator:
 
     async def submit_job(self, request: JobRequest) -> tuple[str, int]:
         self._reject_if_paused()
+        self._resolve_recipe(request)
         self._reject_if_disabled(request)
         job_id = str(uuid.uuid4())[:8]
         job = Job(job_id=job_id, request=request)
@@ -88,6 +113,7 @@ class Orchestrator:
         scheduler.
         """
         self._reject_if_paused()
+        self._resolve_recipe(request)
         self._reject_if_disabled(request)
         job_id = str(uuid.uuid4())[:8]
         stream = JobStream()

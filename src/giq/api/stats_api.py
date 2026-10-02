@@ -28,7 +28,7 @@ from giq.engines import ENGINE_OF_BACKEND
 from giq.gpus import get_gpus, resolve_device, selected_device
 from giq.models import JobRequest
 from giq.policy import RESIDENT_SET_HEADROOM_GB, get_policy_store
-from giq.registry import all_specs
+from giq.registry import all_recipes, get_recipe, resident_defaults
 from giq.runner import get_runner
 from giq.services.orchestration import Orchestrator
 from giq.stats import get_stats
@@ -436,9 +436,20 @@ def reasoning_for(worker: str, model: str) -> str | None:
     return MODEL_REASONING.get(model, DEFAULT_REASONING)
 
 
+def _ref(name: str) -> str:
+    """``modality/name``, the form the dashboard matches residency against until step 7."""
+    recipe = get_recipe(name)
+    return f"{recipe.modality}/{name}" if recipe is not None else name
+
+
 @router.get("/stats/models")
 async def model_catalog() -> dict:
-    """Every registered model with VRAM needs and current schedulability."""
+    """Every recipe with VRAM needs and current schedulability.
+
+    One entry per recipe. ``worker`` is its first modality, which the
+    dashboard groups by; ``modalities`` is every one it serves (flux_klein
+    renders and edits). ADR-003 step 6 renames the keys.
+    """
     from giq.policy import get_policy_store
 
     runner = get_runner()
@@ -446,7 +457,8 @@ async def model_catalog() -> dict:
     vram = get_vram_status()
     resident_ready = runner.resident_models
     resident_devices = runner.resident_devices
-    resident_keys = {f"{w}/{m}" for w, m in store.residents()}
+    resident_keys = set(store.residents())
+    defaults = set(resident_defaults())
 
     # Everything below is per card. "Does it fit?" has no machine-wide answer
     # once models are bound: the same 13GB model fits one card and can never
@@ -454,16 +466,16 @@ async def model_catalog() -> dict:
     # different card.
     cards = {gpu.uuid: gpu for gpu in await asyncio.to_thread(get_gpus)}
     evictable_by_device: dict[str | None, float] = {}
-    for spec in all_specs():
-        if resident_ready.get(spec.name, False):
-            where = resident_devices.get(spec.name)
-            evictable_by_device[where] = evictable_by_device.get(where, 0.0) + spec.vram_gb
+    for recipe in all_recipes():
+        if resident_ready.get(recipe.name, False):
+            where = resident_devices.get(recipe.name)
+            evictable_by_device[where] = evictable_by_device.get(where, 0.0) + recipe.vram_gb
     evictable = sum(evictable_by_device.values())
 
     models = []
-    for spec in all_specs():
-        record = store.record_for(spec.worker, spec.model)
-        where = store.effective_device(spec.worker, spec.model)
+    for recipe in all_recipes():
+        record = store.record_for(recipe.name)
+        where = store.effective_device(recipe.name)
         card = resolve_device(where) if where else None
         device_index = card.index if card else None
         device_name = card.name if card else None
@@ -471,8 +483,8 @@ async def model_catalog() -> dict:
         card_total = cards[where].vram_total_gb if where in cards else vram.total_gb
         card_free = cards[where].vram_free_gb if where in cards else vram.free_gb
         card_evictable = evictable_by_device.get(where, 0.0)
-        needed = spec.vram_gb + margin_for(spec.vram_gb) + reserve_for(where)
-        if resident_ready.get(spec.name, False):
+        needed = recipe.vram_gb + margin_for(recipe.vram_gb) + reserve_for(where)
+        if resident_ready.get(recipe.name, False):
             fits = "loaded"
         elif needed > card_total:
             fits = "never"
@@ -484,23 +496,24 @@ async def model_catalog() -> dict:
             fits = "wont_fit_now"
         models.append(
             {
-                "worker": spec.worker,
-                "model": spec.model,
-                "vram_gb": spec.vram_gb,
+                "worker": recipe.modality,
+                "modalities": list(recipe.modalities),
+                "model": recipe.name,
+                "vram_gb": recipe.vram_gb,
                 "needed_gb": round(needed, 1),
-                "measured": spec.measured,
-                "backend": spec.backend,
-                "engine": spec.engine,
-                "label": spec.display,
-                "detail": spec.detail,
-                "lanes": spec.lanes,
-                "resident": spec.name in resident_keys,
+                "measured": recipe.measured,
+                "backend": recipe.engine,
+                "engine": recipe.engine,
+                "label": recipe.display,
+                "detail": recipe.detail,
+                "lanes": recipe.lanes,
+                "resident": recipe.name in resident_keys,
                 # Whether this model is *meant* to be resident, independent of
                 # what the operator has done to it. The homepage lane cards key
                 # on this: a stopped resident must keep its card (and its play
                 # button) instead of vanishing from the list.
-                "resident_default": spec.resident_priority is not None,
-                "ready": resident_ready.get(spec.name, False),
+                "resident_default": recipe.name in defaults,
+                "ready": resident_ready.get(recipe.name, False),
                 "fits": fits,
                 "policy": record.policy,
                 "policy_source": record.source,
@@ -511,15 +524,15 @@ async def model_catalog() -> dict:
                 # "on" | "off" | "template" for LLMs, null otherwise. A model
                 # that thinks needs a much larger token budget than one that
                 # does not — below it, the answer is empty rather than short.
-                "reasoning": reasoning_for(spec.worker, spec.model),
+                "reasoning": reasoning_for(recipe.modality, recipe.name),
                 # Accepts images alongside text. A capability of the model,
                 # not a worker type — it still serves ordinary chat.
-                "vision": spec.vision,
+                "vision": recipe.vision,
                 # Which declared engine binary executes it. Distinct from
                 # `backend` (the engine's name, and `engine` for the image
                 # models): the audio and embed stacks are different engines
                 # running on one interpreter.
-                "runtime": ENGINE_OF_BACKEND.get(spec.backend, spec.backend),
+                "runtime": ENGINE_OF_BACKEND.get(recipe.engine, recipe.engine),
                 "device": record.device,
                 "device_source": record.device_source,
                 "effective_device": where,
@@ -549,7 +562,7 @@ async def model_catalog() -> dict:
                 "pinned_gb": round(pinned_gb, 2),
                 "pinned_needed_gb": round(projected, 2),
                 "pinned_fits": projected <= gpu.vram_total_gb,
-                "pinned": [f"{w}/{m}" for w, m in pinned_by_device.get(uuid, [])],
+                "pinned": [_ref(n) for n in pinned_by_device.get(uuid, [])],
                 "default": bool(default_card and default_card.uuid == uuid),
             }
         )
@@ -566,12 +579,12 @@ async def model_catalog() -> dict:
         "pinned_fits": fits,
         "pinned_device": tight_device,
         "pinned_by_device": {
-            uuid or "unassigned": [f"{w}/{m}" for w, m in keys]
-            for uuid, keys in store.pinned_by_device().items()
+            uuid or "unassigned": [_ref(n) for n in names]
+            for uuid, names in store.pinned_by_device().items()
         },
         # Reload priority order — which model comes back first, and by the same
         # token which is the last to be evicted. Not the catalog's sort order.
-        "pinned": [f"{w}/{m}" for w, m in store.residents()],
+        "pinned": [_ref(n) for n in store.residents()],
         "models": models,
     }
 
@@ -625,22 +638,22 @@ async def storage() -> dict:
 async def delete_model_weights(worker: str, model: str) -> dict:
     """Remove a model's weight files from disk (registry entry remains)."""
     runner = get_runner()
+    recipe = get_recipe(model)
+    if recipe is None or not recipe.serves(worker):
+        raise HTTPException(status_code=404, detail=f"unknown recipe {worker}/{model}")
+    model = recipe.name
     resident_keys = set(get_policy_store().residents())
-    loaded = (
-        str(runner.active_worker) if runner.active_worker else None,
-        runner.active_model,
-    )
     try:
         result = await asyncio.to_thread(
-            delete_model, worker, model, resident_keys=resident_keys, loaded=loaded
+            delete_model, model, resident_keys=resident_keys, loaded=runner.loaded_keys()
         )
     except StorageError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
     if result["deleted"]:
         await get_stats().record_event(
-            "delete_model", f"{worker}/{model} freed {result['freed_bytes']} bytes"
+            "delete_model", f"{model} freed {result['freed_bytes']} bytes"
         )
-        logger.info("deleted %s/%s: %s", worker, model, result["deleted"])
+        logger.info("deleted %s: %s", model, result["deleted"])
     return result
 
 

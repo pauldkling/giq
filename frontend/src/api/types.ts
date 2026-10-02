@@ -145,7 +145,10 @@ export interface GpusResponse {
 // --- GET /stats/models (the catalog) ------------------------------------------
 
 export interface CatalogModel {
+  /** The recipe's first modality, which the views group by. */
   worker: WorkerType;
+  /** Every modality the recipe serves (flux_klein renders and edits). */
+  modalities?: WorkerType[];
   model: string;
   vram_gb: number;
   /** vram_gb plus margin and the card's reserve: what a load is gated on. */

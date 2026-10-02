@@ -51,9 +51,8 @@ Each engine has one name, used alike in recipe files (`engine:`),
 | `da3` | multiview | `envs/da3` |
 | `faster-whisper`, `faster-whisper+pyannote`, `speechbrain`, `kokoro` | speech to text, the audio stack, voiceprints, text to speech | `python` |
 
-The old spelling `sdcpp` (from `config.yaml` `image_models`) is still
-accepted wherever an engine is named and read as `sd.cpp`, with a
-deprecation warning.
+The old spelling `sdcpp` is still accepted wherever an engine is named and
+read as `sd.cpp`, with a deprecation warning.
 
 An image model's runtime is its instance's `engine`. A model's VRAM figure
 is measured under its engine; switching engine means measuring again.
@@ -219,12 +218,12 @@ the paged pool, so it suits a large card without costing a small one memory.
 `$GIQ_MODELS_DIR/nvidia-Qwen3.8-27B-NVFP4`. Their KV budgets keep them
 loadable on a 32 GB card through giq's gate; on a larger card, replace the
 file in your recipes directory with a larger `kv_cache_memory` (the VRAM
-figure follows) — see [configuration.md](configuration.md#instances):
+figure follows) — see [configuration.md](configuration.md#recipes):
 
 ```yaml
 # ~/.config/giq/recipes/qwen3.8-27b-nvfp4.yaml — on a 96 GB card
 name: qwen3.8-27b-nvfp4
-worker: llm
+modalities: [llm]
 engine: vllm
 weights:
   path: nvidia-Qwen3.8-27B-NVFP4

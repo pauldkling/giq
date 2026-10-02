@@ -15,13 +15,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from giq.registry import get_spec, reload_registry
+from giq.registry import get_recipe, reload_registry
 from giq.runner import _choose_victims
 from giq.vram import get_vram_requirement, margin_for
 
-GEMMA = ("llm", "gemma-4-12b")
-WHISPER = ("audio", "whisper-large-v3")
-ECAPA = ("embed", "ecapa-tdnn")
+GEMMA = "gemma-4-12b"
+WHISPER = "whisper-large-v3"
+ECAPA = "ecapa-tdnn"
 
 
 def _loaded(**sizes):
@@ -115,7 +115,7 @@ def test_a_flux_render_never_costs_whisper():
     the deficit exceeded gemma's size once free VRAM dipped under ~1.5GB and
     the audio residents went down with it.
     """
-    base = get_vram_requirement("text2image", "flux_klein")
+    base = get_vram_requirement("flux_klein")
     required = base + margin_for(base)
     for free in (0.0, 0.3, 0.5, 1.0, 1.5, 2.0, 3.0):
         victims = _keys(_choose_victims(standard_set(), deficit=required - free))
@@ -124,15 +124,15 @@ def test_a_flux_render_never_costs_whisper():
 
 def test_flux_klein_is_declared_at_its_measured_footprint():
     """Guards the number the property above depends on."""
-    for worker in ("text2image", "image_edit"):
-        spec = get_spec(worker, "flux_klein")
-        assert spec.vram_gb == 8.0, "measured 7.91GB peak"
-        assert spec.measured is True
+    recipe = get_recipe("flux_klein")
+    assert recipe is not None and recipe.modalities == ("text2image", "image_edit")
+    assert recipe.vram_gb == 8.0, "measured 7.91GB peak"
+    assert recipe.measured is True
 
 
 def test_zimage_still_needs_the_whole_card():
     """Not everything can be helped: 13GB + margin of a 15.93GB card."""
-    base = get_vram_requirement("text2image", "zimage")
+    base = get_vram_requirement("zimage")
     required = base + margin_for(base)
     victims = _keys(_choose_victims(standard_set(), deficit=required - 1.0))
     assert victims == {GEMMA, WHISPER, ECAPA}
@@ -213,5 +213,5 @@ async def test_sizer_falls_back_wholesale_when_nvidia_smi_fails(monkeypatch):
 def test_kokoro_is_declared_at_its_measured_runtime_footprint():
     """It held 968 MiB and was declared 0.5GB, so the gate let it load into
     space it did not fit in and it OOM'd."""
-    spec = get_spec("tts", "kokoro")
+    spec = get_recipe("kokoro")
     assert spec.vram_gb >= 0.95

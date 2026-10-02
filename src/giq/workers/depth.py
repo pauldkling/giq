@@ -51,14 +51,14 @@ class DepthWorker(SubprocessWorker):
         super().__init__(config, device)
         # The recipe's weights.path, under GIQ_DEPTH_MODELS_DIR when that is
         # set. Unknown model or no weights: fail here, not at spawn.
-        self.weights = require_path("depth", config.model)
+        self.weights = require_path(config.model)
 
     def child_args(self) -> list[str]:
         return ["--model", self.config.model, "--weights", self.weights]
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "depth", default=DEPTH_VRAM_GB)
+        return vram_for(self.config.model, default=DEPTH_VRAM_GB)
 
     async def run_batch(
         self, tasks: list[dict[str, Any]], params: dict[str, Any] | None = None

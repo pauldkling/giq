@@ -25,10 +25,10 @@ def wedged_gpu(monkeypatch):
 
 
 async def test_full_margin_wedges(wedged_gpu):
-    ok = await wait_for_vram("llm", "gemma-4-12b", timeout=0.05, poll_interval=0.01)
+    ok = await wait_for_vram("gemma-4-12b", timeout=0.05, poll_interval=0.01)
     assert not ok
 
 
 async def test_resident_margin_unwedges(wedged_gpu):
-    ok = await wait_for_vram("llm", "gemma-4-12b", timeout=0.05, poll_interval=0.01, margin_gb=0.5)
+    ok = await wait_for_vram("gemma-4-12b", timeout=0.05, poll_interval=0.01, margin_gb=0.5)
     assert ok

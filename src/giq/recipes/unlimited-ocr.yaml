@@ -9,7 +9,7 @@
 # disabled; GIQ_OCR_MODEL_DIR overrides the path.
 name: unlimited-ocr
 label: Unlimited-OCR
-worker: ocr
+modalities: [ocr]
 engine: transformers-4.57
 detail: "PDF / page images → layout-tagged text · 32k ctx · dozens of pages per pass"
 weights:

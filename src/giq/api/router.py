@@ -35,12 +35,12 @@ from giq.models import (
     WorkerCapability,
 )
 from giq.queue import get_queue
-from giq.registry import all_specs, get_spec
+from giq.registry import get_recipe, recipes_serving
 from giq.runner import get_runner
 from giq.services.orchestration import Orchestrator
 from giq.vram import (
-    can_load_model,
-    device_for_model,
+    can_load,
+    device_for_recipe,
     get_free_vram,
     get_vram_requirement,
     get_vram_status,
@@ -188,23 +188,42 @@ async def resume_serving() -> PauseResponse:
     return PauseResponse(**result, vram_free_gb=vram.free_gb, vram_total_gb=vram.total_gb)
 
 
-def _policy_state(worker: str, model: str) -> ModelPolicyState:
+def _recipe_or_404(worker: str, model: str) -> str:
+    """The recipe a ``/control/models/{worker}/{model}`` path names.
+
+    The routes predate recipes (ADR-003): the path's first segment must be a
+    modality the recipe serves, and everything behind the route keys on the
+    recipe's name. Step 6 replaces them with ``/recipes/{name}``.
+    """
+    recipe = get_recipe(model)
+    if recipe is None or not recipe.serves(worker):
+        raise HTTPException(status_code=404, detail=f"{worker}/{model} is not a recipe")
+    return recipe.name
+
+
+def _ref(name: str) -> str:
+    """``modality/name``, the form the dashboard matches residency against until step 7."""
+    recipe = get_recipe(name)
+    return f"{recipe.modality}/{name}" if recipe is not None else name
+
+
+def _policy_state(name: str) -> ModelPolicyState:
     from giq.policy import get_policy_store
 
     store = get_policy_store()
-    record = store.record_for(worker, model)
-    spec = get_spec(worker, model)
-    ready = get_runner().resident_models.get(f"{worker}/{model}", False)
-    effective = store.effective_device(worker, model)
+    record = store.record_for(name)
+    recipe = get_recipe(name)
+    ready = get_runner().resident_models.get(name, False)
+    effective = store.effective_device(name)
     gpu = resolve_device(effective) if effective else None
     return ModelPolicyState(
-        worker=record.worker,
-        model=record.model,
+        worker=recipe.modality if recipe else "",
+        model=record.recipe,
         policy=record.policy,
         source=record.source,
         reason=record.reason,
         updated_at=record.updated_at,
-        vram_gb=spec.vram_gb if spec else 0.0,
+        vram_gb=recipe.vram_gb if recipe else 0.0,
         ready=ready,
         device=record.device,
         device_source=record.device_source,
@@ -214,22 +233,21 @@ def _policy_state(worker: str, model: str) -> ModelPolicyState:
     )
 
 
-def _policy_response(worker: str, model: str, warnings: list[str]) -> ModelPolicyResponse:
+def _policy_response(name: str, warnings: list[str]) -> ModelPolicyResponse:
     from giq.policy import get_policy_store
 
     store = get_policy_store()
-    key = (worker, model)
-    _fits, _needed, total, _device = store.pinned_fit(extra=key)
+    _fits, _needed, total, _device = store.pinned_fit(extra=name)
     return ModelPolicyResponse(
-        state=_policy_state(worker, model),
-        pinned=[f"{w}/{m}" for w, m in store.residents()],
-        # This model's card, not the machine: the budget a caller is checking
+        state=_policy_state(name),
+        pinned=[_ref(n) for n in store.residents()],
+        # This recipe's card, not the machine: the budget a caller is checking
         # is the one its own pin competes for.
-        pinned_vram_gb=round(store.pinned_vram_gb(device=store.effective_device(*key)), 2),
+        pinned_vram_gb=round(store.pinned_vram_gb(device=store.effective_device(name)), 2),
         vram_total_gb=total,
         pinned_by_device={
-            uuid or "unassigned": [f"{w}/{m}" for w, m in keys]
-            for uuid, keys in store.pinned_by_device().items()
+            uuid or "unassigned": [_ref(n) for n in names]
+            for uuid, names in store.pinned_by_device().items()
         },
         warnings=warnings,
     )
@@ -237,10 +255,10 @@ def _policy_response(worker: str, model: str, warnings: list[str]) -> ModelPolic
 
 @router.get("/control/models", response_model=list[ModelPolicyState])
 async def list_model_policies() -> list[ModelPolicyState]:
-    """Residency policy for every registered model."""
+    """Residency policy for every recipe."""
     from giq.policy import get_policy_store
 
-    return [_policy_state(r.worker, r.model) for r in get_policy_store().all_records()]
+    return [_policy_state(r.recipe) for r in get_policy_store().all_records()]
 
 
 @router.post("/control/models/{worker}/{model}", response_model=ModelPolicyResponse)
@@ -267,28 +285,28 @@ async def set_model_policy(
     store = get_policy_store()
     warnings: list[str] = []
 
-    if get_spec(worker, model) is None:
-        raise HTTPException(status_code=404, detail=f"{worker}/{model} is not a registered model")
+    name = _recipe_or_404(worker, model)
+    serves_llm = bool((recipe := get_recipe(name)) and recipe.serves("llm"))
 
     if request.policy == PINNED:
-        target = store.effective_device(worker, model)
-        other_llm = store.resident_llm(exclude=(worker, model), device=target)
-        if worker == "llm" and other_llm is not None:
+        target = store.effective_device(name)
+        other_llm = store.resident_llm(exclude=name, device=target)
+        if serves_llm and other_llm is not None:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{other_llm[0]}/{other_llm[1]} is already pinned to the same card. One "
+                    f"{other_llm} is already pinned to the same card. One "
                     "resident LLM per card: both llama-servers would bind that card's "
                     "internal port. Unpin it, or bind one of them to another card."
                 ),
             )
-        fits, projected, total, device = store.pinned_fit(extra=(worker, model))
+        fits, projected, total, device = store.pinned_fit(extra=name)
         where = _device_label(device)
         if not fits and not request.force:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"pinning {worker}/{model} would need {projected:.1f}GB of "
+                    f"pinning {name} would need {projected:.1f}GB of "
                     f"{total:.1f}GB on {where} — the resident set there could never all "
                     "load, and the scheduler would retry forever. Unpin something, bind it "
                     "to another card, or pass force=true."
@@ -301,14 +319,14 @@ async def set_model_policy(
             )
 
     try:
-        store.set(worker, model, request.policy, request.reason)
+        store.set(name, request.policy, request.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     from giq.stats import get_stats
 
-    await get_stats().record_event("policy", f"{worker}/{model} -> {request.policy}")
-    return _policy_response(worker, model, warnings)
+    await get_stats().record_event("policy", f"{name} -> {request.policy}")
+    return _policy_response(name, warnings)
 
 
 def _device_label(uuid: str | None) -> str:
@@ -339,45 +357,45 @@ async def set_model_device(
     from giq.policy import get_policy_store
 
     store = get_policy_store()
-    if get_spec(worker, model) is None:
-        raise HTTPException(status_code=404, detail=f"{worker}/{model} is not a registered model")
+    name = _recipe_or_404(worker, model)
+    serves_llm = bool((recipe := get_recipe(name)) and recipe.serves("llm"))
 
-    previous = store.device_for(worker, model)
+    previous = store.device_for(name)
     try:
-        store.set_device(worker, model, request.device)
+        store.set_device(name, request.device)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     warnings: list[str] = []
-    target = store.effective_device(worker, model)
+    target = store.effective_device(name)
     where = _device_label(target)
 
     # "Fits the card at all" is checked against the card's total, not its free
     # VRAM: a binding is durable, so what matters is whether it can EVER load
     # there, not whether it could this second.
-    fits_card, reason = await asyncio.to_thread(can_load_model, worker, model, target)
+    fits_card, reason = await asyncio.to_thread(can_load, name, target)
     if not fits_card and "can never fit" in reason:
-        store.set_device(worker, model, previous)
-        raise HTTPException(status_code=409, detail=f"{worker}/{model} on {where}: {reason}")
+        store.set_device(name, previous)
+        raise HTTPException(status_code=409, detail=f"{name} on {where}: {reason}")
 
-    if store.policy_for(worker, model) == "pinned":
-        other_llm = store.resident_llm(exclude=(worker, model), device=target)
-        if worker == "llm" and other_llm is not None:
-            store.set_device(worker, model, previous)
+    if store.policy_for(name) == "pinned":
+        other_llm = store.resident_llm(exclude=name, device=target)
+        if serves_llm and other_llm is not None:
+            store.set_device(name, previous)
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{other_llm[0]}/{other_llm[1]} is already pinned to {where}. One resident "
+                    f"{other_llm} is already pinned to {where}. One resident "
                     "LLM per card — they would collide on that card's internal port."
                 ),
             )
-        pinned_fits, projected, total, _dev = store.pinned_fit(extra=(worker, model))
+        pinned_fits, projected, total, _dev = store.pinned_fit(extra=name)
         if not pinned_fits and not request.force:
-            store.set_device(worker, model, previous)
+            store.set_device(name, previous)
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"binding {worker}/{model} to {where} would put {projected:.1f}GB of "
+                    f"binding {name} to {where} would put {projected:.1f}GB of "
                     f"pinned models on a {total:.1f}GB card. Unpin something there, or pass "
                     "force=true."
                 ),
@@ -390,8 +408,8 @@ async def set_model_device(
 
     from giq.stats import get_stats
 
-    await get_stats().record_event("device", f"{worker}/{model} -> {target or 'default'}")
-    return _policy_response(worker, model, warnings)
+    await get_stats().record_event("device", f"{name} -> {target or 'default'}")
+    return _policy_response(name, warnings)
 
 
 @router.delete("/control/models/{worker}/{model}", response_model=ModelPolicyResponse)
@@ -399,10 +417,9 @@ async def clear_model_policy(worker: str, model: str) -> ModelPolicyResponse:
     """Drop an override, reverting the model to its configured default."""
     from giq.policy import get_policy_store
 
-    if get_spec(worker, model) is None:
-        raise HTTPException(status_code=404, detail=f"{worker}/{model} is not a registered model")
-    get_policy_store().clear(worker, model)
-    return _policy_response(worker, model, [])
+    name = _recipe_or_404(worker, model)
+    get_policy_store().clear(name)
+    return _policy_response(name, [])
 
 
 @router.get("/status", response_model=ServiceStatus)
@@ -450,10 +467,10 @@ async def get_service_status() -> ServiceStatus:
         loaded = runner.loaded_keys()
         for job in pending:
             worker, model = str(job.request.modality), job.request.model
-            if (worker, model) in loaded:
+            if model in loaded:
                 continue
-            on = device_for_model(worker, model)
-            need = get_vram_requirement(worker, model)
+            on = device_for_recipe(model)
+            need = get_vram_requirement(model)
             need += margin_for(need) + reserve_for(on)
             free = get_free_vram(on)
             if free >= need:
@@ -539,7 +556,7 @@ async def get_llm_endpoint(model: str = "gemma-4-12b") -> dict:
         return {"model": model, "base_url": base_url}
     # A switched-off model is not "loading" — say so, or clients keep probing
     # a server that will never come back.
-    if runner.is_disabled(Modality.llm, model):
+    if runner.is_disabled(model):
         raise HTTPException(
             status_code=503,
             detail={"state": "disabled", "model": model},
@@ -570,7 +587,7 @@ async def list_engines(refresh: bool = False) -> dict:
 
 @router.get("/capabilities", response_model=Capabilities)
 async def get_capabilities() -> Capabilities:
-    """What this service can run, generated from the model registry.
+    """What this service can run, generated from the recipes.
 
     Hand-maintained before: it had drifted to omit the audio, embed and stt
     modalities entirely, omit flux_klein under both image workers (the two
@@ -579,26 +596,27 @@ async def get_capabilities() -> Capabilities:
     Generating it means a model is discoverable exactly when it is runnable.
     """
     workers: dict[Modality, WorkerCapability] = {}
-    for spec in all_specs():
-        worker = Modality(spec.worker)
-        cap = workers.get(worker)
-        if cap is None:
-            workers[worker] = WorkerCapability(
-                backend=spec.backend,
-                models=[spec.model],
-                max_batch=spec.max_batch,
-                voices=list(spec.voices) or None,
-            )
-            continue
-        cap.models.append(spec.model)
-        # One worker type can span runtimes (ocr runs on transformers or its
-        # pinned 4.57 venv depending on `engine:`), so report every backend in play.
-        if spec.backend not in cap.backend:
-            cap.backend = f"{cap.backend}, {spec.backend}"
-        if spec.max_batch is not None:
-            cap.max_batch = max(cap.max_batch or 0, spec.max_batch)
-        if spec.voices:
-            cap.voices = sorted({*(cap.voices or []), *spec.voices})
+    for modality in Modality:
+        for recipe in recipes_serving(modality):
+            batch = recipe.max_batch_for(modality)
+            cap = workers.get(modality)
+            if cap is None:
+                workers[modality] = WorkerCapability(
+                    backend=recipe.engine,
+                    models=[recipe.name],
+                    max_batch=batch,
+                    voices=list(recipe.voices) or None,
+                )
+                continue
+            cap.models.append(recipe.name)
+            # One modality can span engines (ocr runs on transformers or its
+            # pinned 4.57 venv depending on `engine:`), so report every one in play.
+            if recipe.engine not in cap.backend:
+                cap.backend = f"{cap.backend}, {recipe.engine}"
+            if batch is not None:
+                cap.max_batch = max(cap.max_batch or 0, batch)
+            if recipe.voices:
+                cap.voices = sorted({*(cap.voices or []), *recipe.voices})
 
     return Capabilities(
         workers=workers,
@@ -740,8 +758,8 @@ async def ocr_document(
     document, not a job id to poll. Page images go through ``/run`` with
     ``images_b64``. ``response_format=html`` returns the fragment itself.
     """
-    if get_spec(Modality.ocr, model) is None:
-        known = sorted(s.model for s in all_specs() if s.worker == "ocr")
+    if not ((recipe := get_recipe(model)) and recipe.serves(Modality.ocr)):
+        known = [r.name for r in recipes_serving(Modality.ocr)]
         raise HTTPException(status_code=400, detail=f"unknown OCR model {model!r}; one of {known}")
     limit = upload_limit()
     data = await _document_from(request, await _read_body_capped(request, limit))
@@ -835,8 +853,8 @@ async def depth_map(
     same queue, same stats row — for a consumer that has an image and wants
     a map, not a job id to poll.
     """
-    if get_spec(Modality.depth, model) is None:
-        known = sorted(s.model for s in all_specs() if s.worker == "depth")
+    if not ((recipe := get_recipe(model)) and recipe.serves(Modality.depth)):
+        known = [r.name for r in recipes_serving(Modality.depth)]
         raise HTTPException(
             status_code=400, detail=f"unknown depth model {model!r}; one of {known}"
         )
@@ -939,8 +957,8 @@ async def multiview_scene(
     A convenience over ``POST /run`` with ``worker: "multiview"`` — same job,
     same queue, same stats row — which also takes known poses.
     """
-    if get_spec(Modality.multiview, model) is None:
-        known = sorted(s.model for s in all_specs() if s.worker == "multiview")
+    if not ((recipe := get_recipe(model)) and recipe.serves(Modality.multiview)):
+        known = [r.name for r in recipes_serving(Modality.multiview)]
         raise HTTPException(
             status_code=400, detail=f"unknown multiview model {model!r}; one of {known}"
         )

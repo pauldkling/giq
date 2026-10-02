@@ -75,7 +75,7 @@ class TTSWorker(SubprocessWorker):
         args = ["--lang-code", self.config.lang_code]
         # kokoro fetches its model and voices by repository (hf_hub_download
         # per file), so the recipe's hf: source is what it can take.
-        recipe = recipe_of("tts", self.config.model)
+        recipe = recipe_of(self.config.model)
         if recipe and recipe.weights and (repo := hub_repo(recipe.weights.source)):
             args += ["--repo", repo]
         return args
@@ -85,7 +85,7 @@ class TTSWorker(SubprocessWorker):
         # Registry, not a literal: this was hardcoded 0.5 while kokoro actually
         # holds ~0.95GB, so the VRAM gate admitted it into space it did not fit
         # in and it OOM'd mid-synthesis with the resident set loaded.
-        return vram_for(self.config.model, "tts", default=1.0)
+        return vram_for(self.config.model, default=1.0)
 
     async def run_batch(
         self, tasks: list[dict[str, Any]], params: dict[str, Any] | None = None

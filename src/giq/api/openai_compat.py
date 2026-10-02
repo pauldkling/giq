@@ -17,7 +17,8 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from giq.api.dependencies import get_audio_cache, get_orchestrator
 from giq.models import JobRequest
 from giq.queue import Job
-from giq.registry import ModelSpec, all_specs, get_spec
+from giq.recipes.schema import Recipe
+from giq.registry import get_recipe, recipes_serving, resident_defaults
 from giq.services.audio_cache import AudioCache
 from giq.services.orchestration import Orchestrator
 
@@ -274,8 +275,8 @@ async def create_chat_completion(
     # can carry neither an image nor a conversation.
     multimodal = is_multimodal(messages)
     if multimodal:
-        spec = get_spec("llm", model)
-        if spec is None or not spec.vision:
+        recipe = get_recipe(model)
+        if recipe is None or not recipe.vision:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -444,8 +445,11 @@ async def create_chat_completion(
     }
 
 
-def _advertised_llm_specs() -> list[ModelSpec]:
-    """The LLM models an OpenAI client should be offered, in display order.
+def _advertised_llm_recipes() -> list[Recipe]:
+    """The LLM recipes an OpenAI client should be offered, in display order.
+
+    To a client a recipe is a model: its name is the `id` a client sends
+    back as `model` (ADR-003).
 
     Installed is the only filter: if the weights are on disk, the model is
     offered. No audit gate, no staging step, no opinion about how good or how
@@ -462,12 +466,11 @@ def _advertised_llm_specs() -> list[ModelSpec]:
     """
     from giq.workers.llm import weights_installed
 
-    specs = [spec for spec in all_specs() if spec.worker == "llm" and weights_installed(spec.model)]
+    residents = resident_defaults()
+    offered = [r for r in recipes_serving("llm") if weights_installed(r.name)]
     return sorted(
-        specs,
-        key=lambda s: (
-            (1, 0, s.model) if s.resident_priority is None else (0, s.resident_priority, "")
-        ),
+        offered,
+        key=lambda r: (0, residents.index(r.name), "") if r.name in residents else (1, 0, r.name),
     )
 
 
@@ -475,7 +478,7 @@ def _advertised_llm_specs() -> list[ModelSpec]:
 async def list_models() -> dict:
     """List available models (OpenAI-compatible endpoint).
 
-    Generated from the registry, for the same reason `/capabilities` is: a
+    Generated from the recipes, for the same reason `/capabilities` is: a
     hand-written list drifts. With a literal here, a model could be
     registered and servable while every OpenAI client was told it did not
     exist, because adding a model meant remembering to edit this list too.
@@ -484,8 +487,8 @@ async def list_models() -> dict:
     return {
         "object": "list",
         "data": [
-            {"id": spec.model, "object": "model", "created": now, "owned_by": "giq"}
-            for spec in _advertised_llm_specs()
+            {"id": recipe.name, "object": "model", "created": now, "owned_by": "giq"}
+            for recipe in _advertised_llm_recipes()
         ],
     }
 

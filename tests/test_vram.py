@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from giq import gpus
-from giq.vram import VRAMStatus, can_load_model, get_free_vram, get_vram_status
+from giq.vram import VRAMStatus, can_load, get_free_vram, get_vram_status
 
 # GPU 0 is the small card (and the one the old first-row read would have
 # reported); GPU 1 is the big one giq should actually pick.
@@ -105,12 +105,12 @@ def test_falls_back_to_a_conservative_card_when_no_gpu_visible(monkeypatch):
 def test_can_load_model_is_judged_against_the_selected_card(two_cards):
     """A model that fits the 5090 and not the 5060 Ti answers differently."""
     with two_cards("1"):  # 5090, 27GB free
-        ok_big, _ = can_load_model("llm", "qwen3.8-27b")  # 26.5GB declared
-        ok_klein_big, _ = can_load_model("text2image", "flux_klein")  # 8GB
+        ok_big, _ = can_load("qwen3.8-27b")  # 26.5GB declared
+        ok_klein_big, _ = can_load("flux_klein")  # 8GB
     gpus.reset_selected_device()
     gpus._cache = None
     with two_cards("0"):  # 5060 Ti, 15.1GB free
-        ok_small, reason_small = can_load_model("llm", "qwen3.8-27b")
+        ok_small, reason_small = can_load("qwen3.8-27b")
     assert ok_klein_big is True
     assert ok_big is False  # 26.5GB + margin overruns the 27GB free
     assert ok_small is False

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""The registry is the single source of truth for what models exist.
+"""The catalog is the single source of truth for what recipes exist.
 
 These tests exist because the list used to live in six places and drifted:
 /capabilities advertised tts/kokoro-82m, a name absent from the VRAM table,
@@ -14,12 +14,12 @@ import asyncio
 import pytest
 
 from giq.models import Modality
+from giq.recipes.schema import DEFAULT_LANE_WIDTH
 from giq.registry import (
-    DEFAULT_LANE_WIDTH,
-    ModelSpec,
-    all_specs,
-    get_spec,
+    all_recipes,
+    get_recipe,
     lane_width_for,
+    recipes_serving,
     reload_registry,
     resident_defaults,
     vram_for,
@@ -34,30 +34,32 @@ def _fresh_registry():
     reload_registry()
 
 
-def test_every_spec_is_uniquely_keyed():
-    keys = [spec.key for spec in all_specs()]
-    assert len(keys) == len(set(keys))
+def test_every_name_and_alias_means_one_recipe():
+    """A recipe's name is what a client sends as `model` (ADR-003)."""
+    names = [n for r in all_recipes() for n in (r.name, *r.aliases)]
+    assert len(names) == len(set(names))
 
 
-def test_worker_names_are_real_worker_types():
-    """A typo'd worker name would silently create an unreachable entry."""
-    for spec in all_specs():
-        Modality(spec.worker)  # raises on an unknown worker
+def test_modalities_are_real():
+    """A typo'd modality would silently create an unreachable recipe."""
+    for recipe in all_recipes():
+        for modality in recipe.modalities:
+            Modality(modality)  # raises on an unknown one
 
 
-def test_vram_lookup_goes_through_the_registry():
-    for spec in all_specs():
-        assert get_vram_requirement(spec.worker, spec.model) == spec.vram_gb
+def test_vram_lookup_goes_through_the_catalog():
+    for recipe in all_recipes():
+        assert get_vram_requirement(recipe.name) == recipe.vram_gb
 
 
-def test_unregistered_model_falls_back_to_the_default():
-    assert get_vram_requirement("llm", "no-such-model") == DEFAULT_VRAM_REQUIREMENT
+def test_unknown_recipe_falls_back_to_the_default():
+    assert get_vram_requirement("no-such-model") == DEFAULT_VRAM_REQUIREMENT
 
 
-def test_aliases_resolve_to_the_same_spec():
-    for spec in all_specs():
-        for alias in spec.aliases:
-            assert get_spec(spec.worker, alias) is spec
+def test_aliases_resolve_to_the_same_recipe():
+    for recipe in all_recipes():
+        for alias in recipe.aliases:
+            assert get_recipe(alias) is recipe
 
 
 def test_kokoro_82m_alias_is_loadable():
@@ -68,79 +70,87 @@ def test_kokoro_82m_alias_is_loadable():
     "VRAM never became available" rather than loading a 0.5GB model.
     """
     total = get_vram_status().total_gb
-    req = get_vram_requirement("tts", "kokoro-82m")
-    assert req == get_vram_requirement("tts", "kokoro")
+    req = get_vram_requirement("kokoro-82m")
+    assert req == get_vram_requirement("kokoro")
     assert req + margin_for(req) <= total
 
 
-def test_advertised_models_are_all_registered():
+def test_advertised_models_are_all_recipes_serving_that_modality():
     """Anything /capabilities lists must be schedulable, not just nameable."""
     from giq.api.router import get_capabilities
 
     caps = asyncio.run(get_capabilities())
-    for worker, cap in caps.workers.items():
-        for model in cap.models:
-            assert get_spec(str(worker), model) is not None, f"{worker}/{model} unregistered"
+    for modality, cap in caps.workers.items():
+        for name in cap.models:
+            recipe = get_recipe(name)
+            assert recipe is not None and recipe.serves(modality), f"{modality}/{name}"
 
 
-def test_capabilities_covers_every_registered_worker():
+def test_capabilities_covers_every_modality_a_recipe_serves():
     from giq.api.router import get_capabilities
 
     caps = asyncio.run(get_capabilities())
-    assert {str(w) for w in caps.workers} == {spec.worker for spec in all_specs()}
+    served = {m for r in all_recipes() for m in r.modalities}
+    assert {str(m) for m in caps.workers} == served
 
 
-def test_resident_defaults_are_ordered_and_registered():
+def test_a_recipe_is_listed_under_every_modality_it_serves():
+    """flux_klein renders and edits: one recipe, both image tabs."""
+    assert "flux_klein" in [r.name for r in recipes_serving("text2image")]
+    assert "flux_klein" in [r.name for r in recipes_serving("image_edit")]
+    assert "zimage" not in [r.name for r in recipes_serving("image_edit")]
+
+
+def test_resident_defaults_are_ordered_and_known():
     residents = resident_defaults()
     assert residents  # a giq with no resident set is a misconfiguration
-    for key in residents:
-        assert get_spec(*key) is not None
-    priorities = [get_spec(*key).resident_priority for key in residents]
+    for name in residents:
+        assert get_recipe(name) is not None
+    priorities = [get_recipe(name).residency.priority for name in residents]
     assert priorities == sorted(priorities)
 
 
-def test_runner_residents_match_the_registry():
+def test_runner_residents_match_the_catalog():
     from giq.runner import RESIDENTS_DEFAULT
 
-    assert [(str(w), m) for w, m in RESIDENTS_DEFAULT] == resident_defaults()
+    assert RESIDENTS_DEFAULT == resident_defaults()
 
 
-def test_lane_width_falls_back_to_the_worker_default():
-    assert lane_width_for("llm", "gemma-4-12b") == DEFAULT_LANE_WIDTH["llm"]
-    assert lane_width_for("llm", "unregistered") == DEFAULT_LANE_WIDTH["llm"]
-    assert lane_width_for("stt", "tiny") == 1
+def test_lane_width_falls_back_to_the_modality_default():
+    assert lane_width_for("gemma-4-12b") == DEFAULT_LANE_WIDTH["llm"]
+    assert lane_width_for("unknown", "llm") == DEFAULT_LANE_WIDTH["llm"]
+    assert lane_width_for("tiny") == 1
 
 
-def test_vram_for_tries_workers_in_order():
-    """sd.cpp serves both image workers; zimage exists only under text2image."""
-    assert vram_for("zimage", "text2image", "image_edit", default=99.0) == 13.0
-    assert vram_for("nothing", "text2image", default=99.0) == 99.0
-
-
-def test_lane_width_override_beats_the_worker_default():
-    spec = ModelSpec("llm", "x", 1.0, "llama.cpp", lane_width=2)
-    assert spec.lanes == 2
-    assert ModelSpec("llm", "y", 1.0, "llama.cpp").lanes == DEFAULT_LANE_WIDTH["llm"]
+def test_vram_for_reads_the_recipe_or_the_default():
+    assert vram_for("zimage", default=99.0) == 13.0
+    assert vram_for("nothing", default=99.0) == 99.0
 
 
 def test_config_residents_override_the_builtin_set(monkeypatch):
     class _Cfg:
-        image_models: dict = {}
+        residents = ["ecapa-tdnn", "gemma-4-12b"]
+
+    monkeypatch.setattr("giq.config.get_config", lambda: _Cfg())
+    assert resident_defaults() == ["ecapa-tdnn", "gemma-4-12b"]
+
+
+def test_config_residents_written_before_adr_003_still_count(monkeypatch):
+    """`llm/gemma-4-12b` was the form before names were unique."""
+
+    class _Cfg:
         residents = ["embed/ecapa-tdnn", "llm/gemma-4-12b"]
 
     monkeypatch.setattr("giq.config.get_config", lambda: _Cfg())
-    reload_registry()
-    assert resident_defaults() == [("embed", "ecapa-tdnn"), ("llm", "gemma-4-12b")]
+    assert resident_defaults() == ["ecapa-tdnn", "gemma-4-12b"]
 
 
 def test_unknown_config_resident_is_ignored_not_fatal(monkeypatch):
     class _Cfg:
-        image_models: dict = {}
-        residents = ["llm/does-not-exist", "llm/gemma-4-12b"]
+        residents = ["does-not-exist", "gemma-4-12b"]
 
     monkeypatch.setattr("giq.config.get_config", lambda: _Cfg())
-    reload_registry()
-    assert resident_defaults() == [("llm", "gemma-4-12b")]
+    assert resident_defaults() == ["gemma-4-12b"]
 
 
 def test_estimated_vram_matches_the_gate():
@@ -153,8 +163,8 @@ def test_estimated_vram_matches_the_gate():
     from giq.workers.sdcpp import SdCppWorker, SdCppWorkerConfig
 
     llm = LLMWorker(config=LLMWorkerConfig(model="gemma-4-12b"))
-    assert llm.estimated_vram_gb == get_vram_requirement("llm", "gemma-4-12b")
+    assert llm.estimated_vram_gb == get_vram_requirement("gemma-4-12b")
 
     for model in ("flux_klein", "zimage"):
         worker = SdCppWorker(config=SdCppWorkerConfig(model=model))
-        assert worker.estimated_vram_gb == get_vram_requirement("text2image", model)
+        assert worker.estimated_vram_gb == get_vram_requirement(model)

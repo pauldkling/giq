@@ -22,7 +22,7 @@ def model_ref(model: str) -> str:
     """What faster-whisper loads for ``model``: the recipe's weights.path
     or the repository of its ``hf:`` source. A name without a recipe
     falls through to faster-whisper's own table of size names."""
-    return load_ref("stt", model) or model
+    return load_ref(model) or model
 
 
 @dataclass
@@ -69,7 +69,7 @@ class STTWorker:
     @property
     def estimated_vram_gb(self) -> float:
         """Estimated VRAM usage."""
-        return vram_for(self.config.model, "stt", default=2.0)
+        return vram_for(self.config.model, default=2.0)
 
     async def start(self) -> None:
         """Load Whisper model."""
@@ -89,9 +89,9 @@ class STTWorker:
         from faster_whisper import WhisperModel
 
         from giq.gpus import resolve_device
-        from giq.vram import device_for_model
+        from giq.vram import device_for_recipe
 
-        uuid = self.config.gpu_device or device_for_model("stt", self.config.model)
+        uuid = self.config.gpu_device or device_for_recipe(self.config.model)
         gpu = resolve_device(uuid) if uuid else None
         kwargs = {}
         if gpu is not None and self.config.device == "cuda":

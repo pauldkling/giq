@@ -124,11 +124,9 @@ def concurrency_of(params: VllmParams) -> Concurrency:
 
 def recipe_for(model: str) -> Recipe | None:
     """The vllm recipe clients reach as ``model`` (a name or an alias)."""
-    from giq import recipes
-    from giq.registry import get_spec
+    from giq.registry import get_recipe
 
-    spec = get_spec("llm", model)
-    recipe = recipes.current().get("llm", spec.model if spec else model)
+    recipe = get_recipe(model)
     return recipe if recipe is not None and recipe.engine == ENGINE else None
 
 
@@ -386,9 +384,9 @@ class VLLMWorkerConfig:
         # an alias.
         self.model = self.recipe.name
         if self.device is None:
-            from giq.vram import device_for_model
+            from giq.vram import device_for_recipe
 
-            self.device = device_for_model("llm", self.model)
+            self.device = device_for_recipe(self.model)
         if self.port is None:
             self.port = device_port(INTERNAL_VLLM_PORT, self.device)
         if self.python is None:
@@ -452,7 +450,7 @@ class VLLMWorker(ServedLLM):
 
     @property
     def estimated_vram_gb(self) -> float:
-        return vram_for(self.config.model, "llm", default=self.recipe.vram.gb)
+        return vram_for(self.config.model, default=self.recipe.vram.gb)
 
     @property
     def base_url(self) -> str:

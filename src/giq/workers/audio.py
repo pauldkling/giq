@@ -29,7 +29,7 @@ def _refs(env: dict[str, str], worker: str, model: str, wanted: dict[str, str | 
     child reads it the same way it always has.
     """
     for var, part in wanted.items():
-        if var not in os.environ and (ref := load_ref(worker, model, part)):
+        if var not in os.environ and (ref := load_ref(model, part)):
             env[var] = ref
 
 
@@ -95,7 +95,7 @@ class EmbedWorker(SubprocessWorker):
     def _spawn_env(self) -> dict[str, str]:
         env = super()._spawn_env()
         _refs(env, "embed", self.config.model, {"GIQ_EMBED_MODEL": None})
-        recipe = recipe_of("embed", self.config.model)
+        recipe = recipe_of(self.config.model)
         revision = recipe.weights.revision if recipe and recipe.weights else None
         if revision and "GIQ_EMBED_REVISION" not in os.environ:
             env["GIQ_EMBED_REVISION"] = revision

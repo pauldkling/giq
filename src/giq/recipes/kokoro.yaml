@@ -7,7 +7,7 @@
 # workers (_audio_child, _ocr_child) are the pattern that avoids that;
 # kokoro does not use it yet.
 name: kokoro
-worker: tts
+modalities: [tts]
 engine: kokoro
 detail: "loads on demand without evicting residents"
 weights:

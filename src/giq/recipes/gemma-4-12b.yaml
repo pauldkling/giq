@@ -5,7 +5,7 @@
 # The resident chat model: first in the resident set, small enough to stay
 # loaded beside the audio stack.
 name: gemma-4-12b
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 detail: "chat · 128k ctx · 4 slots"
 weights:

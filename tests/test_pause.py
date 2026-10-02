@@ -15,9 +15,9 @@ from giq.queue import Job, JobQueue
 from giq.runner import Runner
 
 RESIDENTS = [
-    (Modality.llm, "gemma-4-12b"),
-    (Modality.audio, "whisper-large-v3"),
-    (Modality.embed, "ecapa-tdnn"),
+    "gemma-4-12b",
+    "whisper-large-v3",
+    "ecapa-tdnn",
 ]
 
 
@@ -52,8 +52,8 @@ async def test_pause_unloads_residents_and_batch_worker(queue: JobQueue):
     batch = AsyncMock()
     from giq.runner import _Slot
 
-    device = runner._device_for(Modality.text2image, "zimage")
-    runner._slots[device] = _Slot(batch, Modality.text2image, "zimage", device)
+    device = runner._device_for("zimage")
+    runner._slots[device] = _Slot(batch, "zimage", device)
     residents = [_prime_resident(runner, key) for key in RESIDENTS]
 
     state = await runner.pause()
@@ -198,7 +198,7 @@ async def test_paused_runner_refuses_to_load(queue: JobQueue):
     await runner.pause()
 
     with pytest.raises(RuntimeError, match="paused"):
-        await runner._ensure_worker(Modality.llm, "llama-3.2-3b")
+        await runner._ensure_worker("llama-3.2-3b")
     assert runner.active_worker is None
 
     await runner._load_resident(RESIDENTS[0])

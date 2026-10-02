@@ -7,7 +7,7 @@
 # Image files are single safetensors, one subfolder per part
 # (diffusion_models/, text_encoders/, vae/, loras/) under GIQ_MODELS_DIR.
 name: zimage
-worker: text2image
+modalities: [text2image]
 engine: sd.cpp
 weights:
   parts:

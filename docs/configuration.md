@@ -17,7 +17,7 @@ engines:
 ```
 
 What each model is — its weights, engine, parameters and VRAM figure — is not
-in `config.yaml` but in its [recipe file](#instances).
+in `config.yaml` but in its [recipe file](#recipes).
 
 Engines are described in [engines.md](engines.md); `access:` in
 [access-and-privacy.md](access-and-privacy.md).
@@ -70,15 +70,17 @@ Environment variables:
 | `GIQ_OCR_MAX_UPLOAD_MB`, `GIQ_OCR_MAX_PAGES` | 64, 200 | Upload limits (see [OCR](api.md#ocr)) |
 | `GIQ_MULTIVIEW_MAX_VIEWS`, `GIQ_MULTIVIEW_MAX_TOKENS` | 32, 41472 | Multiview request limits |
 
-## Instances
+## Recipes
 
-Every model giq serves is an **instance**: one YAML file naming the model,
-its weights, the engine that runs them, that engine's parameters, residency
-defaults and the VRAM figure the scheduler gates on
-([ADR-002](ADR-002-model-instances.md)). Two places hold them:
+Every model giq serves is a **recipe**: one YAML file naming it, the
+modalities it serves, its weights, the engine that runs them, that engine's
+parameters, residency defaults and the VRAM figure the scheduler gates on
+([ADR-002](ADR-002-model-instances.md); the terms are
+[ADR-003](ADR-003-domain.md)'s). A running recipe is an *instance*. Two
+places hold recipes:
 
-- **Built-in** — one file per model shipped in the package,
-  `src/giq/recipes/<worker>.<name>.yaml`. Read them for the catalog giq
+- **Built-in** — one file per recipe shipped in the package,
+  `src/giq/recipes/<name>.yaml`. Read them for the catalog giq
   ships and for why each model runs with the settings it does; the reasoning
   is in their comments. Don't edit them in an installed giq.
 - **Yours** — `*.yaml` / `*.yml` directly in the recipes directory
@@ -86,18 +88,22 @@ defaults and the VRAM figure the scheduler gates on
   `~/.config/giq/recipes`). File names are free; the contents say what the
   file defines.
 
-An instance is identified by its `worker` and `name` together
-(`text2image/flux_klein` and `image_edit/flux_klein` are two instances). A
-file of yours with the same worker and name as a built-in **replaces** it
+A recipe is identified by its `name`, which is what a client sends as
+`model`; names and aliases are unique across modalities. A recipe lists the
+`modalities` it serves — usually one; `flux_klein` serves `text2image` and
+`image_edit` from one sd-server, so alternating renders and edits costs no
+reload. A file of yours with the same name as a built-in **replaces** it
 entirely — nothing is inherited, so parameters you leave out take the
 engine's defaults, not the built-in's; copy the built-in file and change what
-you need. A file with a new name **adds** a model. The log says at INFO which
-file each of your instances came from and which built-ins they replace.
+you need. A file with a new name **adds** a recipe. The log says at INFO which
+file each of your recipes came from and which built-ins they replace. A file
+written before ADR-003 with `worker: llm` still loads, as
+`modalities: [llm]`, with a warning.
 
 ```yaml
 # ~/.config/giq/recipes/qwen3.8-27b.yaml — the built-in at 196k context
 name: qwen3.8-27b
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 detail: "chat + vision · 192k ctx"
 weights:
@@ -118,12 +124,12 @@ max_batch: 32
 
 | Key | What |
 |-----|------|
-| `name` | What clients send as `model`. Letters, digits, `.`, `_`, `-`. |
-| `worker` | `llm`, `text2image`, `image_edit`, `tts`, `stt`, `audio`, `embed`, `ocr`, `depth`, `multiview` |
-| `engine` | The runtime, which must be able to serve the worker: `llama.cpp` or `vllm` (llm); `sd.cpp` (image workers); `kokoro`, `faster-whisper`, `faster-whisper+pyannote`, `speechbrain`, `transformers`, `transformers-4.57`, `da3` for the rest |
+| `name` | What clients send as `model`; unique across modalities. Letters, digits, `.`, `_`, `-`. |
+| `modalities` | What it serves, one or more of `llm`, `text2image`, `image_edit`, `tts`, `stt`, `audio`, `embed`, `ocr`, `depth`, `multiview` |
+| `engine` | The runtime, which must be able to serve every listed modality: `llama.cpp` or `vllm` (llm); `sd.cpp` (both image modalities); `kokoro`, `faster-whisper`, `faster-whisper+pyannote`, `speechbrain`, `transformers`, `transformers-4.57`, `da3` for the rest |
 | `label`, `detail` | Dashboard presentation; `label` defaults to the name |
 | `weights.path` | The weights file (a checkpoint directory for `vllm`), relative to `GIQ_MODELS_DIR`; `~` or absolute is used as written. Required for `llama.cpp` and `vllm`; `vllm` also needs `format: safetensors` or `modelopt` |
-| `weights.parts` | The other files the model needs, by the name its worker reads them under (see [Weights](#weights)) |
+| `weights.parts` | The other files the model needs, by the name its modality's engine reads them under (see [Weights](#weights)) |
 | `weights.source`, `revision`, `format`, `licence` | Provenance (`hf:org/repo`, a pinned revision, `gguf`/`safetensors`/`modelopt`). Recorded, never fetched |
 | `capabilities` | `chat`, `vision`. For llama.cpp `vision` needs `params.mmproj` and vice versa; for vllm, leaving it out serves a multimodal checkpoint as text |
 | `profile` | vllm only: a named parameter set (`interactive`, `throughput`) under `params`, which outrank it ([engines.md](engines.md#profiles)) |
@@ -131,8 +137,8 @@ max_batch: 32
 | `request_defaults` | Body fields sent under each request; the caller's own values win. llama.cpp: samplers, `reasoning_budget_tokens`; vllm: `top_k`, `min_p`, `presence_penalty`, `frequency_penalty`, `repetition_penalty` |
 | `residency.priority` | Position in the default resident set, lowest first; unset = loads on demand |
 | `vram.gb`, `vram.measured` | The gate's figure, and whether it was observed on real hardware (`measured_on`, `notes` optional). vllm with a `kv_cache_memory` budget: `vram.weights_gb` + `vram.overhead_gb` instead, and `gb` is their sum with the budget |
-| `aliases` | Other names clients may send |
-| `lane_width`, `max_batch`, `voices` | Concurrent jobs on a resident's lane (default per worker; for vllm it is `params.max_num_seqs` and cannot be set), batch ceiling, TTS voices |
+| `aliases` | Other names clients may send; unique like names |
+| `lane_width`, `max_batch`, `voices` | Concurrent jobs on a resident's lane (default per modality; for vllm it is `params.max_num_seqs` and cannot be set), batch ceiling (a number, or one per modality), TTS voices |
 
 llama.cpp `params`: `ctx_size` (shared by the slots), `parallel` (slots;
 more than one turns on continuous batching), `cache_type_k` and
@@ -197,12 +203,12 @@ relative paths, and `GIQ_AUDIO_WHISPER_MODEL`, `GIQ_AUDIO_DIAR_MODEL` and
 An image model's files are its instance's `weights.parts`. The built-ins
 expect them under the models directory, one subfolder per part —
 `diffusion_models/`, `text_encoders/`, `vae/`, `loras/`. To keep them
-elsewhere, override the instance with absolute paths:
+elsewhere, override the recipe with absolute paths:
 
 ```yaml
 # ~/.config/giq/recipes/zimage.yaml
 name: zimage
-worker: text2image
+modalities: [text2image]
 engine: sd.cpp
 weights:
   parts:
@@ -215,18 +221,16 @@ vram:
 max_batch: 8
 ```
 
-`flux_klein` is two instances (`text2image` and `image_edit`) over the same
-files; override both.
+`max_batch` may differ per modality: `flux_klein` takes
+`{text2image: 8, image_edit: 4}`.
 
-**`image_models` in `config.yaml` is deprecated.** It is still read: an
-entry replaces the instance's files, and — where it sets them — its `engine`
-and `vram_gb` are laid over the instance's (a config figure counts as
-unmeasured). giq logs a warning once per model naming the built-in file to
-copy and the `weights.parts` to put in it. The old engine spelling `sdcpp`
-is read as `sd.cpp`, with a warning.
+**`image_models` in `config.yaml` is no longer read.** An image recipe's
+files, engine and VRAM figure are its own; giq logs a warning when the block
+is still there. The old engine spelling `sdcpp` is read as `sd.cpp`, with a
+warning.
 
 **Validation is strict.** An unknown key, a key given twice, a parameter the
-engine does not have, a worker paired with an engine that cannot serve it,
+engine does not have, a modality paired with an engine that cannot serve it,
 and a setting giq does not honour yet (`profile` on an engine without
 profiles, `residency.gpu`, `residency.default_policy: off`) are all errors, never silently ignored. A
 file of yours that fails is logged as an error and left out — the built-in of

@@ -48,7 +48,7 @@ from giq.api.openai_compat import (
     is_multimodal,
 )
 from giq.models import JobRequest, Modality
-from giq.registry import get_spec
+from giq.registry import get_recipe
 from giq.services.orchestration import Orchestrator
 
 logger = logging.getLogger(__name__)
@@ -346,8 +346,8 @@ def _build_chat_request(request: ResponsesRequest, body: dict) -> tuple[str, dic
     messages = responses_input_to_messages(request.input, request.instructions)
 
     if is_multimodal(messages):
-        spec = get_spec("llm", model)
-        if spec is None or not spec.vision:
+        recipe = get_recipe(model)
+        if recipe is None or not recipe.vision:
             raise HTTPException(
                 status_code=400,
                 detail=(

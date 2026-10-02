@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from giq import gpus
-from giq.models import JobRequest, Modality
+from giq.models import JobRequest
 from giq.policy import reset_policy_store
 from giq.queue import JobQueue
 from giq.runner import Runner, _Resident
@@ -62,17 +62,17 @@ def store():
     from giq.stats import get_stats
 
     stats = get_stats()
-    for worker, model in list(stats.load_policies()):
-        stats.delete_policy(worker, model)
-    for worker, model in list(stats.load_devices()):
-        stats.save_device(worker, model, None)
+    for name in list(stats.load_policies()):
+        stats.delete_policy(name)
+    for name in list(stats.load_devices()):
+        stats.save_device(name, None)
     s = reset_policy_store()
     s.load()
     yield s
-    for worker, model in list(stats.load_devices()):
-        stats.save_device(worker, model, None)
-    for worker, model in list(stats.load_policies()):
-        stats.delete_policy(worker, model)
+    for name in list(stats.load_devices()):
+        stats.save_device(name, None)
+    for name in list(stats.load_policies()):
+        stats.delete_policy(name)
     reset_policy_store()
 
 
@@ -81,21 +81,21 @@ def store():
 
 def test_unbound_models_land_on_the_selected_card(two_cards, store):
     with two_cards():
-        assert store.device_for("llm", "gemma-4-12b") is None
-        assert store.effective_device("llm", "gemma-4-12b") == BIG  # biggest
+        assert store.device_for("gemma-4-12b") is None
+        assert store.effective_device("gemma-4-12b") == BIG  # biggest
 
 
 def test_config_bind_places_a_model(two_cards, store):
-    with two_cards(bind={"text2image/flux_klein": "1"}):
-        device, source = store.device_record("text2image", "flux_klein")
+    with two_cards(bind={"flux_klein": "1"}):
+        device, source = store.device_record("flux_klein")
     assert device == SMALL
     assert source == "config"
 
 
 def test_an_override_outranks_config(two_cards, store):
-    with two_cards(bind={"text2image/flux_klein": "1"}):
-        store.set_device("text2image", "flux_klein", "0")
-        device, source = store.device_record("text2image", "flux_klein")
+    with two_cards(bind={"flux_klein": "1"}):
+        store.set_device("flux_klein", "0")
+        device, source = store.device_record("flux_klein")
     assert device == BIG
     assert source == "override"
 
@@ -105,16 +105,16 @@ def test_binding_is_stored_as_a_uuid_not_an_index(two_cards, store):
     from giq.stats import get_stats
 
     with two_cards():
-        store.set_device("tts", "kokoro", "1")
-    assert get_stats().load_devices()[("tts", "kokoro")] == SMALL
+        store.set_device("kokoro", "1")
+    assert get_stats().load_devices()["kokoro"] == SMALL
 
 
 def test_binding_survives_a_reload(two_cards, store):
     with two_cards():
-        store.set_device("tts", "kokoro", "1")
+        store.set_device("kokoro", "1")
         reloaded = reset_policy_store()
         reloaded.load()
-        assert reloaded.device_for("tts", "kokoro") == SMALL
+        assert reloaded.device_for("kokoro") == SMALL
 
 
 def test_binding_and_residency_are_independent(two_cards, store):
@@ -122,26 +122,26 @@ def test_binding_and_residency_are_independent(two_cards, store):
     from giq.policy import AUTO, PINNED
 
     with two_cards():
-        store.set_device("tts", "kokoro", "1")
-        assert store.policy_for("tts", "kokoro") == AUTO  # binding didn't pin it
+        store.set_device("kokoro", "1")
+        assert store.policy_for("kokoro") == AUTO  # binding didn't pin it
 
-        store.set("tts", "kokoro", PINNED)
-        assert store.device_for("tts", "kokoro") == SMALL  # pinning didn't unbind
+        store.set("kokoro", PINNED)
+        assert store.device_for("kokoro") == SMALL  # pinning didn't unbind
 
-        store.clear("tts", "kokoro")
-        assert store.policy_for("tts", "kokoro") == AUTO
-        assert store.device_for("tts", "kokoro") == SMALL  # still bound
+        store.clear("kokoro")
+        assert store.policy_for("kokoro") == AUTO
+        assert store.device_for("kokoro") == SMALL  # still bound
 
 
 def test_a_binding_to_a_missing_card_falls_back_loudly(two_cards, store, caplog):
     with two_cards():
-        store.set_device("tts", "kokoro", "1")
+        store.set_device("kokoro", "1")
     # Card 1 is gone on the next boot.
     gpus._cache = None
     one_card = f"{BIG}, 0, NVIDIA GeForce RTX 5090, 32607, 4921, 30, 9.00, 500.00, 0, 0, 0x0\n"
     with caplog.at_level("WARNING"):
         with patch("giq.gpus.subprocess.run", return_value=FakeResult(one_card)):
-            device, source = store.device_record("tts", "kokoro")
+            device, source = store.device_record("kokoro")
     assert (device, source) == (None, "default")
     assert "not present" in caplog.text
 
@@ -149,7 +149,7 @@ def test_a_binding_to_a_missing_card_falls_back_loudly(two_cards, store, caplog)
 def test_binding_an_unknown_card_is_refused(two_cards, store):
     with two_cards():
         with pytest.raises(ValueError, match="matches no GPU"):
-            store.set_device("tts", "kokoro", "7")
+            store.set_device("kokoro", "7")
 
 
 # --- what the binding changes ------------------------------------------------
@@ -161,23 +161,23 @@ def test_the_vram_gate_measures_the_bound_card(two_cards, store):
     Same model, same question, opposite answers — which is the whole reason
     the gate had to learn which card it was talking about.
     """
-    from giq.vram import can_load_model
+    from giq.vram import can_load
 
     with two_cards():
-        ok_big, _ = can_load_model("llm", "gemma-4-31b-it")
-        store.set_device("llm", "gemma-4-31b-it", "1")
-        ok_small, why = can_load_model("llm", "gemma-4-31b-it")
+        ok_big, _ = can_load("gemma-4-31b-it")
+        store.set_device("gemma-4-31b-it", "1")
+        ok_small, why = can_load("gemma-4-31b-it")
     assert ok_big is True
     assert ok_small is False
     assert "can never fit" in why and "15.9GB total" in why
 
 
 def test_a_reserve_is_deducted_on_the_card_that_declares_it(two_cards, store):
-    from giq.vram import can_load_model
+    from giq.vram import can_load
 
-    with two_cards(bind={"text2image/flux_klein": "1"}, reserve={"1": 6.0}):
+    with two_cards(bind={"flux_klein": "1"}, reserve={"1": 6.0}):
         # klein needs 8 + 2 margin = 10; 15.1 free covers it, 15.1 - 6 does not.
-        ok, why = can_load_model("text2image", "flux_klein")
+        ok, why = can_load("flux_klein")
     assert ok is False
     assert "6.0GB reserved" in why
 
@@ -197,18 +197,18 @@ async def test_eviction_only_considers_residents_on_the_target_card(two_cards, s
         runner._residents[key] = res
         return res
 
-    with two_cards(bind={"text2image/zimage": "1"}):
-        gemma = resident((Modality.llm, "gemma-4-12b"), 9.5, BIG)
-        kokoro = resident((Modality.tts, "kokoro"), 1.0, SMALL)
+    with two_cards(bind={"zimage": "1"}):
+        gemma = resident("gemma-4-12b", 9.5, BIG)
+        kokoro = resident("kokoro", 1.0, SMALL)
         # zimage wants 13 + 2 = 15 on the small card, which has 15.1 free —
         # but only 0.5 once we pretend the desktop grew.
         with patch("giq.runner.get_free_vram", lambda *a: 0.5):
             with patch("giq.gpus.compute_app_memory", lambda *a: {}):
-                await runner._evict_residents_for(Modality.text2image, "zimage")
+                await runner._evict_residents_for("zimage")
 
-    assert (Modality.llm, "gemma-4-12b") in runner._residents  # untouched
+    assert "gemma-4-12b" in runner._residents  # untouched
     gemma.worker.stop.assert_not_awaited()
-    assert (Modality.tts, "kokoro") not in runner._residents  # its card, its cost
+    assert "kokoro" not in runner._residents  # its card, its cost
     kokoro.worker.stop.assert_awaited()
 
 
@@ -233,14 +233,14 @@ def test_a_bound_llm_config_takes_its_cards_port(two_cards, store):
     from giq.workers.llm import LLMWorkerConfig
 
     with two_cards():
-        store.set_device("llm", "gemma-4-12b", "1")
+        store.set_device("gemma-4-12b", "1")
         config = LLMWorkerConfig(model="gemma-4-12b")
     assert config.device == SMALL
     assert config.port == 8096
 
 
 def test_the_child_environment_names_the_bound_card(two_cards, store):
-    with two_cards(bind={"tts/kokoro": "1"}):
+    with two_cards(bind={"kokoro": "1"}):
         from giq.workers.tts import TTSWorker, TTSWorkerConfig
 
         worker = TTSWorker(TTSWorkerConfig(model="kokoro"))
@@ -254,16 +254,16 @@ async def test_a_slot_per_card_survives_the_other_cards_load(two_cards, store):
     from giq.runner import _Slot
 
     runner = Runner(JobQueue())
-    with two_cards(bind={"text2image/flux_klein": "1"}):
+    with two_cards(bind={"flux_klein": "1"}):
         other = AsyncMock()
-        runner._slots[BIG] = _Slot(other, Modality.llm, "llama-3.2-3b", BIG)
+        runner._slots[BIG] = _Slot(other, "llama-3.2-3b", BIG)
 
         built = AsyncMock()
         built.is_ready = True
         built.is_running = True
         with patch.object(runner, "_build_worker", return_value=built):
             with patch("giq.runner.wait_for_vram", AsyncMock(return_value=True)):
-                worker = await runner._ensure_worker(Modality.text2image, "flux_klein")
+                worker = await runner._ensure_worker("flux_klein")
 
     assert worker is built
     assert runner._slots[SMALL].model == "flux_klein"
@@ -276,11 +276,11 @@ def test_the_pinned_budget_is_per_card(two_cards, store):
     from giq.policy import PINNED
 
     with two_cards():
-        store.set("tts", "kokoro", PINNED)
-        store.set_device("tts", "kokoro", "1")
+        store.set("kokoro", PINNED)
+        store.set_device("kokoro", "1")
         big = store.pinned_vram_gb(device=BIG)
         small = store.pinned_vram_gb(device=SMALL)
-        fits, projected, total, device = store.pinned_fit(extra=("tts", "kokoro"))
+        fits, projected, total, device = store.pinned_fit(extra="kokoro")
     assert big == pytest.approx(14.1)  # gemma 9.5 + whisper 4.0 + ecapa 0.6
     assert small == pytest.approx(1.0)  # kokoro alone
     assert (fits, device) == (True, SMALL)
@@ -299,18 +299,18 @@ async def test_rebinding_a_loaded_resident_moves_it(two_cards, store):
 
     runner = Runner(JobQueue(), use_policy=True)
     with two_cards():
-        store.set("tts", "kokoro", PINNED)
+        store.set("kokoro", PINNED)
         worker = AsyncMock()
         worker.is_ready = True
-        runner._residents[(Modality.tts, "kokoro")] = _Resident(worker, 1, BIG)
+        runner._residents["kokoro"] = _Resident(worker, 1, BIG)
 
         await runner._release_demoted_residents()
-        assert (Modality.tts, "kokoro") in runner._residents  # still where it belongs
+        assert "kokoro" in runner._residents  # still where it belongs
 
-        store.set_device("tts", "kokoro", "1")
+        store.set_device("kokoro", "1")
         await runner._release_demoted_residents()
 
-    assert (Modality.tts, "kokoro") not in runner._residents
+    assert "kokoro" not in runner._residents
     worker.stop.assert_awaited()  # the residents loop reloads it on card 1
 
 
@@ -369,9 +369,9 @@ def test_every_backend_maps_to_a_runtime():
     """A model whose backend has no engine would report a runtime of its own
     label, which reads as an engine that does not exist."""
     from giq.engines import ENGINE_OF_BACKEND
-    from giq.registry import all_specs
+    from giq.registry import all_recipes
 
-    unmapped = {s.backend for s in all_specs()} - set(ENGINE_OF_BACKEND)
+    unmapped = {r.engine for r in all_recipes()} - set(ENGINE_OF_BACKEND)
     assert not unmapped, f"backends with no declared runtime: {unmapped}"
 
 
@@ -403,12 +403,12 @@ def test_multimodal_content_is_detected_not_dropped():
 def test_vision_models_declare_a_projector_requirement():
     """A vision model without --mmproj loads and serves text, accepting images
     and ignoring them — the exact silent failure this feature exists to end."""
-    from giq.registry import all_specs
+    from giq.registry import all_recipes
 
-    seers = [s for s in all_specs() if s.vision]
-    assert seers, "expected at least one vision-capable model in the registry"
-    for spec in seers:
-        assert spec.worker == "llm", "vision is a capability of an LLM, not a worker type"
+    seers = [r for r in all_recipes() if r.vision]
+    assert seers, "expected at least one vision-capable recipe"
+    for recipe in seers:
+        assert recipe.modalities == ("llm",), "vision is a capability of an LLM, not a modality"
 
 
 # --- a second server of one engine on a card ---------------------------------------
@@ -445,7 +445,7 @@ async def test_llama_moves_off_a_held_port_at_start(two_cards, store, monkeypatc
     from giq.workers.llm import LLMWorker, LLMWorkerConfig
 
     with two_cards():
-        store.set_device("llm", "gemma-4-12b", "1")
+        store.set_device("gemma-4-12b", "1")
         worker = LLMWorker(config=LLMWorkerConfig(model="gemma-4-12b"))
         _taken(monkeypatch, 8096)
         await worker._claim_port()
@@ -494,10 +494,14 @@ async def test_the_stale_sweep_covers_every_port_of_every_card(two_cards, monkey
 async def _status(monkeypatch, *jobs, loaded=()):
     from giq.api import router as api
     from giq.queue import Job
+    from giq.registry import get_recipe
 
     queued = [
-        Job(job_id=f"j{i}", request=JobRequest(modality=w, model=m, chat_request={}))
-        for i, (w, m) in enumerate(jobs)
+        Job(
+            job_id=f"j{i}",
+            request=JobRequest(modality=get_recipe(m).modality, model=m, chat_request={}),
+        )
+        for i, m in enumerate(jobs)
     ]
     queue = SimpleNamespace(get_all=AsyncMock(return_value=queued))
     runner = SimpleNamespace(
@@ -533,8 +537,8 @@ async def test_a_job_waits_on_its_own_cards_vram(two_cards, store, monkeypatch):
     """22 GB bound to a 16 GB card is blocked there, however empty the
     default card is; the default card's free figure would say otherwise."""
     with two_cards():
-        store.set_device("llm", "qwen3.8-27b", "1")
-        status = await _status(monkeypatch, ("llm", "qwen3.8-27b"))
+        store.set_device("qwen3.8-27b", "1")
+        status = await _status(monkeypatch, "qwen3.8-27b")
     assert not status.vram_ok
     assert status.vram_blocked_gpu == SMALL
     assert "GPU 1" in status.vram_message
@@ -545,9 +549,17 @@ async def test_a_job_waits_on_its_own_cards_vram(two_cards, store, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_job_that_fits_its_card_or_is_loaded_is_not_blocked(two_cards, store, monkeypatch):
     with two_cards():
-        store.set_device("llm", "gemma-4-12b", "1")
-        fits = await _status(monkeypatch, ("llm", "gemma-4-12b"))
-        store.set_device("llm", "qwen3.8-27b", "1")
-        loaded = await _status(monkeypatch, ("llm", "qwen3.8-27b"), loaded={("llm", "qwen3.8-27b")})
+        store.set_device("gemma-4-12b", "1")
+        fits = await _status(monkeypatch, "gemma-4-12b")
+        store.set_device("qwen3.8-27b", "1")
+        loaded = await _status(monkeypatch, "qwen3.8-27b", loaded={"qwen3.8-27b"})
     assert fits.vram_ok and fits.vram_blocked_gpu is None
     assert loaded.vram_ok
+
+
+def test_a_bind_key_written_before_adr_003_still_binds(two_cards, store):
+    """`text2image/flux_klein` was the key form before names were unique."""
+    from giq.policy import get_policy_store
+
+    with two_cards(bind={"text2image/flux_klein": "1"}):
+        assert get_policy_store().device_record("flux_klein") == (SMALL, "config")

@@ -77,7 +77,7 @@ def test_llama_ready_timeout_is_the_engine_default_unless_the_instance_sets_one(
     assert _llama(tmp_path).config.ready_timeout == llm.DEFAULT_READY_TIMEOUT
     monkeypatch.setitem(llm.MODEL_READY_TIMEOUT, "gemma-4-12b", 900.0)
     assert _llama(tmp_path).config.ready_timeout == 900.0
-    assert runner.start_budget(Modality.llm, "gemma-4-12b") == 900.0
+    assert runner.start_budget("gemma-4-12b") == 900.0
 
 
 def test_vllm_start_budget_is_the_instance_ready_timeout():
@@ -85,7 +85,7 @@ def test_vllm_start_budget_is_the_instance_ready_timeout():
 
     recipe = recipe_for("qwen3.8-27b-nvfp4")
     assert recipe is not None
-    budget = runner.start_budget(Modality.llm, "qwen3.8-27b-nvfp4")
+    budget = runner.start_budget("qwen3.8-27b-nvfp4")
     assert budget == recipe.params.ready_timeout
     # The measured cold start the API's old flat wait could not cover.
     assert budget > 192
@@ -100,9 +100,7 @@ def test_wait_budget_covers_a_start_and_the_run():
             chat_request={"messages": [], "max_tokens": 100},
         ),
     )
-    expected = runner.start_budget(Modality.llm, "qwen3.8-27b-nvfp4") + runner._job_timeout(
-        Modality.llm, job
-    )
+    expected = runner.start_budget("qwen3.8-27b-nvfp4") + runner._job_timeout(Modality.llm, job)
     assert runner.wait_budget(job) == expected
     assert runner.wait_budget(job) > 120
 

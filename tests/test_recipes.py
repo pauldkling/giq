@@ -20,7 +20,7 @@ from giq.recipes.schema import LlamaCppParams, Recipe
 
 LLM = """\
 name: {name}
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 weights:
   path: some-GGUF/model-Q4_K_M.gguf
@@ -60,7 +60,8 @@ def operator_dir(tmp_path):
 
 def test_a_minimal_instance_loads(tmp_path):
     recipe = load_file(_write(tmp_path, "a.yaml", LLM.format(name="m")))
-    assert recipe.key == ("llm", "m")
+    assert recipe.name == "m"
+    assert recipe.modalities == ("llm",)
     assert isinstance(recipe.params, LlamaCppParams)
     assert recipe.params.given() == {}, "nothing set means every engine default applies"
 
@@ -101,14 +102,19 @@ def test_what_is_not_understood_is_refused(tmp_path, extra, complaint):
 @pytest.mark.parametrize(
     "text, complaint",
     [
-        ("name: m\nworker: painter\nengine: sd.cpp\nvram: {gb: 1}\n", "unknown worker"),
-        ("name: m\nworker: tts\nengine: tensorrt-llm\nvram: {gb: 1}\n", "unknown engine"),
-        ("name: m\nworker: tts\nengine: llama.cpp\nvram: {gb: 1}\n", "cannot serve"),
-        ("name: m\nworker: llm\nengine: llama.cpp\nvram: {gb: 1}\n", "weights.path"),
-        ("name: ../m\nworker: stt\nengine: faster-whisper\nvram: {gb: 1}\n", "name"),
-        ("name: m\nworker: stt\nengine: faster-whisper\nvram: {gb: 0}\n", "vram.gb"),
-        ("name: m\nworker: stt\nengine: faster-whisper\n", "vram"),
-        ("name: m\nworker: stt\nengine: faster-whisper\nvram: {gb: 1}\nparams: {x: 1}\n", "x"),
+        ("name: m\nmodalities: [painter]\nengine: sd.cpp\nvram: {gb: 1}\n", "unknown modality"),
+        ("name: m\nmodalities: []\nengine: sd.cpp\nvram: {gb: 1}\n", "modalities"),
+        ("name: m\nmodalities: [stt, stt]\nengine: faster-whisper\nvram: {gb: 1}\n", "repeat"),
+        ("name: m\nmodalities: [tts]\nengine: tensorrt-llm\nvram: {gb: 1}\n", "unknown engine"),
+        ("name: m\nmodalities: [tts]\nengine: llama.cpp\nvram: {gb: 1}\n", "cannot serve"),
+        ("name: m\nmodalities: [llm]\nengine: llama.cpp\nvram: {gb: 1}\n", "weights.path"),
+        ("name: ../m\nmodalities: [stt]\nengine: faster-whisper\nvram: {gb: 1}\n", "name"),
+        ("name: m\nmodalities: [stt]\nengine: faster-whisper\nvram: {gb: 0}\n", "vram.gb"),
+        ("name: m\nmodalities: [stt]\nengine: faster-whisper\n", "vram"),
+        (
+            "name: m\nmodalities: [stt]\nengine: faster-whisper\nvram: {gb: 1}\nparams: {x: 1}\n",
+            "x",
+        ),
         ("- not a mapping\n", "mapping"),
     ],
 )
@@ -132,87 +138,122 @@ def test_an_instance_cannot_be_changed_once_loaded(tmp_path):
 
 
 def test_builtins_must_be_named_after_what_they_define(builtin_dir):
-    _write(builtin_dir, "llm.other.yaml", LLM.format(name="m"))
-    with pytest.raises(RecipeError, match="<worker>.<name>.yaml"):
+    _write(builtin_dir, "other.yaml", LLM.format(name="m"))
+    with pytest.raises(RecipeError, match="<name>.yaml"):
         recipes.builtin()
 
 
 def test_a_broken_builtin_raises(builtin_dir):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m") + "colour: red\n")
+    _write(builtin_dir, "m.yaml", LLM.format(name="m") + "colour: red\n")
     with pytest.raises(RecipeError):
         recipes.builtin()
 
 
 def test_builtin_aliases_may_not_shadow_another_instance(builtin_dir):
-    _write(builtin_dir, "llm.a.yaml", LLM.format(name="a") + "aliases: [b]\n")
-    _write(builtin_dir, "llm.b.yaml", LLM.format(name="b"))
+    _write(builtin_dir, "a.yaml", LLM.format(name="a") + "aliases: [b]\n")
+    _write(builtin_dir, "b.yaml", LLM.format(name="b"))
     with pytest.raises(RecipeError, match="names both"):
         recipes.builtin()
 
 
-def test_one_name_may_serve_two_workers(builtin_dir, operator_dir):
-    """flux_klein is both a text2image and an image_edit model."""
-    for worker in ("text2image", "image_edit"):
-        _write(
-            builtin_dir,
-            f"{worker}.klein.yaml",
-            f"name: klein\nworker: {worker}\nengine: sd.cpp\nvram: {{gb: 8}}\n",
-        )
-    assert set(load(operator_dir).recipes) == {("text2image", "klein"), ("image_edit", "klein")}
+def test_one_recipe_may_serve_two_modalities(builtin_dir, operator_dir):
+    """flux_klein renders and edits from one sd-server: one recipe, two modalities."""
+    _write(
+        builtin_dir,
+        "klein.yaml",
+        "name: klein\nmodalities: [text2image, image_edit]\nengine: sd.cpp\nvram: {gb: 8}\n"
+        "max_batch: {text2image: 8, image_edit: 4}\n",
+    )
+    snap = load(operator_dir)
+    klein = snap.get("klein")
+    assert klein is not None and klein.serves("image_edit") and klein.serves("text2image")
+    assert (klein.max_batch_for("text2image"), klein.max_batch_for("image_edit")) == (8, 4)
+    assert [r.name for r in snap.serving("image_edit")] == ["klein"]
+
+
+def test_names_are_unique_across_modalities(builtin_dir, operator_dir):
+    """A name is what a client sends as `model`; two recipes cannot share one."""
+    _write(operator_dir, "a.yaml", "name: m\nmodalities: [tts]\nengine: kokoro\nvram: {gb: 1}\n")
+    _write(
+        operator_dir,
+        "b.yaml",
+        "name: m\nmodalities: [stt]\nengine: faster-whisper\nvram: {gb: 1}\n",
+    )
+    snap = load(operator_dir)
+    assert snap.get("m") is None
+    assert "more than once" in snap.errors[0]
+
+
+def test_a_batch_for_a_modality_the_recipe_does_not_serve_is_refused(tmp_path):
+    text = (
+        "name: m\nmodalities: [text2image]\nengine: sd.cpp\nvram: {gb: 8}\n"
+        "max_batch: {image_edit: 4}\n"
+    )
+    with pytest.raises(RecipeError, match="does not serve"):
+        load_file(_write(tmp_path, "a.yaml", text))
+
+
+def test_a_file_written_before_adr_003_still_loads(tmp_path, caplog):
+    """`worker: llm` was the field before recipes served modalities."""
+    text = LLM.format(name="m").replace("modalities: [llm]", "worker: llm")
+    with caplog.at_level(logging.WARNING, logger="giq.recipes.schema"):
+        recipe = load_file(_write(tmp_path, "a.yaml", text))
+    assert recipe.modalities == ("llm",)
+    assert any("modalities: [llm]" in r.message for r in caplog.records)
 
 
 def test_no_operator_directory_means_the_builtins(builtin_dir, tmp_path):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     snap = load(tmp_path / "does-not-exist")
-    assert list(snap.recipes) == [("llm", "m")]
+    assert list(snap.recipes) == ["m"]
     assert snap.errors == ()
 
 
 def test_an_operator_file_adds_an_instance(builtin_dir, operator_dir):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     path = _write(operator_dir, "private.yaml", LLM.format(name="private-finetune"))
     snap = load(operator_dir)
-    assert snap.get("llm", "private-finetune") is not None
-    assert snap.sources[("llm", "private-finetune")] == path
+    assert snap.get("private-finetune") is not None
+    assert snap.sources["private-finetune"] == path
 
 
 def test_an_operator_file_replaces_the_builtin_of_its_name(builtin_dir, operator_dir, caplog):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     path = _write(operator_dir, "m.yml", LLM.format(name="m").replace("9.5", "11.0"))
     with caplog.at_level(logging.INFO, logger="giq.recipes"):
         snap = load(operator_dir)
-    assert snap.recipes[("llm", "m")].vram.gb == 11.0
-    assert snap.sources[("llm", "m")] == path
+    assert snap.recipes["m"].vram.gb == 11.0
+    assert snap.sources["m"] == path
     messages = [r.message for r in caplog.records]
     assert any("replaces the built-in" in m and str(path) in m for m in messages)
 
 
 def test_a_broken_operator_file_falls_back_to_the_builtin(builtin_dir, operator_dir, caplog):
     """An operator typo must not take the service down, nor the model with it."""
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     _write(operator_dir, "m.yaml", LLM.format(name="m") + "ctx_size: 8192\n")
     with caplog.at_level(logging.ERROR, logger="giq.recipes"):
         snap = load(operator_dir)
-    assert snap.recipes[("llm", "m")].vram.gb == 9.5
+    assert snap.recipes["m"].vram.gb == 9.5
     assert len(snap.errors) == 1 and "ctx_size" in snap.errors[0]
     assert any("m.yaml" in r.message for r in caplog.records if r.levelno == logging.ERROR)
 
 
 def test_two_operator_files_with_one_name_are_both_refused(builtin_dir, operator_dir):
     """Which would win is an accident of sorting, so neither does."""
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     _write(operator_dir, "a.yaml", LLM.format(name="m").replace("9.5", "1.0"))
     _write(operator_dir, "b.yaml", LLM.format(name="m").replace("9.5", "2.0"))
     snap = load(operator_dir)
-    assert snap.recipes[("llm", "m")].vram.gb == 9.5
+    assert snap.recipes["m"].vram.gb == 9.5
     assert "more than once" in snap.errors[0]
 
 
 def test_an_operator_alias_may_not_capture_a_builtin_name(builtin_dir, operator_dir):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     _write(operator_dir, "x.yaml", LLM.format(name="x") + "aliases: [m]\n")
     snap = load(operator_dir)
-    assert snap.get("llm", "x") is None
+    assert snap.get("x") is None
     assert "names both" in snap.errors[0]
 
 
@@ -223,25 +264,25 @@ def test_other_files_in_the_operator_directory_are_not_read(builtin_dir, operato
 
 
 def test_the_snapshot_cannot_be_edited(builtin_dir, operator_dir):
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     snap = load(operator_dir)
     with pytest.raises(TypeError):
-        snap.recipes[("llm", "n")] = snap.get("llm", "m")  # ty: ignore[invalid-assignment]
+        snap.recipes["n"] = snap.get("m")  # ty: ignore[invalid-assignment]
 
 
 def test_reload_swaps_the_snapshot_and_tells_subscribers(builtin_dir, operator_dir, monkeypatch):
     monkeypatch.setattr(recipes, "_current", None)
     monkeypatch.setattr(recipes, "_subscribers", [])
     monkeypatch.setenv("GIQ_RECIPES_DIR", str(operator_dir))
-    _write(builtin_dir, "llm.m.yaml", LLM.format(name="m"))
+    _write(builtin_dir, "m.yaml", LLM.format(name="m"))
     seen: list[set] = []
     recipes.subscribe(lambda snap: seen.append(set(snap.recipes)))
 
     _write(operator_dir, "n.yaml", LLM.format(name="n"))
     recipes.reload()
 
-    assert seen == [{("llm", "m")}, {("llm", "m"), ("llm", "n")}]
-    assert recipes.current().get("llm", "n") is not None
+    assert seen == [{"m"}, {"m", "n"}]
+    assert recipes.current().get("n") is not None
 
 
 def test_a_validated_instance_round_trips(tmp_path):

@@ -19,9 +19,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from giq.config import get_config
 from giq.paths import hf_home
-from giq.registry import all_specs
+from giq.registry import all_recipes, get_recipe
 from giq.weights import Location, locations
 
 # GGUF shard names: model-00001-of-00004.gguf → glob the whole set.
@@ -70,34 +69,30 @@ def _expand_gguf(path: Path) -> list[Path]:
     return siblings or [path]
 
 
-def resolve_model_paths() -> dict[tuple[str, str], list[Path]]:
-    """(worker, model) → on-disk paths (files or snapshot dirs), resolved.
+def resolve_model_paths() -> dict[str, list[Path]]:
+    """recipe → on-disk paths (files or snapshot dirs), resolved.
 
-    Every registered model gets an entry; unresolvable models map to
-    an empty list rather than being dropped.
+    Every recipe gets an entry; unresolvable ones map to an empty list rather
+    than being dropped.
     """
-    cfg = get_config()
     hub = hf_cache_dir()
-    out: dict[tuple[str, str], list[Path]] = {}
-    for worker, model in (s.key for s in all_specs()):
+    out: dict[str, list[Path]] = {}
+    for name in (r.name for r in all_recipes()):
         paths: list[Path] = []
-        if worker in ("text2image", "image_edit") and (im := cfg.image_models.get(model)):
-            # A deprecated config.yaml entry still decides which files render.
-            paths = [Path(p) for p in (im.diffusion, im.text_encoder, im.vae, im.lora) if p]
-        elif found := locations(worker, model):
-            # What the recipe names (with the workers' env overrides): local
+        if found := locations(name):
+            # What the recipe names (with the adapters' env overrides): local
             # files and snapshot directories for the models loaded by path —
             # the hub is never consulted for those — and HF-cache repos for
             # the models loaded by repository. faster-whisper large-v3 appears
-            # twice on purpose: stt/large-v3 and the audio resident load one
-            # snapshot. LLMs come through here too, whatever their format: a
-            # llama.cpp GGUF (its shards expanded) and a vllm checkpoint
-            # directory are both just the recipe's weights.path. Asking the
-            # llama.cpp tables instead left every vllm model with no files.
+            # twice on purpose: the stt recipe large-v3 and the audio resident
+            # whisper-large-v3 load one snapshot. LLMs come through here too,
+            # whatever their format: a llama.cpp GGUF (its shards expanded) and
+            # a vllm checkpoint directory are both just the recipe's
+            # weights.path.
             paths = [p for loc in found for p in _expand_gguf(_on_disk(loc, hub))]
         # resolve() unifies symlinked routes (e.g. a symlinked home dir) so
         # sharing detection compares real locations.
-        out[(worker, model)] = [p.expanduser().resolve() for p in paths]
+        out[name] = [p.expanduser().resolve() for p in paths]
     return out
 
 
@@ -117,12 +112,14 @@ def _mount_point(p: Path) -> Path:
 
 @dataclass
 class ModelStorage:
+    # The recipe's first modality, as the dashboard groups it; the recipe is
+    # `model`. GET /weights replaces this per-recipe view (ADR-003 step 4).
     worker: str
     model: str
     paths: list[Path]
     on_disk: bool
     size_bytes: int  # 0 when not on disk
-    shared_with: list[str] = field(default_factory=list)  # other "worker/model" keys
+    shared_with: list[str] = field(default_factory=list)  # other recipes
 
 
 def storage_report() -> tuple[list[ModelStorage], list[dict]]:
@@ -133,20 +130,20 @@ def storage_report() -> tuple[list[ModelStorage], list[dict]]:
     """
     resolved = resolve_model_paths()
     owners: dict[Path, list[str]] = {}
-    for (worker, model), paths in resolved.items():
+    for name, paths in resolved.items():
         for p in paths:
-            owners.setdefault(p, []).append(f"{worker}/{model}")
+            owners.setdefault(p, []).append(name)
 
     sizes = {p: _path_size(p) for p in owners}
     models: list[ModelStorage] = []
-    for (worker, model), paths in sorted(resolved.items()):
-        key = f"{worker}/{model}"
+    for name, paths in sorted(resolved.items()):
+        recipe = get_recipe(name)
         existing = [p for p in paths if p.exists()]
-        shared = sorted({o for p in paths for o in owners[p] if o != key})
+        shared = sorted({o for p in paths for o in owners[p] if o != name})
         models.append(
             ModelStorage(
-                worker=worker,
-                model=model,
+                worker=recipe.modality if recipe is not None else "",
+                model=name,
                 paths=paths,
                 on_disk=bool(paths) and len(existing) == len(paths),
                 size_bytes=sum(sizes[p] for p in existing),
@@ -174,40 +171,40 @@ def storage_report() -> tuple[list[ModelStorage], list[dict]]:
 
 
 def delete_model(
-    worker: str,
     model: str,
     *,
-    resident_keys: set[tuple[str, str]],
-    loaded: tuple[str | None, str | None] = (None, None),
+    resident_keys: set[str],
+    loaded: set[str] | None = None,
 ) -> dict:
-    """Delete a model's weights from disk; returns what happened per path.
+    """Delete a recipe's weights from disk; returns what happened per path.
 
     Refuses residents (evicting them is scheduler policy, not a disk
-    operation) and the currently-loaded model. Paths referenced by another
-    model in the registry are left alone and reported as skipped.
+    operation) and loaded recipes. Paths another recipe also uses are left
+    alone and reported as skipped.
     """
-    if (worker, model) not in {s.key for s in all_specs()}:
-        raise StorageError(f"unknown model {worker}/{model}", status=404)
-    if (worker, model) in resident_keys:
+    recipe = get_recipe(model)
+    if recipe is None:
+        raise StorageError(f"unknown recipe {model}", status=404)
+    model = recipe.name
+    if model in resident_keys:
         raise StorageError(
-            f"{worker}/{model} is a configured resident — it would reload on the "
+            f"{model} is a configured resident — it would reload on the "
             "next idle cycle; remove it from residents first",
             status=409,
         )
-    if (worker, model) == loaded:
-        raise StorageError(f"{worker}/{model} is currently loaded", status=409)
+    if model in (loaded or set()):
+        raise StorageError(f"{model} is currently loaded", status=409)
 
     resolved = resolve_model_paths()
-    key = f"{worker}/{model}"
     owners: dict[Path, list[str]] = {}
-    for (w, m), paths in resolved.items():
+    for name, paths in resolved.items():
         for p in paths:
-            owners.setdefault(p, []).append(f"{w}/{m}")
+            owners.setdefault(p, []).append(name)
 
     deleted, skipped_shared, missing = [], [], []
     freed = 0
-    for p in resolved[(worker, model)]:
-        if others := [o for o in owners[p] if o != key]:
+    for p in resolved[model]:
+        if others := [o for o in owners[p] if o != model]:
             skipped_shared.append({"path": str(p), "shared_with": others})
             continue
         if not p.exists():
@@ -232,7 +229,6 @@ def delete_model(
         freed += size
         deleted.append(str(p))
     return {
-        "worker": worker,
         "model": model,
         "deleted": deleted,
         "skipped_shared": skipped_shared,

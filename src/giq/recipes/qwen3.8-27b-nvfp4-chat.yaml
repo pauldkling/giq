@@ -14,7 +14,7 @@
 # the other through the ordinary swap. Not resident by default, like its
 # sibling.
 name: qwen3.8-27b-nvfp4-chat
-worker: llm
+modalities: [llm]
 engine: vllm
 label: Qwen3.8 27B NVFP4 (interactive)
 detail: "chat + vision · vllm · MTP · up to 4 in parallel · 128k ctx"

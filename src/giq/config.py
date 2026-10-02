@@ -17,74 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ImageModelConfig:
-    """An image model's files, and the runtime that renders them.
-
-    What ``giq.weights.image_files`` hands the image workers, built from the
-    model's recipe file. As a ``config.yaml`` ``image_models`` entry it is
-    deprecated (see :func:`warn_image_model`): such an entry still replaces
-    the recipe's files, and its ``vram_gb``/``engine``, when given,
-    overlay the recipe's.
-    """
-
-    diffusion: str
-    text_encoder: str
-    vae: str
-    lora: str | None = None
-    # None = the recipe's figure.
-    vram_gb: float | None = None
-    # Which runtime renders this model: "sd.cpp" (stable-diffusion.cpp's
-    # sd-server child), the only image runtime; the old "sdcpp" is read as
-    # "sd.cpp". None = the recipe's engine.
-    engine: str | None = None
-
-
-_warned_image_models: set[str] = set()
-
-
-def warn_image_model(name: str, entry: ImageModelConfig) -> None:
-    """Say once per process that ``image_models.<name>`` belongs in a recipe file.
-
-    Warned where the entry is used (the catalog, a worker being built), not
-    where the config is parsed, so the children that read config.yaml for
-    their generation defaults do not repeat it.
-    """
-    if name in _warned_image_models:
-        return
-    _warned_image_models.add(name)
-    from giq.engines import ENGINE_ALIASES
-    from giq.recipes import builtin
-
-    shipped = [
-        (recipe, path)
-        for (worker, model), (recipe, path) in builtin().items()
-        if model == name and worker in ("text2image", "image_edit")
-    ]
-    parts = {"diffusion": entry.diffusion, "text_encoder": entry.text_encoder, "vae": entry.vae}
-    if entry.lora:
-        parts["lora"] = entry.lora
-    equivalent = "weights: {parts: {" + ", ".join(f"{k}: {v}" for k, v in parts.items()) + "}}"
-    # Only what differs from the shipped file needs saying.
-    reference = shipped[0][0] if shipped else None
-    engine = ENGINE_ALIASES.get(entry.engine or "", entry.engine)
-    if engine and (reference is None or reference.engine != engine):
-        equivalent += f", engine: {engine}"
-    if entry.vram_gb is not None and (reference is None or reference.vram.gb != entry.vram_gb):
-        equivalent += f", vram: {{gb: {entry.vram_gb}, measured: false}}"
-    where = (
-        "copy " + " and ".join(str(path) for _, path in shipped)
-        if shipped
-        else "write a recipe file"
-    )
-    logger.warning(
-        f"config.yaml image_models.{name} is deprecated; it still overrides the recipe's files "
-        "(and its engine and VRAM figure, where it sets them). Move it into a recipe file: "
-        f"{where} to {giq_paths.recipes_dir()}, set {equivalent} there, and delete the "
-        "image_models entry"
-    )
-
-
-@dataclass
 class GpuConfig:
     """Which cards giq runs models on.
 
@@ -149,7 +81,6 @@ class GiqConfig:
     """Main giq configuration."""
 
     gpu: GpuConfig = field(default_factory=GpuConfig)
-    image_models: dict[str, ImageModelConfig] = field(default_factory=dict)
     image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     negative_prompt: str = ""
     provenance: ProvenanceConfig = field(default_factory=ProvenanceConfig)
@@ -207,25 +138,14 @@ class GiqConfig:
                 str(name): float(gb) for name, gb in (gpu_data.get("reserve") or {}).items()
             }
 
-        # Image models (deprecated: their files belong in the recipe files)
-        if "image_models" in data:
-            from giq.engines import canonical_engine
-
-            for name, model_data in (data["image_models"] or {}).items():
-                engine = model_data.get("engine")
-                vram_gb = model_data.get("vram_gb")
-                self.image_models[name] = ImageModelConfig(
-                    diffusion=model_data["diffusion"],
-                    text_encoder=model_data["text_encoder"],
-                    vae=model_data["vae"],
-                    lora=model_data.get("lora"),
-                    vram_gb=float(vram_gb) if vram_gb is not None else None,
-                    engine=(
-                        canonical_engine(str(engine), f"config.yaml image_models.{name}")
-                        if engine
-                        else None
-                    ),
-                )
+        # An image model's files are its recipe's (ADR-002), and since ADR-003
+        # config.yaml no longer overrides them. Said rather than silently
+        # dropped: an operator who still has the block should know it is dead.
+        if data.get("image_models"):
+            logger.warning(
+                "config.yaml image_models is no longer read: an image model's files, "
+                "engine and VRAM figure belong in its recipe file (ADR-003)"
+            )
 
         # Image generation defaults
         if "image_generation" in data:

@@ -109,7 +109,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 
 ### LLM (`llm`)
 - Models: the models declared by `llm` recipe files (`giq/recipes/llm.*.yaml`
-  and your own, see [Instances](configuration.md#instances)) — GGUFs via
+  and your own, see [Instances](configuration.md#recipes)) — GGUFs via
   llama.cpp, Hugging Face checkpoints via vllm; `/capabilities` lists them
 - Task: `{id, messages[], temperature?, max_tokens?}`
 - Result: `{id, text}`
@@ -354,17 +354,17 @@ unclear is not one giq offers for commercial use.
 - `disks` — per mount: total, free, and how much of it is model weights.
 - `paths` — every data directory giq resolved (config, models, recipes,
   engines, state, caches).
-- `recipes` — the operator's [recipe files](configuration.md#instances):
+- `recipes` — the operator's [recipe files](configuration.md#recipes):
 
 ```json
 "recipes": {
   "dir": "/home/me/.config/giq/recipes",
   "builtin_dir": "/opt/giq/src/giq/recipes",
   "files": [
-    {"file": "/home/me/.config/giq/recipes/gemma.yaml", "worker": "llm",
-     "name": "gemma-4-12b", "replaces_builtin": true}
+    {"file": "/home/me/.config/giq/recipes/gemma.yaml", "name": "gemma-4-12b",
+     "modalities": ["llm"], "replaces_builtin": true}
   ],
-  "overrides": ["llm/gemma-4-12b"],
+  "overrides": ["gemma-4-12b"],
   "errors": [
     {"file": "/home/me/.config/giq/recipes/broken.yaml",
      "message": "params.ctx: Extra inputs are not permitted"}

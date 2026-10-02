@@ -111,20 +111,21 @@ class ServedLLM(ABC):
 
 
 def engine_for(model: str) -> str:
-    """The engine that serves an LLM: its registry backend, llama.cpp by default."""
-    from giq.registry import get_spec
+    """The engine that serves an LLM recipe: its own, llama.cpp when unknown."""
+    from giq.registry import get_recipe
 
-    spec = get_spec("llm", model)
-    return spec.backend if spec is not None else "llama.cpp"
+    recipe = get_recipe(model)
+    return recipe.engine if recipe is not None else "llama.cpp"
 
 
 def context_size(model: str) -> int:
     """The context window an LLM is served with, whichever engine runs it."""
     if engine_for(model) == "vllm":
+        from giq.recipes.schema import VllmParams
         from giq.workers.vllm import recipe_for
 
         recipe = recipe_for(model)
-        if recipe is not None:
+        if recipe is not None and isinstance(recipe.params, VllmParams):
             return recipe.params.max_model_len
     from giq.workers.llm import DEFAULT_CTX_SIZE, MODEL_CTX_SIZE
 

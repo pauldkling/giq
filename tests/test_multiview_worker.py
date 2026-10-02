@@ -95,11 +95,11 @@ def test_hydrate_keeps_the_error_envelope():
 
 
 def test_estimated_vram_comes_from_the_registry():
-    from giq.registry import get_spec
+    from giq.registry import get_recipe
 
-    spec = get_spec("multiview", MultiviewWorkerConfig().model)
-    assert spec is not None and spec.model == "da3-base"
-    assert MultiviewWorker(MultiviewWorkerConfig()).estimated_vram_gb == spec.vram_gb
+    recipe = get_recipe(MultiviewWorkerConfig().model)
+    assert recipe is not None and recipe.name == "da3-base"
+    assert MultiviewWorker(MultiviewWorkerConfig()).estimated_vram_gb == recipe.vram_gb
 
 
 def test_unknown_model_fails_at_construction():

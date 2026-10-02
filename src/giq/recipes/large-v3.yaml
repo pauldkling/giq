@@ -6,7 +6,7 @@
 # (audio/whisper-large-v3). Loads by repository from the HF cache; a
 # weights.path to a converted CTranslate2 directory would load that instead.
 name: large-v3
-worker: stt
+modalities: [stt]
 engine: faster-whisper
 weights:
   source: hf:Systran/faster-whisper-large-v3

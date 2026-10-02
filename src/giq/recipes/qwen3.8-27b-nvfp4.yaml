@@ -13,7 +13,7 @@
 # warm), so an operator who wants it pins it rather than paying a cold start
 # on some user's first request.
 name: qwen3.8-27b-nvfp4
-worker: llm
+modalities: [llm]
 engine: vllm
 label: Qwen3.8 27B NVFP4
 detail: "chat + vision · vllm · up to 32 in parallel · 128k ctx"

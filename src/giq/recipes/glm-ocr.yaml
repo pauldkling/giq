@@ -10,7 +10,7 @@
 # and GIQ_GLM_LAYOUT_DIR override the two paths.
 name: glm-ocr
 label: GLM-OCR
-worker: ocr
+modalities: [ocr]
 engine: transformers
 detail: "layout + per-region recognition · tables as HTML · fits beside anything"
 weights:

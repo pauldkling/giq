@@ -21,9 +21,9 @@ from giq.queue import Job, JobQueue
 from giq.runner import ResidentDemoted, Runner, _Resident
 
 RESIDENTS = [
-    (Modality.llm, "gemma-4-12b"),
-    (Modality.audio, "whisper-large-v3"),
-    (Modality.embed, "ecapa-tdnn"),
+    "gemma-4-12b",
+    "whisper-large-v3",
+    "ecapa-tdnn",
 ]
 
 
@@ -33,13 +33,13 @@ def store():
     from giq.stats import get_stats
 
     stats = get_stats()
-    for worker, model in list(stats.load_policies()):
-        stats.delete_policy(worker, model)
+    for name in list(stats.load_policies()):
+        stats.delete_policy(name)
     store = reset_policy_store()
     store.load()
     yield store
-    for worker, model in list(stats.load_policies()):
-        stats.delete_policy(worker, model)
+    for name in list(stats.load_policies()):
+        stats.delete_policy(name)
     reset_policy_store()
 
 
@@ -67,7 +67,7 @@ def _prime_resident(runner: Runner, key, width: int = 1):
     # On the card this model actually binds to — a resident sitting on the
     # wrong card is torn down and reloaded, which is not what these tests are
     # about (see test_binding for that path).
-    res = _Resident(worker, width, runner._device_for(*key))
+    res = _Resident(worker, width, runner._device_for(key))
     runner._residents[key] = res
     return res
 
@@ -76,28 +76,28 @@ def _prime_resident(runner: Runner, key, width: int = 1):
 
 
 def test_registry_residents_default_to_pinned(store):
-    assert store.policy_for("llm", "gemma-4-12b") == PINNED
-    assert store.policy_for("audio", "whisper-large-v3") == PINNED
+    assert store.policy_for("gemma-4-12b") == PINNED
+    assert store.policy_for("whisper-large-v3") == PINNED
 
 
 def test_everything_else_defaults_to_auto(store):
-    assert store.policy_for("text2image", "flux_klein") == AUTO
-    assert store.policy_for("tts", "kokoro") == AUTO
+    assert store.policy_for("flux_klein") == AUTO
+    assert store.policy_for("kokoro") == AUTO
 
 
 def test_unregistered_model_is_auto_not_off(store):
     """An unknown model must not be silently blocked."""
-    assert store.policy_for("llm", "no-such-model") == AUTO
+    assert store.policy_for("no-such-model") == AUTO
 
 
 # --- persistence ------------------------------------------------------------
 
 
 def test_override_round_trips_through_the_db(store):
-    store.set("text2image", "flux_klein", PINNED, reason="demo")
+    store.set("flux_klein", PINNED, reason="demo")
     reloaded = reset_policy_store()
     reloaded.load()
-    record = reloaded.record_for("text2image", "flux_klein")
+    record = reloaded.record_for("flux_klein")
     assert record.policy == PINNED
     assert record.source == "override"
     assert record.reason == "demo"
@@ -105,72 +105,72 @@ def test_override_round_trips_through_the_db(store):
 
 def test_setting_a_model_back_to_its_default_clears_the_override(store):
     """Storing "same as default" would freeze a later default change in place."""
-    store.set("llm", "gemma-4-12b", AUTO)
-    assert store.record_for("llm", "gemma-4-12b").source == "override"
-    store.set("llm", "gemma-4-12b", PINNED)
-    assert store.record_for("llm", "gemma-4-12b").source == "default"
+    store.set("gemma-4-12b", AUTO)
+    assert store.record_for("gemma-4-12b").source == "override"
+    store.set("gemma-4-12b", PINNED)
+    assert store.record_for("gemma-4-12b").source == "default"
 
     from giq.stats import get_stats
 
-    assert ("llm", "gemma-4-12b") not in get_stats().load_policies()
+    assert "gemma-4-12b" not in get_stats().load_policies()
 
 
 def test_clear_reverts_to_default(store):
-    store.set("llm", "gemma-4-12b", OFF)
-    store.clear("llm", "gemma-4-12b")
-    assert store.policy_for("llm", "gemma-4-12b") == PINNED
+    store.set("gemma-4-12b", OFF)
+    store.clear("gemma-4-12b")
+    assert store.policy_for("gemma-4-12b") == PINNED
 
 
 def test_unknown_model_cannot_be_set(store):
-    with pytest.raises(ValueError, match="not a registered model"):
-        store.set("llm", "no-such-model", PINNED)
+    with pytest.raises(ValueError, match="not a recipe"):
+        store.set("no-such-model", PINNED)
 
 
 def test_invalid_policy_is_rejected(store):
     with pytest.raises(ValueError, match="unknown policy"):
-        store.set("llm", "gemma-4-12b", "sometimes")
+        store.set("gemma-4-12b", "sometimes")
 
 
 def test_stale_override_for_a_delisted_model_is_dropped_on_load(store):
     """A model removed from the registry must not resurrect as a resident."""
     from giq.stats import get_stats
 
-    get_stats().save_policy("llm", "model-that-was-deleted", PINNED, None)
+    get_stats().save_policy("model-that-was-deleted", PINNED, None)
     fresh = reset_policy_store()
     fresh.load()
-    assert ("llm", "model-that-was-deleted") not in fresh.residents()
+    assert "model-that-was-deleted" not in fresh.residents()
 
 
 # --- the resident set -------------------------------------------------------
 
 
 def test_pinning_adds_to_the_resident_set(store):
-    assert ("tts", "kokoro") not in store.residents()
-    store.set("tts", "kokoro", PINNED)
-    assert ("tts", "kokoro") in store.residents()
+    assert "kokoro" not in store.residents()
+    store.set("kokoro", PINNED)
+    assert "kokoro" in store.residents()
 
 
 def test_unpinning_removes_from_the_resident_set(store):
-    store.set("audio", "whisper-large-v3", AUTO)
-    assert ("audio", "whisper-large-v3") not in store.residents()
+    store.set("whisper-large-v3", AUTO)
+    assert "whisper-large-v3" not in store.residents()
 
 
 def test_registry_residents_keep_their_priority_order(store):
     """Declared order encodes which model matters most when VRAM is tight."""
-    store.set("tts", "kokoro", PINNED)
+    store.set("kokoro", PINNED)
     residents = store.residents()
     assert residents[:3] == [
-        ("llm", "gemma-4-12b"),
-        ("audio", "whisper-large-v3"),
-        ("embed", "ecapa-tdnn"),
+        "gemma-4-12b",
+        "whisper-large-v3",
+        "ecapa-tdnn",
     ]
-    assert residents[3] == ("tts", "kokoro")  # operator pins follow
+    assert residents[3] == "kokoro"  # operator pins follow
 
 
 def test_off_is_not_resident(store):
-    store.set("llm", "gemma-4-12b", OFF)
-    assert ("llm", "gemma-4-12b") not in store.residents()
-    assert store.is_off("llm", "gemma-4-12b")
+    store.set("gemma-4-12b", OFF)
+    assert "gemma-4-12b" not in store.residents()
+    assert store.is_off("gemma-4-12b")
 
 
 # --- the VRAM budget --------------------------------------------------------
@@ -182,18 +182,18 @@ def test_default_pinned_set_fits(store):
 
 
 def test_pinning_a_huge_model_overcommits(store, sixteen_gb_card):
-    fits, projected, total, _device = store.pinned_fit(extra=("text2image", "zimage"))
+    fits, projected, total, _device = store.pinned_fit(extra="zimage")
     assert not fits
     assert projected > total
 
 
 def test_only_one_llm_can_be_pinned_per_card(store):
     """Two llama-servers on one card would fight over its internal port."""
-    assert store.resident_llm() == ("llm", "gemma-4-12b")
-    assert store.resident_llm(exclude=("llm", "gemma-4-12b")) is None
+    assert store.resident_llm() == "gemma-4-12b"
+    assert store.resident_llm(exclude="gemma-4-12b") is None
     # Scoped to the card gemma actually lands on...
-    where = store.effective_device("llm", "gemma-4-12b")
-    assert store.resident_llm(device=where) == ("llm", "gemma-4-12b")
+    where = store.effective_device("gemma-4-12b")
+    assert store.resident_llm(device=where) == "gemma-4-12b"
     # ...and silent about any other card, which is what lets a second LLM be
     # pinned elsewhere.
     assert store.resident_llm(device="GPU-nothing-here") is None
@@ -206,7 +206,7 @@ def test_only_one_llm_can_be_pinned_per_card(store):
 async def test_submit_is_refused_for_a_disabled_model(store, monkeypatch):
     from giq.services.orchestration import Orchestrator
 
-    store.set("llm", "gemma-4-12b", OFF, reason="freeing the card")
+    store.set("gemma-4-12b", OFF, reason="freeing the card")
     orch = Orchestrator()
     request = JobRequest(modality=Modality.llm, model="gemma-4-12b", tasks=[{"id": "t1"}])
     with pytest.raises(HTTPException) as excinfo:
@@ -221,8 +221,8 @@ async def test_submit_is_refused_for_a_disabled_model(store, monkeypatch):
 async def test_submit_is_allowed_once_re_enabled(store):
     from giq.services.orchestration import Orchestrator
 
-    store.set("text2image", "flux_klein", OFF)
-    store.set("text2image", "flux_klein", AUTO)
+    store.set("flux_klein", OFF)
+    store.set("flux_klein", AUTO)
     orch = Orchestrator()
     job_id, _pos = await orch.submit_job(
         JobRequest(modality=Modality.text2image, model="flux_klein", tasks=[{"id": "t1"}])
@@ -238,25 +238,25 @@ async def test_submit_is_allowed_once_re_enabled(store):
 async def test_disabled_model_cannot_load_via_the_batch_path(store, queue):
     """Submission is the usual gate, but `off` must block loading outright."""
     runner = Runner(queue, use_policy=True)
-    store.set("text2image", "flux_klein", OFF)
+    store.set("flux_klein", OFF)
     with pytest.raises(RuntimeError, match="disabled"):
-        await runner._ensure_worker(Modality.text2image, "flux_klein")
+        await runner._ensure_worker("flux_klein")
 
 
 @pytest.mark.asyncio
 async def test_disabled_resident_is_not_reloaded(store, queue):
     runner = Runner(queue, use_policy=True)
-    store.set("llm", "gemma-4-12b", OFF)
-    await runner._load_resident((Modality.llm, "gemma-4-12b"))
-    assert (Modality.llm, "gemma-4-12b") not in runner._residents
+    store.set("gemma-4-12b", OFF)
+    await runner._load_resident("gemma-4-12b")
+    assert "gemma-4-12b" not in runner._residents
 
 
 @pytest.mark.asyncio
 async def test_runner_resident_set_follows_policy_live(store, queue):
     runner = Runner(queue, use_policy=True)
-    assert (Modality.audio, "whisper-large-v3") in runner._resident_keys
-    store.set("audio", "whisper-large-v3", AUTO)
-    assert (Modality.audio, "whisper-large-v3") not in runner._resident_keys
+    assert "whisper-large-v3" in runner._resident_keys
+    store.set("whisper-large-v3", AUTO)
+    assert "whisper-large-v3" not in runner._resident_keys
 
 
 @pytest.mark.asyncio
@@ -269,13 +269,13 @@ async def test_static_residents_ignore_pinning_but_not_off(store, queue):
     because that runner had use_policy=False.
     """
     runner = Runner(queue, residents=RESIDENTS)
-    store.set("audio", "whisper-large-v3", OFF)
+    store.set("whisper-large-v3", OFF)
     # the static list still drives residency...
-    assert (Modality.audio, "whisper-large-v3") in runner._resident_keys
+    assert "whisper-large-v3" in runner._resident_keys
     # ...but off is honoured everywhere
-    assert runner.is_disabled(Modality.audio, "whisper-large-v3")
+    assert runner.is_disabled("whisper-large-v3")
     with pytest.raises(RuntimeError, match="disabled"):
-        await runner._ensure_worker(Modality.audio, "whisper-large-v3")
+        await runner._ensure_worker("whisper-large-v3")
 
 
 # --- unpinning actually unloads ---------------------------------------------
@@ -285,10 +285,10 @@ async def test_static_residents_ignore_pinning_but_not_off(store, queue):
 async def test_unpinning_unloads_the_resident(store, queue):
     """The point of the whole design: the loop must not reload it right back."""
     runner = Runner(queue, use_policy=True)
-    key = (Modality.audio, "whisper-large-v3")
+    key = "whisper-large-v3"
     res = _prime_resident(runner, key)
 
-    store.set("audio", "whisper-large-v3", AUTO)
+    store.set("whisper-large-v3", AUTO)
     await runner._release_demoted_residents()
 
     res.worker.stop.assert_awaited()
@@ -298,7 +298,7 @@ async def test_unpinning_unloads_the_resident(store, queue):
 @pytest.mark.asyncio
 async def test_pinned_residents_are_left_alone(store, queue):
     runner = Runner(queue, use_policy=True)
-    key = (Modality.audio, "whisper-large-v3")
+    key = "whisper-large-v3"
     res = _prime_resident(runner, key)
 
     await runner._release_demoted_residents()
@@ -311,12 +311,12 @@ async def test_pinned_residents_are_left_alone(store, queue):
 async def test_unload_waits_for_in_flight_lane_jobs(store, queue):
     """Teardown drains the lane, so nothing dies mid-generation."""
     runner = Runner(queue, use_policy=True)
-    key = (Modality.audio, "whisper-large-v3")
+    key = "whisper-large-v3"
     res = _prime_resident(runner, key)
     await res.lane.acquire()  # simulate a job in flight
     res.active_count = 1
 
-    store.set("audio", "whisper-large-v3", AUTO)
+    store.set("whisper-large-v3", AUTO)
     task = asyncio.create_task(runner._release_demoted_residents())
     await asyncio.sleep(0.05)
     assert key in runner._residents  # still waiting on the lane
@@ -335,22 +335,22 @@ async def test_unload_waits_for_in_flight_lane_jobs(store, queue):
 async def test_lane_job_fails_fast_when_unpinned(store, queue):
     """Without this it would wait out RESIDENT_WAIT_TIMEOUT_SECONDS (840s)."""
     runner = Runner(queue, use_policy=True)
-    store.set("audio", "whisper-large-v3", AUTO)
+    store.set("whisper-large-v3", AUTO)
     with pytest.raises(ResidentDemoted):
-        await runner._wait_resident_ready((Modality.audio, "whisper-large-v3"))
+        await runner._wait_resident_ready("whisper-large-v3")
 
 
 @pytest.mark.asyncio
 async def test_demoted_lane_job_is_requeued_not_failed(store, queue):
     runner = Runner(queue, use_policy=True)
-    key = (Modality.audio, "whisper-large-v3")
+    key = "whisper-large-v3"
     job = Job(
         job_id="j1",
         request=JobRequest(modality=Modality.audio, model="whisper-large-v3", tasks=[{"id": "t"}]),
     )
     job.status = JobStatus.running
     await queue.add(job)
-    store.set("audio", "whisper-large-v3", AUTO)
+    store.set("whisper-large-v3", AUTO)
 
     await runner._process_resident_job(job, key)
 
@@ -423,9 +423,9 @@ async def test_pinning_an_image_model_overcommits_a_small_card(client, store, mo
 async def test_listing_policies_covers_every_model(client):
     r = await client.get("/control/models")
     assert r.status_code == 200
-    from giq.registry import all_specs
+    from giq.registry import all_recipes
 
-    assert len(r.json()) == len(all_specs())
+    assert len(r.json()) == len(all_recipes())
 
 
 @pytest.mark.asyncio
@@ -446,7 +446,7 @@ async def test_overcommitting_the_card_is_refused(client, store, sixteen_gb_card
     r = await client.post("/control/models/text2image/zimage", json={"policy": "pinned"})
     assert r.status_code == 409
     assert "force=true" in r.json()["detail"]
-    assert store.policy_for("text2image", "zimage") == AUTO  # nothing was written
+    assert store.policy_for("zimage") == AUTO  # nothing was written
 
 
 @pytest.mark.asyncio
@@ -456,7 +456,7 @@ async def test_overcommit_can_be_forced_but_warns(client, store, sixteen_gb_card
     )
     assert r.status_code == 200
     assert any("cannot all load" in w for w in r.json()["warnings"])
-    assert store.policy_for("text2image", "zimage") == PINNED
+    assert store.policy_for("zimage") == PINNED
 
 
 @pytest.mark.asyncio
@@ -464,7 +464,7 @@ async def test_pinning_a_second_llm_is_refused(client, store):
     r = await client.post("/control/models/llm/llama-3.2-3b", json={"policy": "pinned"})
     assert r.status_code == 409
     assert "One resident LLM per card" in r.json()["detail"]
-    assert store.policy_for("llm", "llama-3.2-3b") == AUTO
+    assert store.policy_for("llama-3.2-3b") == AUTO
 
 
 @pytest.mark.asyncio
@@ -475,12 +475,12 @@ async def test_swapping_the_pinned_llm_works(client, store):
     ).status_code == 200
     r = await client.post("/control/models/llm/llama-3.2-3b", json={"policy": "pinned"})
     assert r.status_code == 200
-    assert store.resident_llm() == ("llm", "llama-3.2-3b")
+    assert store.resident_llm() == "llama-3.2-3b"
 
 
 @pytest.mark.asyncio
 async def test_catalog_reports_policy(client, store):
-    store.set("tts", "kokoro", OFF, reason="noisy")
+    store.set("kokoro", OFF, reason="noisy")
     r = await client.get("/stats/models")
     assert r.status_code == 200
     body = r.json()
@@ -492,7 +492,7 @@ async def test_catalog_reports_policy(client, store):
 
 @pytest.mark.asyncio
 async def test_llm_endpoint_reports_disabled(client, store):
-    store.set("llm", "gemma-4-12b", OFF)
+    store.set("gemma-4-12b", OFF)
     r = await client.get("/llm/endpoint")
     assert r.status_code == 503
     assert r.json()["detail"]["state"] == "disabled"
@@ -513,8 +513,8 @@ async def test_residents_loop_runs_when_nothing_is_pinned_at_boot(store, queue, 
     """
     import giq.runner
 
-    for worker, model in RESIDENTS:
-        store.set(str(worker), model, AUTO)
+    for name in RESIDENTS:
+        store.set(name, AUTO)
     runner = Runner(queue, use_policy=True)
     assert runner._resident_keys == []
 
@@ -526,11 +526,73 @@ async def test_residents_loop_runs_when_nothing_is_pinned_at_boot(store, queue, 
     await runner.start()
     try:
         assert runner._resident_task is not None
-        store.set("audio", "whisper-large-v3", PINNED)
+        store.set("whisper-large-v3", PINNED)
         for _ in range(100):
             await asyncio.sleep(0.02)
             if loaded:
                 break
-        assert (Modality.audio, "whisper-large-v3") in loaded
+        assert "whisper-large-v3" in loaded
     finally:
         await runner.stop()
+
+
+# --- ADR-003: recipes, not (worker, model) pairs ---------------------------------
+
+
+def test_a_job_is_named_by_its_recipe_whatever_alias_the_client_sent():
+    """Policy, the VRAM gate and the runner key on the recipe's own name, so
+    the alias is resolved once, at submit."""
+    from giq.services.orchestration import Orchestrator
+
+    request = JobRequest(modality=Modality.tts, model="kokoro-82m", tasks=[{"id": "t"}])
+    Orchestrator._resolve_recipe(request)
+    assert request.model == "kokoro"
+
+
+def test_a_modality_the_recipe_does_not_serve_is_refused_at_submit():
+    from giq.services.orchestration import Orchestrator
+
+    request = JobRequest(modality=Modality.image_edit, model="zimage", tasks=[{"id": "t"}])
+    with pytest.raises(HTTPException) as exc:
+        Orchestrator._resolve_recipe(request)
+    assert exc.value.status_code == 400 and "does not serve image_edit" in exc.value.detail
+    # flux_klein serves both image modalities from one recipe.
+    edit = JobRequest(modality=Modality.image_edit, model="flux_klein", tasks=[{"id": "t"}])
+    Orchestrator._resolve_recipe(edit)
+
+
+def test_old_policy_rows_become_recipe_rows_once(tmp_path):
+    """Rows keyed (worker, model) move to the recipe name; the two flux_klein
+    rows are one recipe now, and the newer intent wins while a binding
+    survives from whichever row had one."""
+    import sqlite3
+
+    from giq.stats import StatsRecorder
+
+    db = tmp_path / "stats.db"
+    old = sqlite3.connect(db)
+    old.execute(
+        "CREATE TABLE model_policy (worker TEXT NOT NULL, model TEXT NOT NULL, policy TEXT "
+        "NOT NULL, reason TEXT, updated_at REAL NOT NULL, device TEXT, "
+        "PRIMARY KEY (worker, model))"
+    )
+    old.executemany(
+        "INSERT INTO model_policy VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("text2image", "flux_klein", "pinned", "renders", 1.0, "GPU-small"),
+            ("image_edit", "flux_klein", "off", "edits are broken", 2.0, None),
+            ("llm", "gemma-4-12b", "auto", None, 3.0, None),
+        ],
+    )
+    old.commit()
+    old.close()
+
+    stats = StatsRecorder(db)
+    policies = stats.load_policies()
+    assert policies["flux_klein"] == ("off", "edits are broken", 2.0)
+    assert policies["gemma-4-12b"][0] == "auto"
+    assert stats.load_devices() == {"flux_klein": "GPU-small"}
+    # Once: a later restart does not re-merge over what the operator changed since.
+    stats.save_policy("flux_klein", "pinned", None)
+    again = StatsRecorder(db)
+    assert again.load_policies()["flux_klein"][0] == "pinned"

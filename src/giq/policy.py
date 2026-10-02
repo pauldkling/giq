@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-model residency policy: pinned, auto, or off.
+"""Per-recipe residency policy: pinned, auto, or off.
 
 giq always had two implicit behaviours per model — *resident* (the residents
 loop keeps it loaded, reloads it after eviction and on boot) and *sleepy*
@@ -20,7 +20,7 @@ model would be undone before the operator's hand left the mouse. Demoting to
 scheduler.
 
 Overrides persist in stats.db and outrank config.yaml, which outranks the
-registry's built-in set. So "mark this persistent" needs no separate flag:
+recipes' own residency. So "mark this persistent" needs no separate flag:
 what you set is what comes back after a restart.
 
 The same store answers the second per-model question a multi-card rig raises:
@@ -37,7 +37,7 @@ import threading
 from dataclasses import dataclass
 
 from giq.gpus import GpuTelemetry, resolve_device, selected_device
-from giq.registry import all_specs, get_spec
+from giq.registry import all_recipes, get_recipe, resident_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -55,25 +55,24 @@ RESIDENT_SET_HEADROOM_GB = 0.5
 
 @dataclass(frozen=True)
 class PolicyRecord:
-    worker: str
-    model: str
+    """A recipe's residency: its policy, and the card it is bound to."""
+
+    recipe: str
     policy: str
-    source: str  # "override" (operator set it) | "default" (registry/config)
+    source: str  # "override" (operator set it) | "default" (recipe/config)
     reason: str | None = None
     updated_at: float | None = None
-    # GPU UUID this model is bound to, and where that came from:
+    # GPU UUID this recipe is bound to, and where that came from:
     # "override" (operator), "config" (gpu.bind), "default" (unbound — the
-    # model runs on whatever card giq selected).
+    # recipe runs on whatever card giq selected).
     device: str | None = None
     device_source: str = "default"
 
-    @property
-    def key(self) -> tuple[str, str]:
-        return (self.worker, self.model)
 
-    @property
-    def name(self) -> str:
-        return f"{self.worker}/{self.model}"
+def _canonical(name: str) -> str | None:
+    """The recipe name ``name`` means (an alias resolved), or None if unknown."""
+    recipe = get_recipe(name)
+    return recipe.name if recipe is not None else None
 
 
 class PolicyStore:
@@ -81,12 +80,13 @@ class PolicyStore:
 
     Held in memory because the residents loop consults it on every tick and
     the dispatch path consults it per job; neither should touch SQLite.
+    Keyed by recipe name (ADR-003).
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._overrides: dict[tuple[str, str], tuple[str, str | None, float]] = {}
-        self._devices: dict[tuple[str, str], str] = {}
+        self._overrides: dict[str, tuple[str, str | None, float]] = {}
+        self._devices: dict[str, str] = {}
         self._loaded = False
 
     def load(self) -> None:
@@ -99,21 +99,19 @@ class PolicyStore:
             devices = stats.load_devices()
         except Exception as e:
             # A policy store that can't read must not take the service down;
-            # falling back to registry defaults is the safe direction (it can
-            # only load models the operator had already allowed).
+            # falling back to the recipes' defaults is the safe direction (it
+            # can only load models the operator had already allowed).
             logger.error(f"policy: could not load overrides, using defaults: {e}")
             overrides, devices = {}, {}
         for table, label in ((overrides, "override"), (devices, "binding")):
-            for key in [k for k in table if get_spec(*k) is None]:
-                logger.warning(
-                    f"policy: {key[0]}/{key[1]} is no longer registered, ignoring {label}"
-                )
-                table.pop(key)
+            for name in [n for n in table if get_recipe(n) is None]:
+                logger.warning(f"policy: no recipe {name!r} any more, ignoring its {label}")
+                table.pop(name)
         # A row can exist purely to carry a binding, with the policy column
-        # holding the registry default. That is not an override — reporting it
-        # as one would freeze the model against a later default change.
-        for key in [k for k, v in overrides.items() if v[0] == self.default_for(*k)]:
-            overrides.pop(key)
+        # holding the default. That is not an override — reporting it as one
+        # would freeze the recipe against a later default change.
+        for name in [n for n, v in overrides.items() if v[0] == self.default_for(n)]:
+            overrides.pop(name)
         with self._lock:
             self._overrides = overrides
             self._devices = devices
@@ -124,43 +122,34 @@ class PolicyStore:
     # --- reads ---------------------------------------------------------------
 
     @staticmethod
-    def default_for(worker: str, model: str) -> str:
-        spec = get_spec(worker, model)
-        if spec is None:
-            return AUTO
-        return PINNED if spec.resident_priority is not None else AUTO
+    def default_for(name: str) -> str:
+        """PINNED for the default resident set (the recipes', or config.yaml's), else AUTO."""
+        return PINNED if _canonical(name) in resident_defaults() else AUTO
 
-    def policy_for(self, worker: str, model: str) -> str:
-        key = (str(worker), str(model))
+    def policy_for(self, name: str) -> str:
+        key = _canonical(name) or str(name)
         with self._lock:
             override = self._overrides.get(key)
         if override is not None:
             return override[0]
-        return self.default_for(*key)
+        return self.default_for(key)
 
-    def record_for(self, worker: str, model: str) -> PolicyRecord:
-        key = (str(worker), str(model))
+    def record_for(self, name: str) -> PolicyRecord:
+        key = _canonical(name) or str(name)
         with self._lock:
             override = self._overrides.get(key)
-        device, device_source = self.device_record(*key)
+        device, device_source = self.device_record(key)
         if override is not None:
             policy, reason, ts = override
-            return PolicyRecord(
-                key[0], key[1], policy, "override", reason, ts, device, device_source
-            )
+            return PolicyRecord(key, policy, "override", reason, ts, device, device_source)
         return PolicyRecord(
-            key[0],
-            key[1],
-            self.default_for(*key),
-            "default",
-            device=device,
-            device_source=device_source,
+            key, self.default_for(key), "default", device=device, device_source=device_source
         )
 
     # --- device bindings -----------------------------------------------------
 
-    def device_record(self, worker: str, model: str) -> tuple[str | None, str]:
-        """(GPU UUID, source) this model is bound to. (None, "default") = unbound.
+    def device_record(self, name: str) -> tuple[str | None, str]:
+        """(GPU UUID, source) this recipe is bound to. (None, "default") = unbound.
 
         Precedence mirrors residency: an operator override outranks
         config.yaml's ``gpu.bind``, which outranks being unbound. A binding
@@ -168,7 +157,7 @@ class PolicyStore:
         rather than honoured — refusing to load at all would be a worse
         failure than falling back to the default card.
         """
-        key = (str(worker), str(model))
+        key = _canonical(name) or str(name)
         with self._lock:
             override = self._devices.get(key)
         if override is not None:
@@ -176,85 +165,78 @@ class PolicyStore:
             if gpu is not None:
                 return gpu.uuid, "override"
             logger.warning(
-                f"policy: {key[0]}/{key[1]} is bound to {override}, which is not present "
+                f"policy: {key} is bound to {override}, which is not present "
                 "— falling back to the default card"
             )
             return None, "default"
 
-        try:
-            from giq.config import get_config
-
-            configured = get_config().gpu.bind.get(f"{key[0]}/{key[1]}")
-        except Exception as e:
-            logger.warning(f"policy: gpu.bind unreadable: {e}")
-            configured = None
+        configured = _configured_binding(key)
         if configured is not None:
             gpu = resolve_device(configured)
             if gpu is not None:
                 return gpu.uuid, "config"
             logger.error(
-                f"policy: gpu.bind has {key[0]}/{key[1]} on {configured!r}, which matches no "
+                f"policy: gpu.bind has {key} on {configured!r}, which matches no "
                 "card — using the default card"
             )
         return None, "default"
 
-    def device_for(self, worker: str, model: str) -> str | None:
-        """The GPU UUID this model is bound to, or None when unbound."""
-        return self.device_record(worker, model)[0]
+    def device_for(self, name: str) -> str | None:
+        """The GPU UUID this recipe is bound to, or None when unbound."""
+        return self.device_record(name)[0]
 
-    def is_off(self, worker: str, model: str) -> bool:
-        return self.policy_for(worker, model) == OFF
+    def is_off(self, name: str) -> bool:
+        return self.policy_for(name) == OFF
 
     def all_records(self) -> list[PolicyRecord]:
-        return [self.record_for(spec.worker, spec.model) for spec in all_specs()]
+        return [self.record_for(r.name) for r in all_recipes()]
 
-    def residents(self) -> list[tuple[str, str]]:
-        """Pinned models in reload-priority order.
+    def residents(self) -> list[str]:
+        """Pinned recipes in reload-priority order.
 
-        Registry residents keep their declared order (it encodes which model
-        matters most when VRAM is tight); models pinned by an operator follow,
-        oldest pin first, so the order is stable across restarts.
+        The default residents keep their declared order (it encodes which
+        model matters most when VRAM is tight); recipes pinned by an operator
+        follow, oldest pin first, so the order is stable across restarts.
         """
-        pinned: list[tuple[tuple[int, float], tuple[str, str]]] = []
-        for spec in all_specs():
-            record = self.record_for(spec.worker, spec.model)
+        defaults = resident_defaults()
+        pinned: list[tuple[tuple[int, float], str]] = []
+        for recipe in all_recipes():
+            record = self.record_for(recipe.name)
             if record.policy != PINNED:
                 continue
             if record.source == "default":
-                rank = (0, float(spec.resident_priority or 0))
+                rank = (0, float(defaults.index(recipe.name)))
             else:
                 rank = (1, record.updated_at or 0.0)
-            pinned.append((rank, spec.key))
+            pinned.append((rank, recipe.name))
         pinned.sort(key=lambda item: item[0])
-        return [key for _rank, key in pinned]
+        return [name for _rank, name in pinned]
 
-    def effective_device(self, worker: str, model: str) -> str | None:
-        """The UUID of the card this model will actually load on.
+    def effective_device(self, name: str) -> str | None:
+        """The UUID of the card this recipe will actually load on.
 
         The binding when there is one, the service's selected card otherwise.
         None only when no GPU is visible at all.
         """
-        bound = self.device_for(worker, model)
+        bound = self.device_for(name)
         if bound is not None:
             return bound
         gpu = selected_device()
         return gpu.uuid if gpu else None
 
-    def residents_on(self, device: str | None) -> list[tuple[str, str]]:
-        """Pinned models that will load on ``device``, in reload-priority order."""
-        return [key for key in self.residents() if self.effective_device(*key) == device]
+    def residents_on(self, device: str | None) -> list[str]:
+        """Pinned recipes that will load on ``device``, in reload-priority order."""
+        return [name for name in self.residents() if self.effective_device(name) == device]
 
-    def pinned_by_device(self) -> dict[str | None, list[tuple[str, str]]]:
-        """Pinned models grouped by the card they land on."""
-        grouped: dict[str | None, list[tuple[str, str]]] = {}
-        for key in self.residents():
-            grouped.setdefault(self.effective_device(*key), []).append(key)
+    def pinned_by_device(self) -> dict[str | None, list[str]]:
+        """Pinned recipes grouped by the card they land on."""
+        grouped: dict[str | None, list[str]] = {}
+        for name in self.residents():
+            grouped.setdefault(self.effective_device(name), []).append(name)
         return grouped
 
-    def pinned_vram_gb(
-        self, extra: tuple[str, str] | None = None, device: str | None = None
-    ) -> float:
-        """VRAM the pinned set claims on one card, optionally with one more.
+    def pinned_vram_gb(self, extra: str | None = None, device: str | None = None) -> float:
+        """VRAM the pinned set claims on one card, optionally with one more recipe.
 
         ``device`` is a UUID; None means "wherever ``extra`` lands", which is
         what a caller checking a pin actually wants to know. Before bindings
@@ -262,20 +244,18 @@ class PolicyStore:
         that answers a question nobody asked, and refuses pins that fit fine.
         """
         if device is None and extra is not None:
-            device = self.effective_device(*extra)
-        keys = set(self.residents_on(device))
-        if extra is not None and self.effective_device(*extra) == device:
-            keys.add((str(extra[0]), str(extra[1])))
+            device = self.effective_device(extra)
+        names = set(self.residents_on(device))
+        if extra is not None and self.effective_device(extra) == device:
+            names.add(_canonical(extra) or str(extra))
         total = 0.0
-        for key in keys:
-            spec = get_spec(*key)
-            if spec is not None:
-                total += spec.vram_gb
+        for name in names:
+            recipe = get_recipe(name)
+            if recipe is not None:
+                total += recipe.vram_gb
         return total
 
-    def pinned_fit(
-        self, extra: tuple[str, str] | None = None
-    ) -> tuple[bool, float, float, str | None]:
+    def pinned_fit(self, extra: str | None = None) -> tuple[bool, float, float, str | None]:
         """(fits, projected_gb, total_gb, device) for one card's pinned set.
 
         The card is the one ``extra`` would land on; with no ``extra``, the
@@ -296,14 +276,12 @@ class PolicyStore:
             return projected <= total, round(projected, 2), round(total, 2), device
 
         if extra is not None:
-            return judge(self.effective_device(*extra))
+            return judge(self.effective_device(extra))
         devices = set(self.pinned_by_device()) or {None}
         return min((judge(d) for d in devices), key=lambda r: r[2] - r[1])
 
-    def resident_llm(
-        self, exclude: tuple[str, str] | None = None, device: str | None = None
-    ) -> tuple[str, str] | None:
-        """The pinned LLM on one card, if any. At most one may be pinned there.
+    def resident_llm(self, exclude: str | None = None, device: str | None = None) -> str | None:
+        """The pinned LLM recipe on one card, if any. At most one may be pinned there.
 
         The rule dates from when every LLM server on a card bound that card's
         one port, so two pinned there collided. Servers now take a free port
@@ -312,49 +290,51 @@ class PolicyStore:
         stay refused until that pairing is exercised under the residents
         loop. On different cards they coexist, which is the point of binding.
         """
-        for key in self.residents():
-            if key[0] != "llm" or key == exclude:
+        exclude = _canonical(exclude) if exclude is not None else None
+        for name in self.residents():
+            recipe = get_recipe(name)
+            if recipe is None or not recipe.serves("llm") or name == exclude:
                 continue
-            if device is None or self.effective_device(*key) == device:
-                return key
+            if device is None or self.effective_device(name) == device:
+                return name
         return None
 
     # --- writes --------------------------------------------------------------
 
-    def set(self, worker: str, model: str, policy: str, reason: str | None = None) -> PolicyRecord:
+    def set(self, name: str, policy: str, reason: str | None = None) -> PolicyRecord:
         if policy not in POLICIES:
             raise ValueError(f"unknown policy {policy!r} (expected one of {', '.join(POLICIES)})")
-        key = (str(worker), str(model))
-        if get_spec(*key) is None:
-            raise ValueError(f"{key[0]}/{key[1]} is not a registered model")
+        key = _canonical(name)
+        if key is None:
+            raise ValueError(f"{name} is not a recipe")
 
         from giq.stats import get_stats
 
-        # Setting a model back to its default clears the override rather than
+        # Setting a recipe back to its default clears the override rather than
         # persisting a row that says "same as default" — otherwise a later
-        # change to the registry default would be silently pinned in place.
-        if policy == self.default_for(*key):
-            get_stats().delete_policy(*key)
+        # change to the default would be silently pinned in place.
+        if policy == self.default_for(key):
+            get_stats().delete_policy(key)
             with self._lock:
                 self._overrides.pop(key, None)
-            return PolicyRecord(key[0], key[1], policy, "default")
+            return PolicyRecord(key, policy, "default")
 
-        ts = get_stats().save_policy(key[0], key[1], policy, reason)
+        ts = get_stats().save_policy(key, policy, reason)
         with self._lock:
             self._overrides[key] = (policy, reason, ts)
-        logger.info(f"policy: {key[0]}/{key[1]} -> {policy}" + (f" ({reason})" if reason else ""))
-        return PolicyRecord(key[0], key[1], policy, "override", reason, ts)
+        logger.info(f"policy: {key} -> {policy}" + (f" ({reason})" if reason else ""))
+        return PolicyRecord(key, policy, "override", reason, ts)
 
-    def set_device(self, worker: str, model: str, device: str | int | None) -> PolicyRecord:
-        """Bind a model to a card (index or UUID), or unbind it with None.
+    def set_device(self, name: str, device: str | int | None) -> PolicyRecord:
+        """Bind a recipe to a card (index or UUID), or unbind it with None.
 
         Stores the UUID, never the index: an index is a position in whatever
         order the driver enumerated the cards this boot, and a binding has to
         outlive that.
         """
-        key = (str(worker), str(model))
-        if get_spec(*key) is None:
-            raise ValueError(f"{key[0]}/{key[1]} is not a registered model")
+        key = _canonical(name)
+        if key is None:
+            raise ValueError(f"{name} is not a recipe")
 
         uuid: str | None = None
         if device is not None and str(device).strip() != "":
@@ -365,24 +345,42 @@ class PolicyStore:
 
         from giq.stats import get_stats
 
-        get_stats().save_device(key[0], key[1], uuid)
+        get_stats().save_device(key, uuid)
         with self._lock:
             if uuid is None:
                 self._devices.pop(key, None)
             else:
                 self._devices[key] = uuid
-        logger.info(f"policy: {key[0]}/{key[1]} bound to {uuid or 'the default card'}")
-        return self.record_for(*key)
+        logger.info(f"policy: {key} bound to {uuid or 'the default card'}")
+        return self.record_for(key)
 
-    def clear(self, worker: str, model: str) -> PolicyRecord:
-        """Revert residency to the registry/config default. Keeps the binding."""
+    def clear(self, name: str) -> PolicyRecord:
+        """Revert residency to the recipe/config default. Keeps the binding."""
         from giq.stats import get_stats
 
-        key = (str(worker), str(model))
-        get_stats().delete_policy(*key)
+        key = _canonical(name) or str(name)
+        get_stats().delete_policy(key)
         with self._lock:
             self._overrides.pop(key, None)
-        return self.record_for(*key)
+        return self.record_for(key)
+
+
+def _configured_binding(name: str) -> str | None:
+    """config.yaml's ``gpu.bind`` entry for a recipe.
+
+    Keyed by recipe name; the ``worker/name`` keys written before ADR-003
+    still count.
+    """
+    try:
+        from giq.config import get_config
+
+        bind = get_config().gpu.bind
+    except Exception as e:
+        logger.warning(f"policy: gpu.bind unreadable: {e}")
+        return None
+    if name in bind:
+        return bind[name]
+    return next((v for k, v in bind.items() if str(k).rpartition("/")[2] == name), None)
 
 
 _store: PolicyStore | None = None
@@ -396,19 +394,19 @@ def get_policy_store() -> PolicyStore:
 
 
 def reset_policy_store() -> PolicyStore:
-    """Drop the in-memory store (tests; and after a registry reload)."""
+    """Drop the in-memory store (tests; and after a recipe reload)."""
     global _store
     _store = None
     return get_policy_store()
 
 
-def device_of(worker: str, model: str) -> GpuTelemetry | None:
-    """The card this model loads on, as live telemetry.
+def device_of(name: str) -> GpuTelemetry | None:
+    """The card recipe ``name`` loads on, as live telemetry.
 
-    The one call the scheduler, the VRAM gate and the workers all make: it
-    folds "is this model bound?" and "what did giq select?" into a single
+    The one call the scheduler, the VRAM gate and the adapters all make: it
+    folds "is this recipe bound?" and "what did giq select?" into a single
     answer, so no caller has to remember the fallback. None when no GPU is
     visible.
     """
-    uuid = get_policy_store().effective_device(worker, model)
+    uuid = get_policy_store().effective_device(name)
     return resolve_device(uuid) if uuid else selected_device()

@@ -119,6 +119,19 @@ CREATE TABLE IF NOT EXISTS model_policy (
     PRIMARY KEY (worker, model)
 );
 
+-- A recipe's residency policy and card binding, keyed by recipe name
+-- (ADR-003). Absent row = the recipe's default. Never purged: this is intent,
+-- not telemetry. model_policy above is its predecessor, keyed by
+-- (worker, model); it is read once into this table and then left alone, so a
+-- rollback to an older giq finds its own rows where it left them.
+CREATE TABLE IF NOT EXISTS recipe_policy (
+    recipe TEXT PRIMARY KEY,
+    policy TEXT NOT NULL,          -- pinned | auto | off
+    reason TEXT,
+    updated_at REAL NOT NULL,
+    device TEXT                    -- GPU UUID this recipe is bound to; NULL = unbound
+);
+
 CREATE TABLE IF NOT EXISTS gpu_samples (
     ts REAL NOT NULL,
     gpu_uuid TEXT NOT NULL,
@@ -130,6 +143,30 @@ CREATE TABLE IF NOT EXISTS gpu_samples (
     PRIMARY KEY (ts, gpu_uuid)
 );
 """
+
+
+def _migrate_policies(conn: sqlite3.Connection) -> None:
+    """Copy model_policy into recipe_policy once (ADR-003).
+
+    Rows were keyed (worker, model); a recipe's name is the old model name.
+    Two old rows can become one recipe (text2image/flux_klein and
+    image_edit/flux_klein are one recipe now): the newer intent wins, and a
+    binding survives from whichever row had one.
+    """
+    if conn.execute("SELECT COUNT(*) FROM recipe_policy").fetchone()[0]:
+        return
+    rows = conn.execute(
+        "SELECT model, policy, reason, updated_at, device FROM model_policy ORDER BY updated_at"
+    ).fetchall()
+    merged: dict[str, list] = {}
+    for model, policy, reason, ts, device in rows:
+        prior = merged.get(model)
+        merged[model] = [policy, reason, ts, device or (prior[3] if prior else None)]
+    conn.executemany(
+        "INSERT INTO recipe_policy (recipe, policy, reason, updated_at, device) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(name, *values) for name, values in merged.items()],
+    )
 
 
 class StatsRecorder:
@@ -174,6 +211,7 @@ class StatsRecorder:
             if "device" not in policy_cols:
                 conn.execute("ALTER TABLE model_policy ADD COLUMN device TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_gpu_ts ON jobs(gpu_uuid, ts)")
+            _migrate_policies(conn)
             conn.commit()
             self._conn = conn
         return self._conn
@@ -313,32 +351,32 @@ class StatsRecorder:
 
     # --- model policy (sync; the runner reads these on its tick) ----------
 
-    def load_policies(self) -> dict[tuple[str, str], tuple[str, str | None, float]]:
-        """(worker, model) -> (policy, reason, updated_at) for every override."""
+    def load_policies(self) -> dict[str, tuple[str, str | None, float]]:
+        """recipe -> (policy, reason, updated_at) for every override."""
         with self._lock:
             rows = (
                 self._connect()
-                .execute("SELECT worker, model, policy, reason, updated_at FROM model_policy")
+                .execute("SELECT recipe, policy, reason, updated_at FROM recipe_policy")
                 .fetchall()
             )
-        return {(w, m): (p, r, ts) for w, m, p, r, ts in rows}
+        return {name: (p, r, ts) for name, p, r, ts in rows}
 
-    def load_devices(self) -> dict[tuple[str, str], str]:
-        """(worker, model) -> bound GPU UUID, for every model that has one.
+    def load_devices(self) -> dict[str, str]:
+        """recipe -> bound GPU UUID, for every recipe that has one.
 
         Separate from ``load_policies`` because the two are independent: a
-        model can be bound to a card without its residency being overridden,
+        recipe can be bound to a card without its residency being overridden,
         and unpinning must not silently unbind it.
         """
         with self._lock:
             rows = (
                 self._connect()
-                .execute("SELECT worker, model, device FROM model_policy WHERE device IS NOT NULL")
+                .execute("SELECT recipe, device FROM recipe_policy WHERE device IS NOT NULL")
                 .fetchall()
             )
-        return {(w, m): d for w, m, d in rows}
+        return dict(rows)
 
-    def save_policy(self, worker: str, model: str, policy: str, reason: str | None) -> float:
+    def save_policy(self, recipe: str, policy: str, reason: str | None) -> float:
         """Upsert one override. Returns the stored timestamp.
 
         Leaves ``device`` alone — an existing binding survives a policy change.
@@ -347,52 +385,50 @@ class StatsRecorder:
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "INSERT INTO model_policy (worker, model, policy, reason, updated_at) "
-                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(worker, model) DO UPDATE SET "
+                "INSERT INTO recipe_policy (recipe, policy, reason, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(recipe) DO UPDATE SET "
                 "policy=excluded.policy, reason=excluded.reason, updated_at=excluded.updated_at",
-                (worker, model, policy, reason, ts),
+                (recipe, policy, reason, ts),
             )
             conn.commit()
         return ts
 
-    def save_device(self, worker: str, model: str, device: str | None) -> float:
-        """Bind a model to a GPU UUID, or clear the binding with None.
+    def save_device(self, recipe: str, device: str | None) -> float:
+        """Bind a recipe to a GPU UUID, or clear the binding with None.
 
         Upserts against the same row as the residency policy, defaulting the
-        policy column to the registry's own default for models that have no
-        override — binding a card must not accidentally pin or unpin anything.
+        policy column to the recipe's own default when it has no override —
+        binding a card must not accidentally pin or unpin anything.
         """
         from giq.policy import PolicyStore
 
         ts = time.time()
-        default_policy = PolicyStore.default_for(worker, model)
+        default_policy = PolicyStore.default_for(recipe)
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "INSERT INTO model_policy (worker, model, policy, reason, updated_at, device) "
-                "VALUES (?, ?, ?, NULL, ?, ?) ON CONFLICT(worker, model) DO UPDATE SET "
+                "INSERT INTO recipe_policy (recipe, policy, reason, updated_at, device) "
+                "VALUES (?, ?, NULL, ?, ?) ON CONFLICT(recipe) DO UPDATE SET "
                 "device=excluded.device, updated_at=excluded.updated_at",
-                (worker, model, default_policy, ts, device),
+                (recipe, default_policy, ts, device),
             )
             conn.commit()
         return ts
 
-    def delete_policy(self, worker: str, model: str) -> bool:
+    def delete_policy(self, recipe: str) -> bool:
         """Drop a residency override, keeping any device binding on the row."""
         with self._lock:
             conn = self._connect()
             cur = conn.execute(
-                "DELETE FROM model_policy WHERE worker = ? AND model = ? AND device IS NULL",
-                (worker, model),
+                "DELETE FROM recipe_policy WHERE recipe = ? AND device IS NULL", (recipe,)
             )
             if not cur.rowcount:
                 # Row survives for its binding; reset the policy half of it.
                 from giq.policy import PolicyStore
 
                 cur = conn.execute(
-                    "UPDATE model_policy SET policy = ?, reason = NULL WHERE worker = ? "
-                    "AND model = ?",
-                    (PolicyStore.default_for(worker, model), worker, model),
+                    "UPDATE recipe_policy SET policy = ?, reason = NULL WHERE recipe = ?",
+                    (PolicyStore.default_for(recipe), recipe),
                 )
             conn.commit()
         return cur.rowcount > 0

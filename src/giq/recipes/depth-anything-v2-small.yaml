@@ -16,7 +16,7 @@
 # offers what may be run commercially.
 name: depth-anything-v2-small
 label: Depth Anything V2 Small
-worker: depth
+modalities: [depth]
 engine: transformers
 detail: "relative depth · ViT-S 25M · Apache-2.0 · fits beside anything"
 weights:

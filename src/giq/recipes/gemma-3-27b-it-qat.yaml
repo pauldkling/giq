@@ -6,7 +6,7 @@
 # natural setting. The weights follow LM Studio's own layout, hence the
 # `~` path.
 name: gemma-3-27b-it-qat
-worker: llm
+modalities: [llm]
 engine: llama.cpp
 weights:
   path: ~/.lmstudio/models/lmstudio-community/gemma-3-27B-it-qat-GGUF/gemma-3-27B-it-QAT-Q4_0.gguf

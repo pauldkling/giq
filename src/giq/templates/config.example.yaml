@@ -68,8 +68,8 @@ access:
 gpu:
   device:
   # bind:
-  #   llm/gemma-4-12b: 0
-  #   text2image/flux_klein: 1
+  #   gemma-4-12b: 0
+  #   flux_klein: 1
   # reserve:
   #   "1": 1.0        # the card driving the desktop
 
@@ -93,9 +93,7 @@ engines:
 
 # Image models are recipes like every other model: their files (diffusion
 # model, text encoder, VAE, LoRA) are the recipe's `weights.parts`, under
-# `models` (docs/configuration.md, "Image models"). An `image_models:` block
-# here is still read, deprecated: its entries replace the recipe's files,
-# and giq logs, once, the recipe-file equivalent of each.
+# `models` (docs/configuration.md, "Image models").
 
 # Models kept loaded whenever nothing else claims the VRAM, in reload-priority
 # order. Jobs for these run on per-model lanes; everything else is "sleepy" and
@@ -104,9 +102,9 @@ engines:
 # fit the card with room for the largest
 # sleepy model you actually use, or renders will thrash reloads.
 # residents:
-#   - llm/gemma-4-12b
-#   - audio/whisper-large-v3
-#   - embed/ecapa-tdnn
+#   - gemma-4-12b
+#   - whisper-large-v3
+#   - ecapa-tdnn
 
 # Default generation parameters
 image_generation:
