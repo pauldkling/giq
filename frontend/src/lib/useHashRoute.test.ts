@@ -10,7 +10,10 @@ describe("parseHash", () => {
     expect(parseHash("")).toEqual({ view: "overview", sub: null });
     expect(parseHash("#/")).toEqual({ view: "overview", sub: null });
     expect(parseHash("#/usage")).toEqual({ view: "usage", sub: null });
-    expect(parseHash("#/models")).toEqual({ view: "models", sub: null });
+    expect(parseHash("#/recipes")).toEqual({ view: "recipes", sub: null });
+    expect(parseHash("#/inventory?recipe=x")).toEqual({ view: "inventory", sub: null });
+    // The address before ADR-003 still lands on the Recipes view.
+    expect(parseHash("#/models")).toEqual({ view: "recipes", sub: null });
     expect(parseHash("#/sandbox")).toEqual({ view: "sandbox", sub: null });
     expect(parseHash("#/sandbox/chat")).toEqual({ view: "sandbox", sub: "chat" });
   });

@@ -1,0 +1,28 @@
+/*
+ * SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Laid out against the view's own width (a container query), not the
+   window's: the app's navigation sidebar takes its share first, so the
+   window width says little about the room this page has. */
+.rc-view { container: models / inline-size; }
+.rc-layout {
+  display: grid; gap: var(--space-6); align-items: start;
+  grid-template-columns: 268px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "filters main" "context main";
+}
+.rc-filters { grid-area: filters; }
+.rc-main { grid-area: main; min-width: 0; }
+.rc-context { grid-area: context; }
+.rc-filters, .rc-context { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+
+@container models (max-width: 760px) {
+  .rc-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas: "filters" "main" "context";
+  }
+}

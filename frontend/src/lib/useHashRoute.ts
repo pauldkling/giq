@@ -4,12 +4,13 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-/* Hash routes, the same URLs the dashboard has always had (#/, #/usage,
-   #/models, #/sandbox), so bookmarks and the /sandbox redirect keep working.
-   #/sandbox/<tab> additionally deep-links a sandbox tab. Anything else is the
-   overview. No router library: four views do not need one. */
+/* Hash routes: #/, #/recipes, #/inventory, #/usage, #/sandbox.
+   #/sandbox/<tab> additionally deep-links a sandbox tab. #/models — the
+   Recipes view's address before ADR-003 — still lands there, so bookmarks
+   keep working. Anything else is the overview. No router library: five
+   views do not need one. */
 
-export const VIEWS = ["overview", "usage", "models", "sandbox"] as const;
+export const VIEWS = ["overview", "recipes", "inventory", "usage", "sandbox"] as const;
 export type View = (typeof VIEWS)[number];
 
 export interface Route {
@@ -21,7 +22,8 @@ export interface Route {
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split(/[?#]/)[0]!.split("/").filter(Boolean);
   const head = parts[0];
-  if (head === "usage" || head === "models") return { view: head, sub: null };
+  if (head === "usage" || head === "recipes" || head === "inventory") return { view: head, sub: null };
+  if (head === "models") return { view: "recipes", sub: null };
   if (head === "sandbox") return { view: "sandbox", sub: parts[1] ? decodeURIComponent(parts[1]) : null };
   return { view: "overview", sub: null };
 }

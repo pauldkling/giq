@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: 2026 vikworks UG (haftungsbeschränkt)
+//
+// SPDX-License-Identifier: Apache-2.0
+
+import { useTranslation } from "react-i18next";
+import type { CardBudget, RecipeEntry } from "../../api/types";
+import { shortGpuName } from "../../lib/cards";
+import { primaryModality } from "../../lib/recipes";
+import { useFormat } from "../../lib/useFormat";
+import { workerColor } from "../../lib/series";
+
+export interface BudgetRowProps {
+  card: CardBudget;
+  /** The card's kept-warm recipes, in reload priority order. */
+  pinned: RecipeEntry[];
+}
+
+/* One card's residency budget: a bar of what is kept warm on it, one segment
+   per recipe in its modality's colour, then what is left for on-demand loads.
+   Reload priority is the bar's order and its tooltips; spelling the chain
+   out again does not fit the sidebar and was never the headline. */
+export function BudgetRow({ card: c, pinned }: BudgetRowProps) {
+  const { t } = useTranslation("recipes");
+  const fmt = useFormat();
+  const free = Math.max(c.total_gb - c.pinned_needed_gb, 0);
+  const over = !c.pinned_fits;
+  const name = shortGpuName(c.name);
+  return (
+    <div className="rc-budget-row">
+      {c.index != null && (
+        <div className="rc-budget-card">
+          {name}
+          {c.default && <span className="subtle"> · {t("budget.default")}</span>}
+          {c.reserve_gb > 0 && (
+            <span className="subtle"> · {t("budget.reserved", { reserve: fmt.gb(c.reserve_gb) })}</span>
+          )}
+        </div>
+      )}
+      <div
+        className={`rc-budget-bar${over ? " rc-budget-over" : ""}`}
+        role="img"
+        aria-label={t("budget.barLabel", { card: name, used: fmt.gb(c.pinned_gb), total: fmt.gb(c.total_gb) })}
+      >
+        {pinned.map((r, i) => (
+          <span
+            key={r.name}
+            style={{ flex: r.vram_gb, background: over ? undefined : workerColor(primaryModality(r)) }}
+            title={t("budget.segment", { rank: i + 1, key: r.name, vram: fmt.gb(r.vram_gb) })}
+          />
+        ))}
+        <span className="rc-budget-free" style={{ flex: free }} />
+      </div>
+      {over ? (
+        <p className="rc-budget-note rc-budget-note-over">
+          <strong>{t("budget.over", { needed: fmt.gb(c.pinned_needed_gb), total: fmt.gb(c.total_gb) })}</strong>{" "}
+          {t("budget.overHint")}
+        </p>
+      ) : (
+        <p className="rc-budget-note">
+          <strong>{fmt.gb(c.pinned_gb)}</strong>{" "}
+          {t("budget.kept", { total: fmt.gb(c.total_gb), free: fmt.gb(free) })}
+          {pinned.length === 0 && <> · {t("budget.nothing")}</>}
+        </p>
+      )}
+    </div>
+  );
+}

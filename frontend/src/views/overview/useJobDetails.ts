@@ -4,10 +4,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getJSON } from "../../api/client";
-import type { JobStatusResponse, WorkerType } from "../../api/types";
+import type { JobStatusResponse, Modality } from "../../api/types";
 
 export interface JobInfo {
-  worker: WorkerType;
+  worker: Modality;
   model: string;
 }
 

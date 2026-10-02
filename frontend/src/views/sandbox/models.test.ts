@@ -3,49 +3,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { Catalog, CatalogModel, StorageResponse } from "../../api/types";
+import type { RecipeEntry, RecipesResponse } from "../../api/types";
+import { recipeEntry as m } from "../../api/testing";
 import { disabledTabs, sandboxModels } from "./models";
 
-const m = (over: Partial<CatalogModel>): CatalogModel =>
-  ({
-    worker: "llm",
-    model: "x",
-    vram_gb: 8,
-    fits: "fits_now",
-    policy: "auto",
-    reasoning: null,
-    vision: false,
-    resident: false,
-    resident_default: false,
-    ...over,
-  }) as CatalogModel;
-
-const cat = (models: CatalogModel[]) => ({ models }) as unknown as Catalog;
+const cat = (recipes: RecipeEntry[]): RecipesResponse => ({ recipes, cards: [], pinned: [] });
 
 describe("sandboxModels", () => {
-  it("defaults chat to loaded, then resident, then resident_default, then first", () => {
-    const a = m({ model: "a" });
-    const b = m({ model: "b", resident_default: true });
-    const c = m({ model: "c", resident: true });
-    const d = m({ model: "d", fits: "loaded" });
-    expect(sandboxModels(cat([a, b, c, d]), undefined).chatDefault).toBe("d");
-    expect(sandboxModels(cat([a, b, c]), undefined).chatDefault).toBe("c");
-    expect(sandboxModels(cat([a, b]), undefined).chatDefault).toBe("b");
-    expect(sandboxModels(cat([a]), undefined).chatDefault).toBe("a");
+  it("defaults chat to loaded, then pinned, then resident by default, then first", () => {
+    const a = m({ name: "a" });
+    const b = m({ name: "b", residency: { default_resident: true } });
+    const c = m({ name: "c", residency: { policy: "pinned" } });
+    const d = m({ name: "d", fit: "loaded" });
+    expect(sandboxModels(cat([a, b, c, d])).chatDefault).toBe("d");
+    expect(sandboxModels(cat([a, b, c])).chatDefault).toBe("c");
+    expect(sandboxModels(cat([a, b])).chatDefault).toBe("b");
+    expect(sandboxModels(cat([a])).chatDefault).toBe("a");
   });
 
-  it("drops models that never fit and marks weights on disk", () => {
-    const storage = {
-      disks: [],
-      models: [{ worker: "llm", model: "seer", on_disk: true, size_bytes: 1 }],
-    } as unknown as StorageResponse;
+  it("drops recipes that never fit and marks weights on disk", () => {
     const s = sandboxModels(
       cat([
-        m({ model: "seer", vision: true }),
-        m({ model: "blind", vision: true }),
-        m({ worker: "text2image", model: "big", fits: "never" }),
+        m({ name: "seer", vision: true }),
+        m({ name: "blind", vision: true, installed: false }),
+        m({ name: "big", modalities: ["text2image"], fit: "never" }),
       ]),
-      storage,
     );
     expect(s.vision.map((o) => [o.model, o.onDisk])).toEqual([
       ["seer", true],
@@ -55,7 +37,13 @@ describe("sandboxModels", () => {
     expect(disabledTabs(s)).toEqual(new Set(["t2i", "edit", "tools"]));
   });
 
+  it("offers a recipe in every modality it serves", () => {
+    const s = sandboxModels(cat([m({ name: "klein", modalities: ["text2image", "image_edit"] })]));
+    expect(s.t2i.map((o) => o.model)).toEqual(["klein"]);
+    expect(s.edit.map((o) => o.model)).toEqual(["klein"]);
+  });
+
   it("disables nothing before the catalog answers", () => {
-    expect(disabledTabs(sandboxModels(undefined, undefined)).size).toBe(0);
+    expect(disabledTabs(sandboxModels(undefined)).size).toBe(0);
   });
 });

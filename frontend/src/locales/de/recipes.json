@@ -1,0 +1,138 @@
+{
+  "sidebar": {
+    "label": "Filter und Kontext",
+    "modality": "Modalität",
+    "engine": "Engine",
+    "residency": "Vorhaltung",
+    "showAll": "alle zeigen"
+  },
+  "count": {
+    "all_one": "{{count}} Rezept",
+    "all_other": "{{count}} Rezepte",
+    "filtered_one": "{{count}} von {{total}} Rezepten",
+    "filtered_other": "{{count}} von {{total}} Rezepten"
+  },
+  "catalog": {
+    "title": "Rezepte",
+    "noMatch": "Kein Rezept passt zu diesem Filter.",
+    "clearFilters": "Filter zurücksetzen",
+    "absent": "Nicht auf dem Datenträger · {{count}}",
+    "absentHint": "giq kennt diese Rezepte, aber ihre Gewichte fehlen. Das Rezept bleibt – die Gewichte erneut herunterladen genügt, um eines zurückzuholen.",
+    "absentTitle": "{{key}} – {{engine}} · {{vram}} VRAM · {{last}}. Keine Gewichte auf dem Datenträger; erst herunterladen, dann ist es lauffähig.",
+    "lastUsed": "zuletzt genutzt {{ago}}",
+    "neverUsed": "nie genutzt"
+  },
+  "card": {
+    "notOnDisk": "nicht auf dem Datenträger",
+    "keptWarm": "warm gehalten",
+    "keptWarmTitle": "Wird gerade warm gehalten: bleibt geladen und lädt nach einer Verdrängung neu.",
+    "vision": "Bildverständnis",
+    "visionTitle": "Nimmt neben Text auch Bilder an",
+    "vram": "{{vram}} VRAM",
+    "vramEstimated": "~{{vram}} VRAM",
+    "estimatedTitle": "Geschätzt, nicht gemessen",
+    "onDisk": "{{size}} auf dem Datenträger",
+    "noDisk": "nichts auf dem Datenträger",
+    "shared": "geteilt",
+    "sharedTitle": "Teilt Dateien mit {{others}}",
+    "lanes_one": "{{count}} Anfrage gleichzeitig",
+    "lanes_other": "{{count}} parallele Anfragen",
+    "lanesTitle": "Wie viele Anfragen dieses Rezept gleichzeitig bedient",
+    "residency": "Vorhaltung",
+    "gpu": "GPU",
+    "engine": "Engine"
+  },
+  "menu": {
+    "label": "Weitere Aktionen für {{key}}",
+    "test": "In der Sandbox testen",
+    "testHelp": "Öffnet das Panel „{{panel}}“ mit diesem Rezept. Erst das Ausführen dort lädt es.",
+    "noPanel": "Für diese Modalität gibt es kein Sandbox-Panel.",
+    "nothingToRun": "Nichts auf dem Datenträger, das laufen könnte.",
+    "tooLarge": "Zu groß für die zugewiesene Karte.",
+    "weights": "Gewichte zeigen",
+    "weightsHelp": "Öffnet den Bestand bei den Gewichten dieses Rezepts: wo sie liegen, was sie sind, und sie zu löschen.",
+    "noWeights": "Es lädt nichts über einen Pfad oder ein Repository."
+  },
+  "panel": {
+    "chat": "Chat",
+    "t2i": "Text zu Bild",
+    "edit": "Bildbearbeitung",
+    "asr": "Sprache zu Text",
+    "tts": "Text zu Sprache",
+    "voice": "Stimmabdruck"
+  },
+  "residency": {
+    "label": "Vorhaltung von {{key}}",
+    "tooLarge": "Zu groß für diese Karte.",
+    "noWeights": "Keine Gewichte auf dem Datenträger.",
+    "revert": "Auf Standard zurücksetzen",
+    "revertReason": "Von Hand gesetzt: {{reason}} – auf Standard zurücksetzen",
+    "revertFailed": "Zurücksetzen fehlgeschlagen",
+    "reverted": "{{key}} hat wieder seine Standard-Vorhaltung.",
+    "forceTitle": "Trotzdem warm halten?",
+    "forceConfirm": "Trotzdem warm halten",
+    "failed": "Vorhaltung ändern fehlgeschlagen",
+    "done": {
+      "pinned": "{{key}} → warm halten · lädt beim nächsten Durchlauf",
+      "auto": "{{key}} → bei Bedarf · wird entladen, sobald laufende Arbeit fertig ist",
+      "off": "{{key}} → aus · Jobs dafür werden ab jetzt abgelehnt"
+    },
+    "declined": "{{key}} unverändert.",
+    "warningsTitle": "Geändert, mit Warnungen",
+    "hint": "Warm halten: bleibt geladen und kommt beim Start zurück · bei Bedarf: lädt, wenn ein Job kommt, und darf verdrängt werden · aus: lehnt Jobs ab und sperrt jeden Ladeweg. Änderungen greifen beim nächsten Scheduler-Durchlauf."
+  },
+  "device": {
+    "label": "GPU für {{key}}",
+    "autoOn": "automatisch ({{card}})",
+    "auto": "automatisch",
+    "free": "{{card}} · {{free}} frei",
+    "bound": "{{card}} zugewiesen",
+    "boundConfig": "{{card}} zugewiesen in config.yaml",
+    "unbound": "Nicht zugewiesen – folgt der Standardkarte von giq",
+    "noGpu": "keine GPU",
+    "forceTitle": "Trotzdem zuweisen?",
+    "forceConfirm": "Trotzdem zuweisen",
+    "failed": "Zuweisung fehlgeschlagen",
+    "done": "{{key}} → {{card}} · greift beim nächsten Laden",
+    "defaultCard": "Standardkarte",
+    "declined": "{{key}} bleibt, wo es war.",
+    "warningsTitle": "Zugewiesen, mit Warnungen"
+  },
+  "engine": {
+    "missing": "fehlt",
+    "missingTitle": "Die Engine-Binary liegt nicht dort, wo config.yaml sie erwartet",
+    "fallback": "Die Laufzeit, die dieses Rezept ausführt"
+  },
+  "engineNote": {
+    "llamaCpp": "llama-server, ein Prozess pro Rezept auf dem Port seiner Karte",
+    "sdCpp": "sd-server (stable-diffusion.cpp), --offload-to-cpu",
+    "fasterWhisperPyannote": "faster-whisper + pyannote in einem Kindprozess",
+    "speechbrain": "speechbrain ECAPA-TDNN in einem Kindprozess",
+    "fasterWhisper": "faster-whisper im Prozess von giq selbst",
+    "kokoro": "Kokoro in einem Kindprozess",
+    "transformers": "transformers 5 in einem Kindprozess, offline",
+    "transformers457": "Ein Kindprozess mit eigenem transformers-4.57-Interpreter, offline",
+    "da3": "Depth Anything 3 in einem Kindprozess mit eigenem Interpreter"
+  },
+  "budget": {
+    "default": "Standard",
+    "reserved": "{{reserve}} reserviert",
+    "kept": "von {{total}} warm gehalten · {{free}} frei für „bei Bedarf“",
+    "nothing": "nichts warm gehalten",
+    "over": "{{needed}} warm gehalten auf einer {{total}}-Karte.",
+    "overHint": "Das kann nie alles gleichzeitig laden. Eines auf „bei Bedarf“ stellen oder einer anderen Karte zuweisen.",
+    "segment": "{{rank}}. {{key}} – {{vram}} (Priorität beim Neuladen)",
+    "barLabel": "Warm gehaltener VRAM auf {{card}}: {{used}} von {{total}}"
+  },
+  "status": {
+    "working": "Arbeite an {{key}}…",
+    "dismiss": "Schließen"
+  },
+  "recipeErrors": {
+    "kicker": "Rezeptdateien",
+    "title_one": "{{count}} Rezeptdatei ausgelassen",
+    "title_other": "{{count}} Rezeptdateien ausgelassen",
+    "body": "Diese Dateien aus {{dir}} konnte giq nicht verwenden und läuft ohne sie; ein mitgeliefertes Rezept gleichen Namens bleibt in Betrieb. Dateien korrigieren, dann giq neu starten.",
+    "several": "mehrere Dateien"
+  }
+}

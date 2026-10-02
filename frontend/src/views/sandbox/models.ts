@@ -2,26 +2,27 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Catalog, CatalogModel, Fit, Policy, StorageResponse } from "../../api/types";
+import type { Fit, Modality, Policy, RecipeEntry, RecipesResponse } from "../../api/types";
 import { TOOLS_MODEL } from "./constants";
 import type { Tab } from "./tabs";
 
-/* What each panel can offer, derived from the shared catalog and disk report
-   on every refresh (the old page read them once at load, so a model loaded
-   or pinned since stayed labelled with its stale fit until a reload). */
+/* What each panel can offer, derived from the shared recipe list on every
+   refresh (the old page read it once at load, so a recipe loaded or pinned
+   since stayed labelled with its stale fit until a reload). */
 
 export interface ModelOption {
+  /** The recipe name: what a request sends as `model`. */
   model: string;
   vram_gb: number;
   fits: Fit;
   policy: Policy;
-  reasoning: CatalogModel["reasoning"];
-  /** Weights present on disk; null while /storage has not answered. */
-  onDisk: boolean | null;
+  reasoning: RecipeEntry["reasoning"];
+  /** Weights present on disk. */
+  onDisk: boolean;
 }
 
 export interface SandboxModels {
-  /** The catalog has answered; before that, nothing is "missing". */
+  /** The recipes have answered; before that, nothing is "missing". */
   ready: boolean;
   chat: ModelOption[];
   t2i: ModelOption[];
@@ -29,57 +30,52 @@ export interface SandboxModels {
   vision: ModelOption[];
   /** The chat panel's starting choice. */
   chatDefault: string | null;
-  /** The tool-calling model is registered and can load. */
+  /** The tool-calling recipe exists and can load. */
   toolsAvailable: boolean;
 }
 
-const usable = (m: CatalogModel) => m.fits !== "never";
+const usable = (r: RecipeEntry) => r.fit !== "never";
 
-function option(m: CatalogModel, disk: Map<string, boolean> | null): ModelOption {
+/* A recipe can serve several modalities (ADR-003): flux_klein renders and
+   edits from one process, so it belongs in both image tabs. */
+export const serves = (r: RecipeEntry, modality: Modality): boolean => r.modalities.includes(modality);
+
+function option(r: RecipeEntry): ModelOption {
   return {
-    model: m.model,
-    vram_gb: m.vram_gb,
-    fits: m.fits,
-    policy: m.policy,
-    reasoning: m.reasoning,
-    onDisk: disk ? (disk.get(`${m.worker}/${m.model}`) ?? false) : null,
+    model: r.name,
+    vram_gb: r.vram_gb,
+    fits: r.fit,
+    policy: r.residency.policy,
+    reasoning: r.reasoning,
+    onDisk: r.installed,
   };
 }
 
-export function sandboxModels(
-  catalog: Catalog | undefined,
-  storage: StorageResponse | undefined,
-): SandboxModels {
-  if (!catalog) {
+export function sandboxModels(recipes: RecipesResponse | undefined): SandboxModels {
+  if (!recipes) {
     return { ready: false, chat: [], t2i: [], edit: [], vision: [], chatDefault: null, toolsAvailable: true };
   }
-  /* Whether the weights exist is a /storage fact, and the vision panel needs
-     it: a registered model with nothing on disk cannot load, and "asking
-     loads it first" would send you to watch a failure. */
-  const disk = storage
-    ? new Map(storage.models.map((s) => [`${s.worker}/${s.model}`, !!(s.on_disk || s.size_bytes)]))
-    : null;
-  const models = catalog.models.filter(usable);
-  const of = (pred: (m: CatalogModel) => boolean) => models.filter(pred).map((m) => option(m, disk));
+  const usableRecipes = recipes.recipes.filter(usable);
+  const of = (pred: (r: RecipeEntry) => boolean) => usableRecipes.filter(pred).map(option);
   /* Every LLM that can load is selectable (the panel was once pinned to one
      model, so "test" on any other LLM card had nowhere to land). */
-  const llms = models.filter((m) => serves(m, "llm"));
+  const llms = usableRecipes.filter((r) => serves(r, "llm"));
   /* Default to whatever answers soonest: already loaded, else kept warm,
-     else the registry's intended resident. Alphabetical order (the
-     fallback) picks an 18 GB model nobody asked for. */
+     else one resident by default. Alphabetical order (the fallback) picks an
+     18 GB recipe nobody asked for. */
   const preferred =
-    llms.find((m) => m.fits === "loaded") ??
-    llms.find((m) => m.resident) ??
-    llms.find((m) => m.resident_default) ??
+    llms.find((r) => r.fit === "loaded") ??
+    llms.find((r) => r.residency.policy === "pinned") ??
+    llms.find((r) => r.residency.default_resident) ??
     llms[0];
   return {
     ready: true,
-    chat: llms.map((m) => option(m, disk)),
-    t2i: of((m) => serves(m, "text2image")),
-    edit: of((m) => serves(m, "image_edit")),
-    vision: of((m) => m.vision),
-    chatDefault: preferred?.model ?? null,
-    toolsAvailable: llms.some((m) => m.model === TOOLS_MODEL && m.policy !== "off"),
+    chat: llms.map(option),
+    t2i: of((r) => serves(r, "text2image")),
+    edit: of((r) => serves(r, "image_edit")),
+    vision: of((r) => r.vision),
+    chatDefault: preferred?.name ?? null,
+    toolsAvailable: llms.some((r) => r.name === TOOLS_MODEL && r.residency.policy !== "off"),
   };
 }
 
@@ -93,10 +89,4 @@ export function disabledTabs(m: SandboxModels): Set<Tab> {
   if (!m.edit.length) off.add("edit");
   if (!m.vision.length) off.add("vision");
   return off;
-}
-
-/* A recipe can serve several modalities (ADR-003): flux_klein renders and
-   edits from one process, so it belongs in both image tabs. */
-function serves(m: CatalogModel, modality: CatalogModel["worker"]): boolean {
-  return (m.modalities ?? [m.worker]).includes(modality);
 }

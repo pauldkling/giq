@@ -2,7 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Catalog, EnginesResponse, GpusResponse, Status, StorageResponse } from "../api/types";
+import type {
+  EnginesResponse,
+  GpusResponse,
+  InstancesResponse,
+  RecipesResponse,
+  Status,
+  StorageResponse,
+  WeightsResponse,
+} from "../api/types";
 import { createPolledResource } from "./createPolledResource";
 
 /** Poll cadence of /status and /gpus; the page header quotes it. */
@@ -16,10 +24,24 @@ export const [StatusProvider, useStatus] = createPolledResource<Status>("Status"
 /** GET /gpus every 3 s: per-card telemetry. */
 export const [GpusProvider, useGpus] = createPolledResource<GpusResponse>("Gpus", "/gpus", LIVE_POLL_MS);
 
-/** GET /stats/models every 60 s: the model catalog with fit, policy and binding. Call refresh() after changing a model. */
-export const [CatalogProvider, useCatalog] = createPolledResource<Catalog>(
-  "Catalog",
-  "/stats/models",
+/** GET /recipes every 60 s: every recipe with its fit, residency and card. Call refresh() after changing one. */
+export const [RecipesProvider, useRecipes] = createPolledResource<RecipesResponse>(
+  "Recipes",
+  "/recipes",
+  SLOW_POLL_MS,
+);
+
+/** GET /instances every 3 s: the recipes running on each card. */
+export const [InstancesProvider, useInstances] = createPolledResource<InstancesResponse>(
+  "Instances",
+  "/instances",
+  LIVE_POLL_MS,
+);
+
+/** GET /weights every 60 s: every checkpoint, once each. Call refresh() after deleting one. */
+export const [WeightsProvider, useWeights] = createPolledResource<WeightsResponse>(
+  "Weights",
+  "/weights",
   SLOW_POLL_MS,
 );
 

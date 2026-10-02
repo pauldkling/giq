@@ -8,7 +8,8 @@
   "nav": {
     "label": "Hauptnavigation",
     "overview": "Leitstand",
-    "models": "Modelle",
+    "recipes": "Rezepte",
+    "inventory": "Bestand",
     "usage": "Nutzung",
     "sandbox": "Sandbox",
     "openMenu": "Navigation öffnen",

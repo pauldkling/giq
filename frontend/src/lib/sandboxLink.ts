@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { WorkerType } from "../api/types";
+import type { Modality } from "../api/types";
 
 /* The address contract between the sandbox and whatever links into it (the
    Models view's "Test in sandbox"): #/sandbox/<tab>?model=<name>. The hash
@@ -24,7 +24,7 @@ export const isSandboxTab = (s: string | null | undefined): s is SandboxTab =>
 /* Which panel exercises each worker, for a link that names no tab and for
    the models view's menu. Workers with no panel (OCR, depth, multiview) are
    absent: their "Test in sandbox" is offered disabled, with the reason. */
-export const SANDBOX_TAB_FOR_WORKER: Partial<Record<WorkerType, SandboxTab>> = {
+export const SANDBOX_TAB_FOR_WORKER: Partial<Record<Modality, SandboxTab>> = {
   llm: "chat",
   text2image: "t2i",
   image_edit: "edit",

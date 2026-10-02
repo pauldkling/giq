@@ -58,7 +58,8 @@ def _recipe_or_404(name: str) -> Recipe:
 class _Machine:
     """What every entry is judged against, read once per request."""
 
-    def __init__(self, cards: dict) -> None:
+    def __init__(self, cards: dict, last_used: dict[str, float]) -> None:
+        self.last_used = last_used
         runner = get_runner()
         self.store = get_policy_store()
         self.cards = cards
@@ -151,6 +152,8 @@ def recipe_entry(recipe: Recipe, m: _Machine) -> dict[str, Any]:
             "name": gpu.name if gpu else None,
         },
         "fit": fit,
+        # When a job for it last completed, across every modality it serves.
+        "last_used": m.last_used.get(recipe.name),
         "instance": {"id": inst.id, "state": inst.state, "residency": inst.residency}
         if inst
         else None,
@@ -188,8 +191,15 @@ def card_budgets(m: _Machine) -> list[dict[str, Any]]:
 
 
 async def _machine() -> _Machine:
+    from giq.stats import get_stats
+
     cards = {gpu.uuid: gpu for gpu in await asyncio.to_thread(get_gpus)}
-    return _Machine(cards)
+    last_used = dict(
+        await get_stats().fetch(
+            "SELECT recipe, MAX(ts) FROM jobs WHERE status='completed' GROUP BY recipe"
+        )
+    )
+    return _Machine(cards, last_used)
 
 
 @router.get("/recipes")

@@ -3,15 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from "react";
-import type { Catalog } from "../../api/types";
+import type { RecipesResponse } from "../../api/types";
 import { navigateReplace } from "./navigate";
 import type { SandboxModels } from "./models";
 import type { SandboxRoute } from "../../lib/sandboxLink";
 import { isSelectTab, TAB_FOR_WORKER, type SelectTab, type Tab } from "./tabs";
 
 /* "Test in sandbox" arrives as #/sandbox/<tab>?model=<name>. Once the
-   catalog is known the model is chosen in that panel and the query leaves
-   the address, so the link is consumed once and a later catalog refresh
+   recipes is known the model is chosen in that panel and the query leaves
+   the address, so the link is consumed once and a later recipes refresh
    cannot re-apply it over a choice made by hand. Nothing runs: pressing Run
    is what loads the model. A link without a tab goes to the panel for the
    model's worker. Returns the model (and its panel) when the panel cannot
@@ -23,7 +23,7 @@ export interface PreselectMiss {
 
 export function usePreselect(
   route: SandboxRoute,
-  catalog: Catalog | undefined,
+  recipes: RecipesResponse | undefined,
   models: SandboxModels,
   choose: (tab: SelectTab, model: string) => void,
 ): PreselectMiss | null {
@@ -31,8 +31,8 @@ export function usePreselect(
   const { model } = route;
 
   useEffect(() => {
-    if (!model || !catalog) return;
-    const worker = catalog.models.find((m) => m.model === model)?.worker;
+    if (!model || !recipes) return;
+    const worker = recipes.recipes.find((r) => r.name === model || r.aliases.includes(model))?.modalities[0];
     const tab: Tab = route.tab ?? (worker && TAB_FOR_WORKER[worker]) ?? "chat";
     if (isSelectTab(tab)) {
       const ok = models[tab].some((o) => o.model === model);
@@ -43,7 +43,7 @@ export function usePreselect(
       setMissed(null);
     }
     navigateReplace(tab);
-  }, [model, route.tab, catalog, models, choose]);
+  }, [model, route.tab, recipes, models, choose]);
 
   return missed;
 }

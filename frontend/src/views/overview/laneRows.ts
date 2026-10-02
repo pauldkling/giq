@@ -2,73 +2,87 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Catalog, CatalogModel, Status } from "../../api/types";
+import type {
+  InstancesResponse,
+  RecipeEntry,
+  RecipesResponse,
+  Status,
+} from "../../api/types";
 
-/* What is on the cards right now — both kinds. Keep-warm models the
-   residents loop holds, and the on-demand model in the batch slot, which is
-   just as loaded. This list once carried every model the registry *declares*
-   resident, so a demoted one kept a play button under a "resident" heading
-   on a rig where nothing was pinned at all. Residency is set per model on the
-   Models view; this section reports, and each row says which kind it is,
-   because they behave differently when a card gets tight: a resident comes
-   back after an eviction, the batch slot does not.
+/* What is on the cards right now — both kinds. Recipes kept loaded by the
+   residents loop, and on-demand instances, which are just as loaded. This
+   list once carried every recipe *declared* resident, so a demoted one kept
+   a play button under a "resident" heading on a rig where nothing was pinned
+   at all. Residency is set per recipe on the Recipes view; this section
+   reports, and each row says which kind it is, because they behave
+   differently when a card gets tight: a resident comes back after an
+   eviction, an on-demand instance does not.
 
-   Rows come from the catalog (keep-warm) and /status.active (the slot), so
-   the list follows the 3 s status poll rather than the 60 s catalog refresh:
-   an on-demand load has to appear while it is loading, not a minute after it
-   answered. */
+   Rows are the running instances (GET /instances, on the 3 s poll: a load
+   has to appear while it is loading, not a minute after it answered), plus
+   every pinned recipe that has none — coming up, or evicted for someone
+   else's job. The recipes supply labels and residency. */
 
 export type LaneState = "ready" | "loading" | "evicted";
 
 export interface LaneRow {
+  /** The recipe name. */
   key: string;
-  model: CatalogModel;
-  /** Held by the residents loop (policy pinned), as opposed to the batch slot. */
+  recipe: RecipeEntry;
+  /** Held by the residents loop (pinned), as opposed to loaded on demand. */
   warm: boolean;
   ready: boolean;
   state: LaneState;
-  /** worker/model the card was given up for, when state is "evicted". */
+  /** The recipe the card was given up for, when state is "evicted". */
   evictedFor: string | null;
-  /** The card it is on: the slot's own device, or where a resident lands. */
+  /** The card it is on: the instance's own, or where a pinned recipe lands. */
   device: string | null;
 }
 
-export const laneKey = (worker: string, model: string) => `${worker}/${model}`;
-
-export function laneRows(catalog: Catalog | undefined, status: Status | undefined): LaneRow[] {
-  if (!catalog) return [];
+export function laneRows(
+  recipes: RecipesResponse | undefined,
+  instances: InstancesResponse | undefined,
+  status: Status | undefined,
+): LaneRow[] {
+  if (!recipes) return [];
+  const byName = new Map(recipes.recipes.map((r) => [r.name, r]));
   const rows: LaneRow[] = [];
-  /* Pinned but not loaded is either coming up or evicted for batch work.
-     The difference matters: one resolves on its own in seconds, the other
-     waits out someone else's render. */
-  const batch =
-    status?.active_modality != null ? laneKey(status.active_modality, status.active_recipe ?? "?") : null;
-  for (const m of catalog.models) {
-    if (!m.resident) continue;
-    const evicted = !m.ready && batch !== null;
+  const running = new Set<string>();
+  for (const i of instances?.instances ?? []) {
+    const recipe = byName.get(i.recipe);
+    if (!recipe) continue;
+    running.add(i.recipe);
     rows.push({
-      key: laneKey(m.worker, m.model),
-      model: m,
-      warm: true,
-      ready: m.ready,
-      state: m.ready ? "ready" : evicted ? "evicted" : "loading",
-      evictedFor: evicted ? batch : null,
-      device: m.effective_device,
-    });
-  }
-  for (const a of status?.active ?? []) {
-    const m = catalog.models.find((x) => x.worker === a.modality && x.model === a.recipe);
-    if (!m || m.resident) continue;
-    rows.push({
-      key: laneKey(m.worker, m.model),
-      model: m,
-      warm: false,
-      ready: a.ready,
-      state: a.ready ? "ready" : "loading",
+      key: i.recipe,
+      recipe,
+      warm: i.residency === "resident",
+      ready: i.state === "ready",
+      state: i.state === "ready" ? "ready" : "loading",
       evictedFor: null,
-      // Where the slot *is*, not where the catalog says it would land.
-      device: a.device,
+      // Where the instance *is*, not where its recipe would land now.
+      device: i.device,
     });
   }
-  return rows;
+  /* Pinned but not running is either coming up or evicted for on-demand
+     work. The difference matters: one resolves on its own in seconds, the
+     other waits out someone else's render. */
+  const onDemand = status?.active_recipe ?? null;
+  for (const recipe of recipes.recipes) {
+    if (recipe.residency.policy !== "pinned" || running.has(recipe.name))
+      continue;
+    const evicted = onDemand !== null;
+    rows.push({
+      key: recipe.name,
+      recipe,
+      warm: true,
+      ready: false,
+      state: evicted ? "evicted" : "loading",
+      evictedFor: evicted ? onDemand : null,
+      device: recipe.card.effective,
+    });
+  }
+  // Kept loaded first, in reload order; then what is loaded on demand.
+  const order = (r: LaneRow) =>
+    r.warm ? recipes.pinned.indexOf(r.key) : recipes.pinned.length;
+  return rows.sort((a, b) => order(a) - order(b) || a.key.localeCompare(b.key));
 }

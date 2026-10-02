@@ -6,20 +6,21 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { errorText, postJSON } from "../api/client";
 import type { PauseRequest, PauseResponse } from "../api/types";
-import { useCatalog, useStatus } from "../state";
+import { useInstances, useRecipes, useStatus } from "../state";
 import { useConfirm, useNotify } from "./DialogProvider";
 
 export type PauseBusy = "resume" | "graceful" | "force" | null;
 
 /* Pause and resume, with the old dashboard's protocol: a force pause asks
    first, warnings from a pause are shown (a pause that could not drain in
-   time says so), and afterwards the status and catalog are re-read at once
-   rather than on their next tick, so the page does not claim models are
-   still loaded for a minute. */
+   time says so), and afterwards the status, instances and recipes are re-read
+   at once rather than on their next tick, so the page does not claim
+   recipes are still loaded for a minute. */
 export function usePauseActions() {
   const { t } = useTranslation();
   const status = useStatus();
-  const catalog = useCatalog();
+  const recipes = useRecipes();
+  const instances = useInstances();
   const confirm = useConfirm();
   const notify = useNotify();
   const [busy, setBusy] = useState<PauseBusy>(null);
@@ -49,7 +50,8 @@ export function usePauseActions() {
     } finally {
       setBusy(null);
       void status.refresh();
-      void catalog.refresh();
+      void instances.refresh();
+      void recipes.refresh();
     }
   }
 

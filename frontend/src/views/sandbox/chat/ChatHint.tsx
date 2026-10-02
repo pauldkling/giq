@@ -12,7 +12,7 @@ export function ChatHint({ model, hint }: { model: string; hint: Hint }) {
   const { t } = useTranslation("sandbox");
   const f = useFormat();
   if (!model) return null;
-  const strong = { b: <strong />, link: <a href="#/models" /> };
+  const strong = { b: <strong />, link: <a href="#/recipes" /> };
   return (
     <p className="hint" aria-live="polite">
       <Trans t={t} i18nKey={`chat.load.${hint.load}`} values={{ model }} components={strong} />

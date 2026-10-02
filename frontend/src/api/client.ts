@@ -143,6 +143,16 @@ export async function postJSON<T>(path: string, body?: unknown, opts: Opts = {})
   return (await parseBody(res)) as T;
 }
 
+export async function putJSON<T>(path: string, body: unknown, opts: Opts = {}): Promise<T> {
+  const res = await request(path, {
+    method: "PUT",
+    signal: opts.signal,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await parseBody(res)) as T;
+}
+
 export async function del<T>(path: string, opts: Opts = {}): Promise<T> {
   const res = await request(path, { method: "DELETE", signal: opts.signal });
   return (await parseBody(res)) as T;

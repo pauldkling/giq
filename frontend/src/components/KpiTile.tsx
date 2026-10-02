@@ -13,7 +13,7 @@ export interface KpiTileProps {
   unit?: ReactNode;
   /** A line under the figure: a split note, a meter, a caveat. */
   children?: ReactNode;
-  /** Makes the whole tile a link (e.g. the disk tile → #/models). */
+  /** Makes the whole tile a link (e.g. the disk tile → #/inventory). */
   href?: string;
   /** Makes the whole tile a button. Ignored when href is set. */
   onClick?: () => void;

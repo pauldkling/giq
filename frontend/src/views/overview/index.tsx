@@ -9,7 +9,7 @@ import type { JobRecord } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
 import { PauseControl } from "../../components/PauseControl";
 import { usePoll } from "../../lib/usePoll";
-import { useCatalog, useStatus } from "../../state";
+import { useInstances, useRecipes, useStatus } from "../../state";
 import { GpuGrid } from "./GpuGrid";
 import { JobQueue } from "./JobQueue";
 import { KpiRow } from "./KpiRow";
@@ -27,7 +27,7 @@ const JOBS_LIMIT = 100;
 /** The control surface: the machine now (tiles, cards, loaded models, queue), then its recent history. */
 export default function OverviewView() {
   const { t } = useTranslation();
-  const rows = laneRows(useCatalog().data, useStatus().data);
+  const rows = laneRows(useRecipes().data, useInstances().data, useStatus().data);
   const jobs = usePoll(
     useCallback((signal: AbortSignal) => getJSON<JobRecord[]>(`/stats/jobs?limit=${JOBS_LIMIT}`, { signal }), []),
     { intervalMs: JOBS_POLL_MS },

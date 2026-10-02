@@ -8,7 +8,7 @@
    telemetry a card does not expose, and SQL aggregates over no rows are
    NULL — so the type checker makes views handle the missing reading. */
 
-export type WorkerType =
+export type Modality =
   | "llm"
   | "text2image"
   | "image_edit"
@@ -20,7 +20,7 @@ export type WorkerType =
   | "depth"
   | "multiview";
 
-export const WORKER_TYPES: readonly WorkerType[] = [
+export const WORKER_TYPES: readonly Modality[] = [
   "llm",
   "text2image",
   "image_edit",
@@ -72,7 +72,7 @@ export interface StatusGpu {
 export interface Status {
   state: ServiceState;
   state_message: string | null;
-  active_modality: WorkerType | null;
+  active_modality: Modality | null;
   active_recipe: string | null;
   active: ActiveSlot[];
   /** The ONE card the vram_* figures below describe (giq's default card). */
@@ -144,43 +144,62 @@ export interface GpusResponse {
 
 // --- GET /stats/models (the catalog) ------------------------------------------
 
-export interface CatalogModel {
-  /** The recipe's first modality, which the views group by. */
-  worker: WorkerType;
-  /** Every modality the recipe serves (flux_klein renders and edits). */
-  modalities?: WorkerType[];
-  model: string;
-  vram_gb: number;
-  /** vram_gb plus margin and the card's reserve: what a load is gated on. */
-  needed_gb: number;
-  measured: boolean;
-  backend: string;
-  /** Image models: "sd.cpp" (the same as backend); null otherwise. */
-  engine: string | null;
-  label: string;
-  detail: string;
-  lanes: number;
-  resident: boolean;
-  /** Meant to be resident by configuration, whatever the operator did since. */
-  resident_default: boolean;
-  /** Loaded and serving now. */
-  ready: boolean;
-  fits: Fit;
+// --- GET /recipes (ADR-003) ---------------------------------------------------------
+
+/** A recipe's residency: why it is (or is not) kept loaded. */
+export interface Residency {
   policy: Policy;
-  policy_source: "override" | "default";
-  policy_reason: string | null;
-  /** LLMs: whether giq launches it with thinking on. */
-  reasoning: "on" | "off" | "template" | null;
-  vision: boolean;
-  /** Engine binary that executes it (key into /engines). */
-  runtime: string;
+  source: "override" | "default";
+  reason: string | null;
+  /** Kept loaded by default (the recipes' own residency or config.yaml's), whatever the operator set since. */
+  default_resident: boolean;
+}
+
+/** The card a recipe runs on. */
+export interface RecipeCard {
   /** Explicit binding (GPU UUID), null when unbound. */
   device: string | null;
-  device_source: "override" | "config" | "default";
-  /** Card it lands on either way. */
-  effective_device: string | null;
-  device_index: number | null;
-  device_name: string | null;
+  source: "override" | "config" | "default";
+  /** The card it lands on either way. */
+  effective: string | null;
+  index: number | null;
+  name: string | null;
+}
+
+/** One recipe: weights + engine + params, by the name a client sends as `model`. */
+export interface RecipeEntry {
+  name: string;
+  label: string;
+  detail: string;
+  /** Every modality the recipe serves (flux_klein renders and edits); the first picks the defaults. */
+  modalities: Modality[];
+  engine: string;
+  /** Engine binary that executes it (key into /engines). */
+  runtime: string;
+  aliases: string[];
+  capabilities: string[];
+  vision: boolean;
+  /** LLMs: whether giq launches it with thinking on. */
+  reasoning: "on" | "off" | "template" | null;
+  vram_gb: number;
+  measured: boolean;
+  /** vram_gb plus margin and the card's reserve: what a load is gated on. */
+  needed_gb: number;
+  lanes: number;
+  /** One figure, or one per modality. */
+  max_batch: number | Partial<Record<Modality, number>> | null;
+  voices: string[];
+  /** Every file it loads is on disk. */
+  installed: boolean;
+  /** ids into /weights. */
+  weights: string[];
+  residency: Residency;
+  card: RecipeCard;
+  fit: Fit;
+  /** When a job for it last completed (epoch seconds), across its modalities. */
+  last_used: number | null;
+  /** The instance running it now, if any. */
+  instance: { id: string; state: InstanceState; residency: InstanceResidency } | null;
 }
 
 export interface CardBudget {
@@ -193,24 +212,85 @@ export interface CardBudget {
   pinned_gb: number;
   pinned_needed_gb: number;
   pinned_fits: boolean;
-  /** worker/model keys pinned to this card. */
+  /** Recipes pinned to this card, in reload order. */
   pinned: string[];
   default: boolean;
 }
 
-export interface Catalog {
+export interface RecipesResponse {
+  recipes: RecipeEntry[];
   cards: CardBudget[];
-  free_gb: number;
-  total_gb: number;
-  evictable_gb: number;
-  pinned_gb: number;
-  pinned_needed_gb: number;
-  pinned_fits: boolean;
-  pinned_device: string | null;
-  pinned_by_device: Record<string, string[]>;
   /** Reload priority order. */
   pinned: string[];
-  models: CatalogModel[];
+}
+
+/** PUT /recipes/{name}/residency, PUT /recipes/{name}/card. */
+export interface RecipeWriteResponse {
+  recipe: RecipeEntry;
+  cards: CardBudget[];
+  warnings: string[];
+}
+
+// --- GET /instances ----------------------------------------------------------------
+
+export type InstanceState = "ready" | "starting" | "stopped";
+export type InstanceResidency = "resident" | "on_demand";
+
+/** A recipe running on a card. */
+export interface InstanceEntry {
+  /** recipe@card */
+  id: string;
+  recipe: string;
+  modalities: Modality[];
+  engine: string | null;
+  residency: InstanceResidency;
+  state: InstanceState;
+  device: string | null;
+  device_index: number | null;
+  device_name: string | null;
+  /** Loopback port of a server engine; null for in-process and child adapters. */
+  port: number | null;
+  pid: number | null;
+  lanes: number;
+  in_flight: number;
+  vram_gb: number | null;
+  started_at: number;
+}
+
+export interface InstancesResponse {
+  instances: InstanceEntry[];
+}
+
+// --- GET /weights, DELETE /weights/{id} ---------------------------------------------
+
+/** One checkpoint, however many recipes load it. */
+export interface WeightsItem {
+  id: string;
+  /** Exactly one of path (a file or directory) and repo (in the HF cache). */
+  path: string | null;
+  repo: string | null;
+  format: string | null;
+  source: string | null;
+  revision: string | null;
+  licence: string | null;
+  recipes: string[];
+  /** "recipe" for main weights, "recipe:part" for a part. */
+  used_by: string[];
+  on_disk: boolean;
+  size_bytes: number;
+  mount: string | null;
+}
+
+export interface WeightsResponse {
+  weights: WeightsItem[];
+}
+
+export interface DeleteWeightsResult {
+  id: string;
+  recipes: string[];
+  deleted: string[];
+  missing: string[];
+  freed_bytes: number;
 }
 
 // --- GET /storage, DELETE /storage/models/{w}/{m} ----------------------------
@@ -224,7 +304,7 @@ export interface Disk {
 }
 
 export interface StorageModel {
-  worker: WorkerType;
+  worker: Modality;
   model: string;
   size_bytes: number;
   on_disk: boolean;
@@ -240,7 +320,7 @@ export interface StorageModel {
 export interface RecipeFile {
   file: string;
   name: string;
-  modalities: WorkerType[];
+  modalities: Modality[];
   /** Replaces the built-in recipe of the same name. */
   replaces_builtin: boolean;
 }
@@ -265,6 +345,8 @@ export interface RecipesInfo {
 export interface StorageResponse {
   disks: Disk[];
   models: StorageModel[];
+  /** Every data directory giq resolved: models, recipes, engines, state, caches. */
+  paths?: Record<string, string | null>;
   /** Absent from a giq older than recipe files. */
   recipes?: RecipesInfo;
 }
@@ -340,7 +422,7 @@ export interface ModelPolicyResponse {
 // --- jobs ------------------------------------------------------------------------
 
 export interface JobRequest {
-  modality: WorkerType;
+  modality: Modality;
   model: string;
   params?: Record<string, unknown>;
   tasks: Record<string, unknown>[];
@@ -356,7 +438,7 @@ export interface JobSubmitted {
 export interface JobStatusResponse {
   job_id: string;
   status: JobStatus;
-  modality: WorkerType;
+  modality: Modality;
   model: string;
   results: Record<string, unknown>[] | null;
   duration_ms: number | null;
@@ -375,7 +457,7 @@ export interface StatsSummary {
   hours: number;
   evictions: number;
   recipes: {
-    modality: WorkerType;
+    modality: Modality;
     recipe: string;
     jobs: number;
     failed: number;
@@ -392,7 +474,7 @@ export interface StatsTimeline {
   points: {
     /** Bucket start, epoch seconds. */
     t: number;
-    modality: WorkerType;
+    modality: Modality;
     jobs: number;
     failed: number;
     avg_run_ms: number | null;
@@ -454,7 +536,7 @@ export interface StatsUsage {
   until: number | null;
   totals: { jobs: number; failed: number; tokens_in: number; tokens_out: number };
   recipes: {
-    modality: WorkerType;
+    modality: Modality;
     recipe: string;
     jobs: number;
     failed: number;
@@ -466,7 +548,7 @@ export interface StatsUsage {
   /** `b` is a local-time bucket key: "YYYY-MM-DD HH:00" (day), "YYYY-MM-DD" (week/month), "YYYY-MM" (all). */
   series: {
     b: string;
-    modality: WorkerType;
+    modality: Modality;
     recipe: string;
     jobs: number;
     tokens_in: number | null;
@@ -478,7 +560,7 @@ export interface StatsUsage {
 export interface JobRecord {
   t: number;
   job_id: string;
-  modality: WorkerType;
+  modality: Modality;
   recipe: string;
   status: JobStatus | string;
   queue_ms: number | null;
@@ -501,7 +583,7 @@ export interface StatsEvent {
 export interface Capabilities {
   modalities: Partial<
     Record<
-      WorkerType,
+      Modality,
       { engine: string; recipes: string[]; max_batch: number | null; voices: string[] | null }
     >
   >;

@@ -1,0 +1,46 @@
+{
+  "weights": {
+    "title": "Weights",
+    "count_one": "{{count}} checkpoint",
+    "count_other": "{{count}} checkpoints",
+    "only": "Weights of {{recipe}}",
+    "showAll": "show all",
+    "colWhat": "Checkpoint",
+    "colFormat": "Format",
+    "colLicence": "Licence",
+    "colUsedBy": "Used by",
+    "colSize": "Size",
+    "inCache": "Hugging Face cache",
+    "notOnDisk": "not on disk",
+    "noneKnown": "No recipe names any weights.",
+    "hint": "One row per checkpoint, however many recipes load it. A recipe's parts — an image model's diffusion model, text encoder and VAE — are checkpoints of their own."
+  },
+  "delete": {
+    "label": "Delete {{what}}",
+    "confirmTitle": "Delete {{what}}?",
+    "confirmBody_one": "Frees {{size}}. {{recipes}} stays as a recipe, not installed, until the weights are back.",
+    "confirmBody_other": "Frees {{size}}. {{recipes}} stay as recipes, not installed, until the weights are back.",
+    "confirm": "Delete weights",
+    "done": "{{what}}: freed {{freed}}.",
+    "failed": "Deleting weights failed",
+    "nothing": "Nothing on disk to delete."
+  },
+  "engines": {
+    "title": "Engines",
+    "colEngine": "Engine",
+    "colRuntime": "Binary or interpreter",
+    "colVersion": "Version",
+    "missing": "missing",
+    "missingTitle": "Not where config.yaml or the environment says it is",
+    "recipes_one": "{{count}} recipe",
+    "recipes_other": "{{count}} recipes"
+  },
+  "disk": {
+    "title": "Disk",
+    "summary": "{{models}} weights · {{free}} free of {{total}}",
+    "models": "giq's weights",
+    "other": "everything else",
+    "free": "free",
+    "total": "total {{total}}"
+  }
+}

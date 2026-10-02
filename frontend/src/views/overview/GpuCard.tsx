@@ -12,6 +12,7 @@ import { WorkerIcon } from "../../components/WorkerIcon";
 import { shortGpuName } from "../../lib/cards";
 import { useFormat } from "../../lib/useFormat";
 import { GpuTrends } from "./GpuTrends";
+import { primaryModality } from "../../lib/recipes";
 import type { LaneRow } from "./laneRows";
 import { VramSplit } from "./VramSplit";
 import "./GpuCard.css";
@@ -100,14 +101,14 @@ export function GpuCard({ gpu: g, rows, history, nowS }: GpuCardProps) {
             <Tag
               key={r.key}
               tone={r.ready ? "neutral" : "outline"}
-              icon={<WorkerIcon worker={r.model.worker} size={12} />}
+              icon={<WorkerIcon worker={primaryModality(r.recipe)} size={12} />}
               title={
                 r.warm
-                  ? t("gpus.residentTitle", { key: r.key, gb: f.gb(r.model.vram_gb) })
+                  ? t("gpus.residentTitle", { key: r.key, gb: f.gb(r.recipe.vram_gb) })
                   : t("gpus.slotTitle", { key: r.key })
               }
             >
-              {r.model.label || r.model.model}
+              {r.recipe.label || r.recipe.name}
             </Tag>
           ))
         ) : (

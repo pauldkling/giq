@@ -1,0 +1,46 @@
+{
+  "weights": {
+    "title": "Gewichte",
+    "count_one": "{{count}} Checkpoint",
+    "count_other": "{{count}} Checkpoints",
+    "only": "Gewichte von {{recipe}}",
+    "showAll": "alle zeigen",
+    "colWhat": "Checkpoint",
+    "colFormat": "Format",
+    "colLicence": "Lizenz",
+    "colUsedBy": "Genutzt von",
+    "colSize": "Größe",
+    "inCache": "Hugging-Face-Cache",
+    "notOnDisk": "nicht auf dem Datenträger",
+    "noneKnown": "Kein Rezept nennt Gewichte.",
+    "hint": "Eine Zeile pro Checkpoint, egal wie viele Rezepte ihn laden. Die Teile eines Rezepts – Diffusionsmodell, Text-Encoder und VAE eines Bildmodells – sind eigene Checkpoints."
+  },
+  "delete": {
+    "label": "{{what}} löschen",
+    "confirmTitle": "{{what}} löschen?",
+    "confirmBody_one": "Gibt {{size}} frei. {{recipes}} bleibt als Rezept, nicht installiert, bis die Gewichte wieder da sind.",
+    "confirmBody_other": "Gibt {{size}} frei. {{recipes}} bleiben als Rezepte, nicht installiert, bis die Gewichte wieder da sind.",
+    "confirm": "Gewichte löschen",
+    "done": "{{what}}: {{freed}} frei geworden.",
+    "failed": "Gewichte löschen fehlgeschlagen",
+    "nothing": "Nichts auf dem Datenträger zu löschen."
+  },
+  "engines": {
+    "title": "Engines",
+    "colEngine": "Engine",
+    "colRuntime": "Binary oder Interpreter",
+    "colVersion": "Version",
+    "missing": "fehlt",
+    "missingTitle": "Nicht dort, wo config.yaml oder die Umgebung sie erwartet",
+    "recipes_one": "{{count}} Rezept",
+    "recipes_other": "{{count}} Rezepte"
+  },
+  "disk": {
+    "title": "Datenträger",
+    "summary": "{{models}} Gewichte · {{free}} frei von {{total}}",
+    "models": "giqs Gewichte",
+    "other": "alles andere",
+    "free": "frei",
+    "total": "gesamt {{total}}"
+  }
+}

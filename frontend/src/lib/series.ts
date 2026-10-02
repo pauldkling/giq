@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import type { WorkerType } from "../api/types";
+import type { Modality } from "../api/types";
 
 /* Series colours as CSS variable references, never resolved hex: an SVG
    fill of var(--s-llm) follows a theme switch by itself, where a colour read
@@ -22,7 +22,7 @@ const KNOWN = new Set<string>([
 ]);
 
 /** The fixed colour of a worker (its series slot). Colour follows the entity, not its rank. */
-export function workerColor(worker: WorkerType | string): string {
+export function workerColor(worker: Modality | string): string {
   return KNOWN.has(worker) ? `var(--s-${worker})` : "var(--series-other)";
 }
 

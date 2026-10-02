@@ -10,7 +10,7 @@ import { useFormat } from "../../lib/useFormat";
 import { useStorage } from "../../state";
 
 /* Weights on disk, the hint that leads to model management: the tile is a
-   link to #/models. One thin meter per mount — giq's models, everything
+   link to #/inventory. One thin meter per mount — giq's models, everything
    else, free — with the figures in each segment's tooltip. */
 export function DiskKpi() {
   const { t } = useTranslation("overview");
@@ -19,7 +19,7 @@ export function DiskKpi() {
   const disks = data?.disks ?? [];
   const models = disks.length ? disks.reduce((a, d) => a + d.models_bytes, 0) : null;
   return (
-    <KpiTile label={t("kpi.disk")} value={f.bytes(models)} href="#/models" title={t("kpi.diskTitle")}>
+    <KpiTile label={t("kpi.disk")} value={f.bytes(models)} href="#/inventory" title={t("kpi.diskTitle")}>
       {disks.map((d) => {
         const tip = t("kpi.diskTip", {
           mount: d.mount,

@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "../../components/PageHeader";
 import { useHashRoute } from "../../lib/useHashRoute";
-import { useCatalog, useStorage } from "../../state";
+import { useRecipes } from "../../state";
 import { AsrTab } from "./asr/AsrTab";
 import { ChatTab } from "./chat/ChatTab";
 import { EditTab } from "./edit/EditTab";
@@ -32,12 +32,11 @@ export default function SandboxView() {
   const route = parseSandboxHash(window.location.hash);
   const active = route.tab ?? DEFAULT_TAB;
 
-  const catalog = useCatalog();
-  const storage = useStorage();
-  const models = useMemo(() => sandboxModels(catalog.data, storage.data), [catalog.data, storage.data]);
+  const recipes = useRecipes();
+  const models = useMemo(() => sandboxModels(recipes.data), [recipes.data]);
   const disabled = useMemo(() => disabledTabs(models), [models]);
   const { value, choose } = useModelChoices(models);
-  const missed = usePreselect(route, catalog.data, models, choose);
+  const missed = usePreselect(route, recipes.data, models, choose);
 
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set([active]));
   if (!visited.has(active)) setVisited(new Set(visited).add(active));
@@ -68,7 +67,7 @@ export default function SandboxView() {
       <PageHeader title={t("common:nav.sandbox")} />
       <p className="sbx-lede">{t("lede")}</p>
       <SandboxTabBar active={active} disabled={disabled} onSelect={(tab) => navigate("sandbox", tab)} />
-      {catalog.error != null && !catalog.data && <p className="warn">{t("catalogFailed")}</p>}
+      {recipes.error != null && !recipes.data && <p className="warn">{t("catalogFailed")}</p>}
       {missed?.tab === active && <p className="warn">{t("preselectMissed", { model: missed.model })}</p>}
       {TABS.filter((tab) => visited.has(tab)).map((tab) => (
         <div key={tab} role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)} hidden={tab !== active}>

@@ -2,7 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChartBarIcon, FlaskIcon, PulseIcon, StackIcon, type Icon as PhosphorIcon } from "@phosphor-icons/react";
+import {
+  ChartBarIcon,
+  FlaskIcon,
+  HardDrivesIcon,
+  PulseIcon,
+  StackIcon,
+  type Icon as PhosphorIcon,
+} from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { hrefFor, type View } from "../lib/useHashRoute";
 import { useFormat } from "../lib/useFormat";
@@ -15,7 +22,8 @@ import "./Sidebar.css";
 
 const NAV: { view: View; icon: PhosphorIcon }[] = [
   { view: "overview", icon: PulseIcon },
-  { view: "models", icon: StackIcon },
+  { view: "recipes", icon: StackIcon },
+  { view: "inventory", icon: HardDrivesIcon },
   { view: "usage", icon: ChartBarIcon },
   { view: "sandbox", icon: FlaskIcon },
 ];

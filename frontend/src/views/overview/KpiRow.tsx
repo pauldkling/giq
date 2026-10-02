@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { JobRecord } from "../../api/types";
 import { KpiTile } from "../../components/KpiTile";
 import { useFormat } from "../../lib/useFormat";
-import { useCatalog, useGpus, useStatus } from "../../state";
+import { useGpus, useInstances, useRecipes, useStatus } from "../../state";
 import { DiskKpi } from "./DiskKpi";
 import { laneRows } from "./laneRows";
 import { THROUGHPUT_WINDOW_S, throughput } from "./throughput";
@@ -23,7 +23,7 @@ export function KpiRow({ jobs }: { jobs: JobRecord[] | undefined }) {
   const f = useFormat();
   const gpus = useGpus().data?.gpus ?? [];
   const status = useStatus().data;
-  const rows = laneRows(useCatalog().data, status);
+  const rows = laneRows(useRecipes().data, useInstances().data, status);
 
   const draws = gpus.map((g) => g.power_draw_w).filter((w): w is number => w != null);
   const limits = gpus.map((g) => g.power_limit_w).filter((w): w is number => w != null);

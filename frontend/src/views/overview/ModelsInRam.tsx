@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 import { Card } from "../../components/Card";
 import { EmptyState } from "../../components/EmptyState";
 import { useFormat } from "../../lib/useFormat";
-import { useGpus, useStorage } from "../../state";
-import { laneKey, type LaneRow } from "./laneRows";
+import { useGpus } from "../../state";
+import type { LaneRow } from "./laneRows";
 import { ModelRow } from "./ModelRow";
 import { useLaneActions } from "./useLaneActions";
 import "./ModelsInRam.css";
@@ -19,10 +19,8 @@ export function ModelsInRam({ rows }: { rows: LaneRow[] }) {
   const { t } = useTranslation("overview");
   const f = useFormat();
   const gpus = useGpus().data?.gpus ?? [];
-  const storage = useStorage().data;
   const actions = useLaneActions();
-  const lastUsed = new Map(storage?.models.map((m) => [laneKey(m.worker, m.model), m.last_used]));
-  const vram = rows.filter((r) => r.ready).reduce((a, r) => a + r.model.vram_gb, 0);
+  const vram = rows.filter((r) => r.ready).reduce((a, r) => a + r.recipe.vram_gb, 0);
 
   return (
     <Card
@@ -54,10 +52,10 @@ export function ModelsInRam({ rows }: { rows: LaneRow[] }) {
                   key={r.key}
                   row={r}
                   card={gpus.find((g) => g.uuid === r.device)}
-                  lastUsed={lastUsed.get(r.key)}
+                  lastUsed={r.recipe.last_used}
                   busy={actions.busy === r.key}
                   locked={actions.busy !== null && actions.busy !== r.key}
-                  onPolicy={(p) => void actions.setPolicy(r.model.worker, r.model.model, p)}
+                  onPolicy={(p) => void actions.setPolicy(r.key, p)}
                 />
               ))}
             </tbody>
@@ -66,7 +64,7 @@ export function ModelsInRam({ rows }: { rows: LaneRow[] }) {
       ) : (
         <EmptyState compact>
           <span>
-            {t("models.empty")} <a href="#/models">{t("models.emptyLink")}</a>.
+            {t("models.empty")} <a href="#/recipes">{t("models.emptyLink")}</a>.
           </span>
         </EmptyState>
       )}

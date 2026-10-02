@@ -4,11 +4,13 @@
 
 import type { ReactNode } from "react";
 import {
-  CatalogProvider,
   EnginesProvider,
   GpusProvider,
+  InstancesProvider,
+  RecipesProvider,
   StatusProvider,
   StorageProvider,
+  WeightsProvider,
 } from "./resources";
 
 /** Mounts every shared poller once, around the whole app. */
@@ -16,11 +18,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   return (
     <StatusProvider>
       <GpusProvider>
-        <CatalogProvider>
-          <StorageProvider>
-            <EnginesProvider>{children}</EnginesProvider>
-          </StorageProvider>
-        </CatalogProvider>
+        <InstancesProvider>
+          <RecipesProvider>
+            <WeightsProvider>
+              <StorageProvider>
+                <EnginesProvider>{children}</EnginesProvider>
+              </StorageProvider>
+            </WeightsProvider>
+          </RecipesProvider>
+        </InstancesProvider>
       </GpusProvider>
     </StatusProvider>
   );

@@ -6,10 +6,12 @@ export { DataProvider } from "./DataProvider";
 export {
   LIVE_POLL_MS,
   SLOW_POLL_MS,
-  useCatalog,
   useEngines,
   useGpus,
+  useInstances,
+  useRecipes,
   useStatus,
   useStorage,
+  useWeights,
 } from "./resources";
 export type { Resource } from "./createPolledResource";

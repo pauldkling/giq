@@ -9,6 +9,7 @@ import { Icon } from "../../components/Icon";
 import { Tag, type TagTone } from "../../components/Tag";
 import { WorkerIcon } from "../../components/WorkerIcon";
 import { shortGpuName } from "../../lib/cards";
+import { primaryModality } from "../../lib/recipes";
 import { useFormat } from "../../lib/useFormat";
 import type { LaneRow } from "./laneRows";
 
@@ -28,8 +29,9 @@ export interface ModelRowProps {
 export function ModelRow({ row, card, lastUsed, busy, locked, onPolicy }: ModelRowProps) {
   const { t } = useTranslation("overview");
   const f = useFormat();
-  const m = row.model;
-  const policy: Policy = m.policy;
+  const m = row.recipe;
+  const modality = primaryModality(m);
+  const policy: Policy = m.residency.policy;
   const stateText =
     row.state === "evicted"
       ? t("models.evicted", { job: row.evictedFor })
@@ -39,17 +41,17 @@ export function ModelRow({ row, card, lastUsed, busy, locked, onPolicy }: ModelR
   return (
     <tr>
       <td className="ov-mir-model" title={m.detail ? `${row.key} · ${m.detail}` : row.key}>
-        <WorkerIcon worker={m.vision ? "vision" : m.worker} size={14} />
-        <span>{m.label || m.model}</span>
+        <WorkerIcon worker={m.vision ? "vision" : modality} size={14} />
+        <span>{m.label || m.name}</span>
       </td>
-      <td className="muted">{t(`common:worker.${m.worker}`, { defaultValue: m.worker })}</td>
-      <td className="mono muted" title={m.backend}>
-        {m.engine ?? m.runtime}
+      <td className="muted">{t(`common:worker.${modality}`, { defaultValue: modality })}</td>
+      <td className="mono muted" title={m.runtime}>
+        {m.engine}
       </td>
       <td
         className="muted"
         title={
-          card ? t(m.device ? "models.bound" : "models.defaultCard", { name: shortGpuName(card.name) }) : undefined
+          card ? t(m.card.device ? "models.bound" : "models.defaultCard", { name: shortGpuName(card.name) }) : undefined
         }
       >
         {card ? t("common:gpu.label", { index: card.index }) : "–"}
