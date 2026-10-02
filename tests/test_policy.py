@@ -596,3 +596,15 @@ def test_old_policy_rows_become_recipe_rows_once(tmp_path):
     stats.save_policy("flux_klein", "pinned", None)
     again = StatsRecorder(db)
     assert again.load_policies()["flux_klein"][0] == "pinned"
+
+
+def test_a_row_saved_under_a_renamed_recipes_old_name_still_counts(store):
+    """The stt recipes were renamed (tiny -> faster-whisper-tiny) and the old
+    names kept as aliases; an override saved under the old one is the same
+    recipe's intent."""
+    from giq.stats import get_stats
+
+    get_stats().save_policy("tiny", OFF, "kept off")
+    store.load()
+    assert store.policy_for("faster-whisper-tiny") == OFF
+    assert store.policy_for("tiny") == OFF

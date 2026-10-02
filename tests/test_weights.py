@@ -158,7 +158,7 @@ def test_the_storage_catalog_finds_repositories_in_the_hf_cache(tmp_path, monkey
         (tmp_path / "models--Systran--faster-whisper-large-v3").resolve(),
         (tmp_path / "models--pyannote--speaker-diarization-community-1").resolve(),
     ]
-    assert resolved["large-v3"] == resolved["whisper-large-v3"][:1]
+    assert resolved["faster-whisper-large-v3"] == resolved["whisper-large-v3"][:1]
     assert resolved["kokoro"] == [(tmp_path / "models--hexgrad--Kokoro-82M").resolve()]
 
 

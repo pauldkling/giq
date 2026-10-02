@@ -29,7 +29,8 @@ def model_ref(model: str) -> str:
 class STTWorkerConfig:
     """Configuration for STT worker."""
 
-    model: str = "base"  # tiny, base, small, medium, large-v3
+    # A recipe name: faster-whisper-{tiny,base,small,medium,large-v3}.
+    model: str = "faster-whisper-base"
     device: str = "cuda"
     compute_type: str = "float16"
     # GPU UUID this model is bound to. Unlike every other CUDA worker, STT

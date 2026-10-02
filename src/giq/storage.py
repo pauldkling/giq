@@ -4,11 +4,12 @@
 
 """Disk storage accounting and deletion for model weights.
 
-Resolves every model in the VRAM registry to its on-disk files (GGUF files,
-safetensors components, HF-cache snapshot dirs), detects files shared between
-models (text2image and image_edit flux_klein share every file; stt large-v3 and the audio resident
-share the faster-whisper snapshot), and aggregates per-mount disk usage.
-Where a model's files are is its recipe's to say (``giq.weights``).
+Resolves every recipe to its on-disk files (GGUF files, safetensors
+components, checkpoint directories, HF-cache snapshot dirs), detects files
+shared between recipes (the stt recipe faster-whisper-large-v3 and the audio
+resident load one faster-whisper snapshot; the two NVFP4 recipes one
+checkpoint), and aggregates per-mount disk usage. Where a recipe's files are
+is its own to say (``giq.weights``).
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def resolve_model_paths() -> dict[str, list[Path]]:
             # files and snapshot directories for the models loaded by path —
             # the hub is never consulted for those — and HF-cache repos for
             # the models loaded by repository. faster-whisper large-v3 appears
-            # twice on purpose: the stt recipe large-v3 and the audio resident
+            # twice on purpose: the stt recipe faster-whisper-large-v3 and the audio resident
             # whisper-large-v3 load one snapshot. LLMs come through here too,
             # whatever their format: a llama.cpp GGUF (its shards expanded) and
             # a vllm checkpoint directory are both just the recipe's

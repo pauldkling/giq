@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # faster-whisper on the batch path, distinct from the resident audio stack
-# (audio/whisper-large-v3). Loads by repository from the HF cache; a
-# weights.path to a converted CTranslate2 directory would load that instead.
-name: medium
+# (whisper-large-v3). Loads by repository from the HF cache; a weights.path
+# to a converted CTranslate2 directory would load that instead. Named after
+# the weights; the bare size it was called before ADR-003 made names global
+# stays an alias.
+name: faster-whisper-medium
 modalities: [stt]
+aliases: [medium]
 engine: faster-whisper
 weights:
   source: hf:Systran/faster-whisper-medium

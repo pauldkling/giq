@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from typing import TypeVar
 
 from giq.gpus import GpuTelemetry, resolve_device, selected_device
 from giq.registry import all_recipes, get_recipe, resident_defaults
@@ -51,6 +52,8 @@ POLICIES = (PINNED, AUTO, OFF)
 # demanding a full per-model spike margin would reject the working default set
 # (9.5 + 4.0 + 0.6 = 14.1 GB of a 16 GB card's 15.93), which runs fine.
 RESIDENT_SET_HEADROOM_GB = 0.5
+
+V = TypeVar("V")
 
 
 @dataclass(frozen=True)
@@ -103,10 +106,8 @@ class PolicyStore:
             # can only load models the operator had already allowed).
             logger.error(f"policy: could not load overrides, using defaults: {e}")
             overrides, devices = {}, {}
-        for table, label in ((overrides, "override"), (devices, "binding")):
-            for name in [n for n in table if get_recipe(n) is None]:
-                logger.warning(f"policy: no recipe {name!r} any more, ignoring its {label}")
-                table.pop(name)
+        overrides = _by_recipe(overrides, "override")
+        devices = _by_recipe(devices, "binding")
         # A row can exist purely to carry a binding, with the policy column
         # holding the default. That is not an override — reporting it as one
         # would freeze the recipe against a later default change.
@@ -363,6 +364,22 @@ class PolicyStore:
         with self._lock:
             self._overrides.pop(key, None)
         return self.record_for(key)
+
+
+def _by_recipe(table: dict[str, V], label: str) -> dict[str, V]:
+    """Persisted rows keyed by the recipe's own name.
+
+    A row saved under a name that is now an alias (a recipe was renamed) is
+    that recipe's intent; one for a name no recipe answers to is dropped.
+    """
+    out: dict[str, V] = {}
+    for name, value in table.items():
+        canonical = _canonical(name)
+        if canonical is None:
+            logger.warning(f"policy: no recipe {name!r} any more, ignoring its {label}")
+            continue
+        out.setdefault(canonical, value)
+    return out
 
 
 def _configured_binding(name: str) -> str | None:

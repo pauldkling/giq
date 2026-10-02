@@ -197,11 +197,12 @@ generation ends as `response.failed` with `giq_job_failed`.
 
 ### Audio, voiceprints, speech
 
-The resident audio stack (`audio/whisper-large-v3`: faster-whisper plus
-pyannote diarization), speaker voiceprints (`embed/ecapa-tdnn`) and text to
-speech (`tts/kokoro`) are reached through the `/v1/audio/*` routes above.
-Plain speech to text without diarization (`stt`, faster-whisper `tiny` …
-`large-v3`) is a batch worker behind `/run`. `/capabilities` lists every
+The resident audio stack (`whisper-large-v3`: faster-whisper plus pyannote
+diarization), speaker voiceprints (`ecapa-tdnn`) and text to speech
+(`kokoro`) are reached through the `/v1/audio/*` routes above. Plain speech
+to text without diarization (`stt`: `faster-whisper-tiny` …
+`faster-whisper-large-v3`; the bare sizes still work as aliases) is a batch
+worker behind `/run`. `/capabilities` lists every
 worker's models, and Kokoro's voices.
 
 ## OCR
