@@ -173,8 +173,8 @@ def _content_parts_to_chat(parts: list) -> list | str:
 
     `input_text`/`output_text` become `{"type":"text",...}`; `input_image`
     becomes `{"type":"image_url",...}` so the existing multimodal passthrough
-    carries it to a vision model. A lone text part collapses to a string, which
-    is what the plain path downstream expects. A part that names a stored file
+    carries it to a vision model. A lone text part collapses to a string, the
+    plainest form every engine's chat template takes. A part that names a stored file
     is refused — see below — because giq has nothing to resolve the ID against.
     """
     out: list = []

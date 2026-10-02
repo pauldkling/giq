@@ -799,7 +799,19 @@ def chat_completes(monkeypatch):
             request=JobRequest(modality=Modality.llm, model="m", tasks=[]),
         )
         job.status = JobStatus.completed
-        job.results = [{"id": "chat-0", "output": "ok", "tokens_in": 1, "tokens_out": 1}]
+        job.results = [
+            {
+                "model": "whatever-the-engine-was-started-as",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "", "reasoning_content": "hmm"},
+                        "finish_reason": "length",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        ]
         return job
 
     monkeypatch.setattr(Orchestrator, "submit_job", submit)
@@ -809,11 +821,10 @@ def chat_completes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_plain_path_forwards_structured_output(client: AsyncClient, chat_completes):
-    """The plain (non-tool, non-stream) path threads either knob into params.
+    """A plain request (no tools, not streamed) threads either knob through.
 
-    This is the path our extraction pipeline uses: one system+user message, no
-    tools. The key must reach the worker via JobRequest.params so the engine
-    sees it.
+    This is the shape an extraction pipeline sends: one system+user message,
+    no tools. The key must reach the engine in the request it is sent.
     """
     base = {
         "model": "qwen3.8-27b-nvfp4-chat",
@@ -826,7 +837,7 @@ async def test_plain_path_forwards_structured_output(client: AsyncClient, chat_c
         "/v1/chat/completions", json={**base, "response_format": {"type": "json_object"}}
     )
     assert r.status_code == 200, r.text
-    params = chat_completes["request"].params
+    params = chat_completes["request"].chat_request
     assert params["response_format"] == {"type": "json_object"}
     assert "structured_outputs" not in params
 
@@ -834,14 +845,14 @@ async def test_plain_path_forwards_structured_output(client: AsyncClient, chat_c
         "/v1/chat/completions", json={**base, "structured_outputs": {"json": _CAR_SCHEMA}}
     )
     assert r.status_code == 200, r.text
-    params = chat_completes["request"].params
+    params = chat_completes["request"].chat_request
     assert params["structured_outputs"] == {"json": _CAR_SCHEMA}
     assert "response_format" not in params
 
 
 @pytest.mark.asyncio
 async def test_tool_path_forwards_structured_output(client: AsyncClient, chat_completes):
-    """The tool path threads either knob into chat_request (parity with plain)."""
+    """The tool path threads either knob into chat_request too."""
     base = {
         "model": "qwen3.8-27b-nvfp4-chat",
         "messages": [{"role": "user", "content": "pick a tool"}],
@@ -925,3 +936,29 @@ async def test_both_structured_output_knobs_are_rejected(client: AsyncClient, ch
     assert r.status_code == 400
     assert "mutually exclusive" in r.json()["detail"]
     assert "request" not in chat_completes
+
+
+@pytest.mark.asyncio
+async def test_a_plain_request_goes_to_the_engine_whole(client: AsyncClient, chat_completes):
+    """Every turn of the conversation reaches the engine, and its answer comes
+    back as written: an answer cut off mid-thought says "length", not "stop"."""
+    messages = [
+        {"role": "system", "content": "Be brief."},
+        {"role": "user", "content": "My name is Ada."},
+        {"role": "assistant", "content": "Hello Ada."},
+        {"role": "user", "content": "What is my name?"},
+    ]
+    r = await client.post(
+        "/v1/chat/completions",
+        json={"model": "gemma-4-12b", "messages": messages, "max_tokens": 20},
+    )
+    assert r.status_code == 200, r.text
+    sent = chat_completes["request"].chat_request
+    assert [m["role"] for m in sent["messages"]] == ["system", "user", "assistant", "user"]
+    assert sent["max_tokens"] == 20 and "tools" not in sent
+
+    body = r.json()
+    assert body["model"] == "gemma-4-12b"
+    (choice,) = body["choices"]
+    assert choice["finish_reason"] == "length"
+    assert choice["message"]["reasoning_content"] == "hmm"

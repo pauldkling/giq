@@ -57,12 +57,8 @@ def is_multimodal(messages: list) -> bool:
 
 
 def format_messages(messages: list) -> list[dict]:
-    """The message list as llama-server wants it, kept whole.
-
-    The alternative — flattening to one {system, user} pair — loses the
-    conversation, the tool results and any image parts, so every path that can
-    afford to keep the list uses this.
-    """
+    """The message list as the engine wants it, kept whole: every turn, the
+    tool results and any image parts."""
     formatted: list[dict] = []
     for m in messages:
         msg: dict = {"role": m.role}
@@ -269,12 +265,9 @@ async def create_chat_completion(
     if "/" in model:
         model = model.split("/", 1)[1]
 
-    # Tool-calling path — and the multimodal path, which needs the same thing
-    # from it: the message list forwarded to llama-server intact. The plain
-    # path below flattens every message into one {system, user} pair, which
-    # can carry neither an image nor a conversation.
-    multimodal = is_multimodal(messages)
-    if multimodal:
+    # Images reach the engine only on a recipe that can see them; anywhere else
+    # they would be dropped without a word.
+    if is_multimodal(messages):
         recipe = get_recipe(model)
         if recipe is None or not recipe.vision:
             raise HTTPException(
@@ -337,112 +330,55 @@ async def create_chat_completion(
             },
         )
 
-    if request.tools or multimodal:
-        formatted_messages = format_messages(messages)
+    # Not streaming: the request goes to the engine whole, as streaming does,
+    # and its answer comes back as the engine wrote it. That is what keeps a
+    # conversation's earlier turns, the thought (`reasoning_content`) and the
+    # engine's finish_reason — "length" when max_tokens ran out mid-thought,
+    # which a client cannot tell from a finished answer if it reads "stop".
+    formatted_messages = format_messages(messages)
 
-        llm_request: dict = {
-            "messages": formatted_messages,
-            "tools": request.tools,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-        }
-        if request.max_tokens is not None:
-            llm_request["max_tokens"] = request.max_tokens
-        if request.tool_choice is not None:
-            llm_request["tool_choice"] = request.tool_choice
-        # Parity with the streaming branch above. These were honoured when
-        # streaming and silently dropped when not, which is the worst shape for
-        # a knob to have: a client that turns thinking off gets it turned off
-        # or not depending on a flag it set for an unrelated reason.
-        ctk = body.get("chat_template_kwargs")
-        if ctk:
-            llm_request["chat_template_kwargs"] = ctk
-        _apply_structured_output(llm_request, request)
-        for key in ("reasoning_budget_tokens", "thinking_budget_tokens"):
-            if isinstance(body.get(key), int):
-                llm_request["reasoning_budget_tokens"] = body[key]
-                break
-        # giq_loop_guard is deliberately NOT forwarded here. It is giq's own
-        # field, popped by the worker's streaming loop; the non-streaming
-        # worker forwards its request body to llama-server verbatim, so an
-        # unknown key would reach llama-server instead of being consumed.
-
-        job_id, _ = await orch.submit_job(
-            JobRequest(modality="llm", model=model, chat_request=llm_request)
-        )
-        completed_job = await orch.wait_for_job(job_id)
-
-        if not completed_job.results:
-            raise HTTPException(status_code=500, detail="No response generated")
-
-        result = completed_job.results[0]
-
-        return result
-
-    # Non-tool path
-    system_msg = None
-    user_msg = ""
-    for msg in messages:
-        if msg.role == "system":
-            system_msg = extract_text_content(msg.content)
-        elif msg.role == "user":
-            user_msg = extract_text_content(msg.content)
-
-    if not user_msg:
-        raise HTTPException(status_code=400, detail="No user message found")
-
-    params: dict = {
+    llm_request: dict = {
+        "messages": formatted_messages,
         "temperature": request.temperature,
         "top_p": request.top_p,
     }
+    if request.tools:
+        llm_request["tools"] = request.tools
     if request.max_tokens is not None:
-        params["max_tokens"] = request.max_tokens
-    # Pass the thinking-channel override through: clients send
-    # chat_template_kwargs.enable_thinking=false so one-shot answers don't
-    # burn the token budget on reasoning.
+        llm_request["max_tokens"] = request.max_tokens
+    if request.tool_choice is not None:
+        llm_request["tool_choice"] = request.tool_choice
+    # Parity with the streaming branch above. These were honoured when
+    # streaming and silently dropped when not, which is the worst shape for
+    # a knob to have: a client that turns thinking off gets it turned off
+    # or not depending on a flag it set for an unrelated reason.
     ctk = body.get("chat_template_kwargs")
     if ctk:
-        params["chat_template_kwargs"] = ctk
-    _apply_structured_output(params, request)
+        llm_request["chat_template_kwargs"] = ctk
+    _apply_structured_output(llm_request, request)
+    for key in ("reasoning_budget_tokens", "thinking_budget_tokens"):
+        if isinstance(body.get(key), int):
+            llm_request["reasoning_budget_tokens"] = body[key]
+            break
+    # giq_loop_guard is deliberately NOT forwarded here. It is giq's own
+    # field, popped by the worker's streaming loop; the non-streaming
+    # worker forwards its request body to llama-server verbatim, so an
+    # unknown key would reach llama-server instead of being consumed.
 
     job_id, _ = await orch.submit_job(
-        JobRequest(
-            modality="llm",
-            model=model,
-            tasks=[{"id": "chat-0", "system": system_msg, "user": user_msg}],
-            params=params,
-        )
+        JobRequest(modality="llm", model=model, chat_request=llm_request)
     )
-
     completed_job = await orch.wait_for_job(job_id)
+
     if not completed_job.results:
         raise HTTPException(status_code=500, detail="No response generated")
 
     result = completed_job.results[0]
-    output = result.get(
-        "output", result.get("choices", [{}])[0].get("message", {}).get("content", "")
-    )
-    tokens_in = result.get("tokens_in") or 0
-    tokens_out = result.get("tokens_out") or 0
-
-    return {
-        "id": f"chatcmpl-{job_id}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": request.model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": output},
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {
-            "prompt_tokens": tokens_in,
-            "completion_tokens": tokens_out,
-            "total_tokens": tokens_in + tokens_out,
-        },
-    }
+    # The engine names the model by whatever it was started as; the client
+    # asked for a recipe, and the answer says which.
+    if isinstance(result, dict):
+        result["model"] = request.model
+    return result
 
 
 def _advertised_llm_recipes() -> list[Recipe]:
