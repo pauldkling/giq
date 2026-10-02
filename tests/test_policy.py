@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from giq.models import JobRequest, JobStatus, Modality
 from giq.policy import AUTO, OFF, PINNED, reset_policy_store
 from giq.queue import Job, JobQueue
-from giq.runner import ResidentDemoted, Runner, _Resident
+from giq.runner import RESIDENT, Instance, ResidentDemoted, Runner
 
 RESIDENTS = [
     "gemma-4-12b",
@@ -67,7 +67,7 @@ def _prime_resident(runner: Runner, key, width: int = 1):
     # On the card this model actually binds to — a resident sitting on the
     # wrong card is torn down and reloaded, which is not what these tests are
     # about (see test_binding for that path).
-    res = _Resident(worker, width, runner._device_for(key))
+    res = Instance(worker, key, runner._device_for(key), residency=RESIDENT, width=width)
     runner._residents[key] = res
     return res
 

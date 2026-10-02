@@ -70,11 +70,11 @@ async def test_runner_processes_job(queue: JobQueue, runner: Runner):
 
 async def _prime_warm_worker(runner: Runner, modality: Modality, model: str):
     """Set runner state as if a job for (modality, model) just finished."""
-    from giq.runner import _Slot
+    from giq.runner import Instance
 
     device = runner._device_for(model)
     worker = AsyncMock()  # _unload_worker calls .stop()
-    runner._slots[device] = _Slot(worker, model, device)
+    runner._slots[device] = Instance(worker, model, device)
     runner._processing_job = False
 
 
@@ -166,14 +166,14 @@ RESIDENTS = [
 
 def _prime_resident(runner: Runner, key, vram_gb: float, width: int = 1):
     """Install a fake ready resident."""
-    from giq.runner import _Resident
+    from giq.runner import RESIDENT, Instance
 
     worker = AsyncMock()
     worker.is_ready = True
     worker.estimated_vram_gb = vram_gb
     # Same card the model would really load on, so eviction (which only
     # considers residents sharing the incoming model's card) sees them.
-    res = _Resident(worker, width, runner._device_for(key))
+    res = Instance(worker, key, runner._device_for(key), residency=RESIDENT, width=width)
     res.last_active = 0.0  # long quiet — eviction grace already satisfied
     runner._residents[key] = res
     return res

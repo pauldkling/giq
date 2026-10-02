@@ -97,14 +97,19 @@ a model; inside giq, the word is not used for anything else.
 
 ### D4: Instances are first-class
 
-- The runner keeps `instances: dict[InstanceId, Instance]`, one type where
-  `_Resident` and `_Slot` are two today. An instance knows its recipe, card,
-  port, adapter, state (`starting`, `ready`, `stopping`, `failed`) and the
-  residency it was started under.
-- An `InstanceId` is `recipe@card`. Today's rule — at most one instance per
-  recipe, and one on-demand instance per card — is a scheduling rule over
-  that map, not a property of the data. Running a recipe on two cards is a
-  later decision that needs no new concept.
+- One type, `Instance`, where `_Resident` and `_Slot` were two. An instance
+  knows its recipe, card, port, adapter, state (`starting`, `ready`,
+  `stopped`, read from the adapter) and the residency it was started under.
+- The runner indexes instances the two ways it schedules them: residents by
+  recipe, each with a lane of concurrent jobs, and the on-demand instance by
+  card, with serialized dispatch. (Amended while implementing: the proposal
+  was one map, but the two indexes are two scheduling policies, and folding
+  them into one changes dispatch for no gain. One type is what makes an
+  instance a thing of its own.)
+- An instance is named `recipe@card`. Today's rule — at most one instance
+  per recipe, and one on-demand instance per card — is a scheduling rule,
+  not a property of the type. Running a recipe on two cards is a later
+  decision that needs no new concept.
 - `GET /instances` lists them. The dashboard's "running" view is this list.
 
 ### D5: Residency

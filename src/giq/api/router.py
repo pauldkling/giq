@@ -163,6 +163,44 @@ async def list_gpus() -> dict:
     }
 
 
+@router.get("/instances")
+async def list_instances() -> dict:
+    """Every recipe running on a card right now (ADR-003): what, where, how.
+
+    ``residency`` says why it is up — ``resident`` (kept loaded by policy, on
+    its own lane) or ``on_demand`` (loaded for a job, unloaded when idle).
+    ``state`` is the adapter's: ``starting`` while the process is up but not
+    answering, ``ready`` once it does. ``port`` is the loopback server a
+    llama.cpp, vllm or sd.cpp instance listens on; in-process and child
+    adapters have none.
+    """
+    runner = get_runner()
+    out = []
+    for inst in runner.instances():
+        recipe = get_recipe(inst.recipe)
+        gpu = resolve_device(inst.device) if inst.device else None
+        out.append(
+            {
+                "id": inst.id,
+                "recipe": inst.recipe,
+                "modalities": list(recipe.modalities) if recipe else [],
+                "engine": recipe.engine if recipe else None,
+                "residency": inst.residency,
+                "state": inst.state,
+                "device": inst.device,
+                "device_index": gpu.index if gpu else None,
+                "device_name": gpu.name if gpu else None,
+                "port": inst.port,
+                "pid": getattr(inst.adapter, "pid", None),
+                "lanes": inst.width,
+                "in_flight": inst.active_count,
+                "vram_gb": getattr(inst.adapter, "estimated_vram_gb", None),
+                "started_at": inst.started_at,
+            }
+        )
+    return {"instances": out}
+
+
 @router.post("/control/pause", response_model=PauseResponse)
 async def pause_serving(request: PauseRequest | None = None) -> PauseResponse:
     """Suspend serving and unload every model, freeing the GPU.

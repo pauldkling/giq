@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from datetime import datetime
 from time import monotonic
@@ -310,15 +311,15 @@ class _AllDevices:
 _ALL_DEVICES = _AllDevices()
 
 
-def _declared_size(res: "_Resident") -> float:
+def _declared_size(res: "Instance") -> float:
     return res.adapter.estimated_vram_gb
 
 
 def _choose_victims(
-    loaded: list[tuple[str, "_Resident"]],
+    loaded: list[tuple[str, "Instance"]],
     deficit: float,
-    size_of: Callable[["_Resident"], float] = _declared_size,
-) -> list[tuple[str, "_Resident"]]:
+    size_of: Callable[["Instance"], float] = _declared_size,
+) -> list[tuple[str, "Instance"]]:
     """Pick the least disruptive set of residents to evict for ``deficit`` GB.
 
     Fewest residents first, then least VRAM freed. Evicting a resident is not
@@ -412,20 +413,78 @@ def _lane_width(model: str, adapter: Any) -> int:
     return lane_width_for(model)
 
 
-class _Resident:
-    """A loaded resident adapter plus its concurrency lane."""
+RESIDENT = "resident"
+ON_DEMAND = "on_demand"
 
-    def __init__(self, adapter: Adapter, width: int, device: str | None = None):
+
+class Instance:
+    """A recipe running on a card (ADR-003): its adapter, where, and why.
+
+    The runner indexes instances two ways, because it schedules them two
+    ways. A *resident* is kept loaded by policy and has a lane — a semaphore
+    of ``width`` concurrent jobs, so an embed never queues behind a chat
+    generation; the runner finds residents by recipe. An *on-demand* instance
+    is loaded for a job and unloaded when idle, one per card, and dispatch to
+    it is serialized; the runner finds it by card. ``GET /instances`` is both.
+    """
+
+    def __init__(
+        self,
+        adapter: Adapter,
+        recipe: str,
+        device: str | None = None,
+        *,
+        residency: str = ON_DEMAND,
+        width: int = 1,
+    ):
         self.adapter = adapter
-        self.width = width
-        # UUID of the card this resident occupies. Recorded at load time
+        self.recipe = recipe
+        # UUID of the card this instance occupies. Recorded at load time
         # rather than looked up on demand: eviction has to reason about where
         # the VRAM actually is, and a rebind while it is loaded must not
         # retarget an already-running process.
         self.device = device
+        self.residency = residency
+        self.width = width
         self.lane = asyncio.Semaphore(width)
         self.active_count = 0
         self.last_active = monotonic()
+        self.started_at = time.time()
+
+    @property
+    def id(self) -> str:
+        """``recipe@card``: unique while one recipe runs at most once per card."""
+        return f"{self.recipe}@{self.device or 'default'}"
+
+    @property
+    def key(self) -> str:
+        return self.recipe
+
+    @property
+    def model(self) -> str:
+        """The recipe name, as the job API calls it."""
+        return self.recipe
+
+    @property
+    def modality(self) -> Modality:
+        """The recipe's first modality, as the status scalars report an instance."""
+        recipe = get_recipe(self.recipe)
+        return Modality(recipe.modality) if recipe is not None else Modality.llm
+
+    @property
+    def state(self) -> str:
+        """``ready``, ``starting`` (process up, not answering yet), or ``stopped``."""
+        if getattr(self.adapter, "is_ready", False):
+            return "ready"
+        if getattr(self.adapter, "is_running", False):
+            return "starting"
+        return "stopped"
+
+    @property
+    def port(self) -> int | None:
+        """The loopback port of a server engine; None for in-process and child adapters."""
+        port = getattr(getattr(self.adapter, "config", None), "port", None)
+        return port if isinstance(port, int) else None
 
     async def drain(self) -> None:
         """Acquire the full lane (waits out in-flight jobs). Callers must
@@ -442,33 +501,6 @@ class _Resident:
         return self.active_count > 0
 
 
-class _Slot:
-    """The one sleepy (non-resident) adapter loaded on a given card.
-
-    Before bindings there was a single such adapter for the whole machine, so
-    loading klein meant unloading whatever else was loaded — even when the two
-    were destined for different cards. One slot per card keeps each card's
-    load independent; dispatch is still serialized, so at most one of them is
-    ever *running* a job.
-    """
-
-    def __init__(self, adapter: Adapter, model: str, device: str | None):
-        self.adapter = adapter
-        # The recipe name: the slot's key, and what its jobs ask for.
-        self.model = model
-        self.device = device
-
-    @property
-    def modality(self) -> Modality:
-        """The recipe's first modality, as the status scalars report a slot."""
-        recipe = get_recipe(self.model)
-        return Modality(recipe.modality) if recipe is not None else Modality.llm
-
-    @property
-    def key(self) -> str:
-        return self.model
-
-
 class Runner:
     """Processes jobs from queue, manages adapter lifecycle."""
 
@@ -482,7 +514,7 @@ class Runner:
         # silently swaps a freshly-passed queue for the global one.
         self._queue = queue if queue is not None else get_queue()
         # Sleepy adapters by GPU UUID (None when no card is visible at all).
-        self._slots: dict[str | None, _Slot] = {}
+        self._slots: dict[str | None, Instance] = {}
         self._running = False
         self._processing_job = False  # True while actively processing a job
         self._task: asyncio.Task | None = None
@@ -493,7 +525,7 @@ class Runner:
         # the legacy path and what tests construct.
         self._use_policy = use_policy
         self._static_residents = list(residents or [])
-        self._residents: dict[str, _Resident] = {}
+        self._residents: dict[str, Instance] = {}
         self._resident_task: asyncio.Task | None = None
         self._resident_jobs: set[asyncio.Task] = set()
         self._queue_empty_since: float | None = None
@@ -538,7 +570,7 @@ class Runner:
         gpu = device_of(model)
         return gpu.uuid if gpu else None
 
-    def _slot_for(self, model: str) -> _Slot | None:
+    def _slot_for(self, model: str) -> Instance | None:
         """The loaded sleepy adapter for this model, if it is loaded."""
         slot = self._slots.get(self._device_for(model))
         if slot and slot.key == model:
@@ -592,6 +624,10 @@ class Runner:
         keys = {k for k, res in self._residents.items() if getattr(res.adapter, "is_ready", False)}
         keys |= {s.model for s in self._slots.values() if getattr(s.adapter, "is_ready", False)}
         return keys
+
+    def instances(self) -> list[Instance]:
+        """Every instance giq holds, resident or on demand, by id."""
+        return sorted([*self._residents.values(), *self._slots.values()], key=lambda i: i.id)
 
     @property
     def owned_pids(self) -> dict[int, str]:
@@ -1072,7 +1108,7 @@ class Runner:
                 if res.adapter.is_ready:
                     break
                 # Evicted between our ready-check and lane entry — the
-                # residents loop will bring up a fresh _Resident; wait for it.
+                # residents loop will bring up a fresh Instance; wait for it.
                 res.lane.release()
             try:
                 res.active_count += 1
@@ -1157,7 +1193,7 @@ class Runner:
 
                 await get_stats().record_job(job)
 
-    async def _wait_resident_ready(self, key: str) -> _Resident:
+    async def _wait_resident_ready(self, key: str) -> Instance:
         """Wait for a resident to be loaded and ready (it may be evicted for
         an image batch; the residents loop reloads it once the batch drains)."""
         started = monotonic()
@@ -1311,7 +1347,7 @@ class Runner:
             logger.info(f"resident: loading {model}")
             adapter = self._build_worker(model)
             width = _lane_width(model, adapter)
-            resident = _Resident(adapter, width, device)
+            resident = Instance(adapter, model, device, residency=RESIDENT, width=width)
             self._residents[key] = resident
             try:
                 await adapter.start()
@@ -1375,7 +1411,7 @@ class Runner:
             finally:
                 res.release_all()
 
-    async def _victim_sizer(self, device: str | None = None) -> Callable[["_Resident"], float]:
+    async def _victim_sizer(self, device: str | None = None) -> Callable[[Instance], float]:
         """How much VRAM each resident would actually give back if evicted.
 
         Deliberately *not* the same number the VRAM gate uses. The declared
@@ -1396,7 +1432,7 @@ class Runner:
         if not pid_memory:
             return _declared_size
 
-        def size_of(res: "_Resident") -> float:
+        def size_of(res: Instance) -> float:
             pid = getattr(res.adapter, "pid", None)
             measured = pid_memory.get(pid) if pid is not None else None
             # A just-started child may not have allocated yet; trust the
@@ -1409,7 +1445,7 @@ class Runner:
 
     async def _defer_while_busy(
         self,
-        victims: list[tuple[str, "_Resident"]],
+        victims: list[tuple[str, Instance]],
         model: str,
     ) -> None:
         """Wait until every victim has been quiet for EVICT_IDLE_GRACE_SECONDS.
@@ -1506,7 +1542,7 @@ class Runner:
 
             # Publish the adapter BEFORE start() so that _unload_worker can reap
             # it if start() raises (including CancelledError during load).
-            self._slots[device] = _Slot(adapter, model, device)
+            self._slots[device] = Instance(adapter, model, device, residency=ON_DEMAND)
             try:
                 await adapter.start()
             except BaseException:
@@ -1555,7 +1591,7 @@ class Runner:
             self._warm_task.cancel()
         self._warm_task = asyncio.create_task(self._warm_timeout_check())
 
-    def _contested_slots(self, pending: list[Job]) -> list[_Slot]:
+    def _contested_slots(self, pending: list[Job]) -> list[Instance]:
         """Loaded slots a pending job needs for a *different* model.
 
         Keep-warm key is the recipe: a pending job for it is served by the

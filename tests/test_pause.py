@@ -36,12 +36,12 @@ def make_job(job_id: str, model: str = "test-model") -> Job:
 
 
 def _prime_resident(runner: Runner, key, width: int = 1):
-    from giq.runner import _Resident
+    from giq.runner import RESIDENT, Instance
 
     worker = AsyncMock()
     worker.is_ready = True
     worker.estimated_vram_gb = 4.0
-    res = _Resident(worker, width)
+    res = Instance(worker, key, residency=RESIDENT, width=width)
     runner._residents[key] = res
     return res
 
@@ -50,10 +50,10 @@ def _prime_resident(runner: Runner, key, width: int = 1):
 async def test_pause_unloads_residents_and_batch_worker(queue: JobQueue):
     runner = Runner(queue, residents=RESIDENTS)
     batch = AsyncMock()
-    from giq.runner import _Slot
+    from giq.runner import Instance
 
     device = runner._device_for("zimage")
-    runner._slots[device] = _Slot(batch, "zimage", device)
+    runner._slots[device] = Instance(batch, "zimage", device)
     residents = [_prime_resident(runner, key) for key in RESIDENTS]
 
     state = await runner.pause()

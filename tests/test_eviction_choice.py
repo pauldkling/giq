@@ -179,7 +179,7 @@ def test_declared_size_is_the_default():
 @pytest.mark.asyncio
 async def test_sizer_prefers_measured_then_falls_back(monkeypatch):
     from giq.queue import JobQueue
-    from giq.runner import Runner, _Resident
+    from giq.runner import RESIDENT, Instance, Runner
 
     runner = Runner(JobQueue())
     child = MagicMock()
@@ -192,22 +192,22 @@ async def test_sizer_prefers_measured_then_falls_back(monkeypatch):
     monkeypatch.setattr("giq.gpus.compute_app_memory", lambda *a: {4242: 8.88, 9999: 0.01})
     size_of = await runner._victim_sizer()
 
-    assert size_of(_Resident(child, 1)) == 8.88  # measured wins
-    assert size_of(_Resident(inproc, 1)) == 0.5  # no pid -> declared
-    assert size_of(_Resident(fresh, 1)) == 4.0  # near-zero reading -> declared
+    assert size_of(Instance(child, "r", residency=RESIDENT)) == 8.88  # measured wins
+    assert size_of(Instance(inproc, "r", residency=RESIDENT)) == 0.5  # no pid -> declared
+    assert size_of(Instance(fresh, "r", residency=RESIDENT)) == 4.0  # near-zero reading -> declared
 
 
 @pytest.mark.asyncio
 async def test_sizer_falls_back_wholesale_when_nvidia_smi_fails(monkeypatch):
     from giq.queue import JobQueue
-    from giq.runner import Runner, _declared_size, _Resident
+    from giq.runner import RESIDENT, Instance, Runner, _declared_size
 
     runner = Runner(JobQueue())
     monkeypatch.setattr("giq.gpus.compute_app_memory", lambda *a: {})
     assert await runner._victim_sizer() is _declared_size
     worker = MagicMock()
     worker.estimated_vram_gb, worker.pid = 7.0, 1
-    assert _declared_size(_Resident(worker, 1)) == 7.0
+    assert _declared_size(Instance(worker, "r", residency=RESIDENT)) == 7.0
 
 
 def test_kokoro_is_declared_at_its_measured_runtime_footprint():

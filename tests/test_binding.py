@@ -19,7 +19,7 @@ from giq import gpus
 from giq.models import JobRequest
 from giq.policy import reset_policy_store
 from giq.queue import JobQueue
-from giq.runner import Runner, _Resident
+from giq.runner import RESIDENT, Instance, Runner
 
 BIG = "GPU-8f6adead-beef-0000-0000-c0ffee000001"
 SMALL = "GPU-8f6adead-beef-0000-0000-c0ffee000002"
@@ -192,7 +192,7 @@ async def test_eviction_only_considers_residents_on_the_target_card(two_cards, s
         worker.is_ready = True
         worker.estimated_vram_gb = gb
         worker.pid = None
-        res = _Resident(worker, 1, device)
+        res = Instance(worker, key, device, residency=RESIDENT)
         res.last_active = 0.0
         runner._residents[key] = res
         return res
@@ -251,12 +251,12 @@ def test_the_child_environment_names_the_bound_card(two_cards, store):
 @pytest.mark.asyncio
 async def test_a_slot_per_card_survives_the_other_cards_load(two_cards, store):
     """Loading on one card no longer unloads the worker on the other."""
-    from giq.runner import _Slot
+    from giq.runner import Instance
 
     runner = Runner(JobQueue())
     with two_cards(bind={"flux_klein": "1"}):
         other = AsyncMock()
-        runner._slots[BIG] = _Slot(other, "llama-3.2-3b", BIG)
+        runner._slots[BIG] = Instance(other, "llama-3.2-3b", BIG)
 
         built = AsyncMock()
         built.is_ready = True
@@ -302,7 +302,7 @@ async def test_rebinding_a_loaded_resident_moves_it(two_cards, store):
         store.set("kokoro", PINNED)
         worker = AsyncMock()
         worker.is_ready = True
-        runner._residents["kokoro"] = _Resident(worker, 1, BIG)
+        runner._residents["kokoro"] = Instance(worker, "kokoro", BIG, residency=RESIDENT)
 
         await runner._release_demoted_residents()
         assert "kokoro" in runner._residents  # still where it belongs
