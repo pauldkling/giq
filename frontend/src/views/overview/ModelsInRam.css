@@ -10,6 +10,10 @@
 .ov-mir-table th { font-size: 10px; }
 .ov-mir-table .mono { font-size: 11.5px; }
 .ov-mir-model { font-weight: 500; }
+/* Engine names run long ("faster-whisper+pyannote") and are the least read
+   column; capping it keeps the Stop/Keep warm buttons in view on a laptop
+   screen instead of behind a sideways scroll. The full name is the title. */
+.ov-mir-engine { max-width: 13ch; overflow: hidden; text-overflow: ellipsis; }
 .ov-mir-model > svg { margin-right: 7px; }
 .ov-mir-residency { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .ov-mir-residency .tag { font-size: 10px; padding: 2px 8px; }

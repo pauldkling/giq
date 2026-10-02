@@ -30,7 +30,7 @@ export function WeightsRow({ w, name, busy, onDelete }: WeightsRowProps) {
         {w.revision && <span className="subtle inv-weights-rev"> @{w.revision.slice(0, 8)}</span>}
       </td>
       <td className="muted">{w.format ?? "–"}</td>
-      <td className="muted">{w.licence ?? "–"}</td>
+      <td className="muted inv-weights-licence">{w.licence ?? "–"}</td>
       <td>
         <span className="inv-weights-users" title={w.used_by.join("\n")}>
           {w.recipes.map((r) => (

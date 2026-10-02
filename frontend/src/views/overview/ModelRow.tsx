@@ -45,7 +45,7 @@ export function ModelRow({ row, card, lastUsed, busy, locked, onPolicy }: ModelR
         <span>{m.label || m.name}</span>
       </td>
       <td className="muted">{t(`common:worker.${modality}`, { defaultValue: modality })}</td>
-      <td className="mono muted" title={m.runtime}>
+      <td className="mono muted ov-mir-engine" title={m.runtime ? `${m.engine} · ${m.runtime}` : m.engine}>
         {m.engine}
       </td>
       <td

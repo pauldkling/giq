@@ -6,6 +6,7 @@
 
 .inv-weights-table td { vertical-align: top; }
 .inv-weights-name { overflow-wrap: anywhere; color: var(--text-strong); }
+.inv-weights-licence { white-space: nowrap; }
 .inv-weights-rev { font-size: 11px; }
 .inv-weights-absent td { color: var(--text-muted); }
 .inv-weights-users { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
