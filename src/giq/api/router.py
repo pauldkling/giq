@@ -289,7 +289,7 @@ async def get_service_status() -> ServiceStatus:
 
     if pause["paused"]:
         state = ServiceState.paused
-        state_message = "Serving paused — models unloaded, GPU free; requests get 503"
+        state_message = "Serving paused — instances stopped, GPUs free; requests get 503"
         if pause["reason"]:
             state_message += f" ({pause['reason']})"
     elif running:
@@ -308,7 +308,7 @@ async def get_service_status() -> ServiceStatus:
             state_message = f"{len(pending)} jobs waiting for VRAM: {vram_message}"
     else:
         state = ServiceState.idle
-        state_message = "No jobs, no worker loaded"
+        state_message = "No jobs, nothing loaded"
 
     return ServiceStatus(
         state=state,

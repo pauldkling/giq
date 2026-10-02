@@ -242,8 +242,8 @@ class JobStatusResponse(BaseModel):
 class ServiceState(StrEnum):
     """Overall service state."""
 
-    idle = "idle"  # No work, no worker loaded
-    ready = "ready"  # Worker loaded, waiting for work
+    idle = "idle"  # No work, nothing loaded
+    ready = "ready"  # An on-demand instance up, waiting for work
     running = "running"  # Actively processing a job
     blocked = "blocked"  # Jobs queued but can't run (VRAM)
     paused = "paused"  # Serving suspended by an operator; GPU handed back
