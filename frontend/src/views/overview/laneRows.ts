@@ -42,7 +42,7 @@ export function laneRows(catalog: Catalog | undefined, status: Status | undefine
      The difference matters: one resolves on its own in seconds, the other
      waits out someone else's render. */
   const batch =
-    status?.active_worker != null ? laneKey(status.active_worker, status.active_model ?? "?") : null;
+    status?.active_modality != null ? laneKey(status.active_modality, status.active_recipe ?? "?") : null;
   for (const m of catalog.models) {
     if (!m.resident) continue;
     const evicted = !m.ready && batch !== null;
@@ -57,7 +57,7 @@ export function laneRows(catalog: Catalog | undefined, status: Status | undefine
     });
   }
   for (const a of status?.active ?? []) {
-    const m = catalog.models.find((x) => x.worker === a.worker && x.model === a.model);
+    const m = catalog.models.find((x) => x.worker === a.modality && x.model === a.recipe);
     if (!m || m.resident) continue;
     rows.push({
       key: laneKey(m.worker, m.model),

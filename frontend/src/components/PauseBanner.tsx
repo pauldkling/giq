@@ -21,7 +21,7 @@ export function PauseBanner() {
   const since = data.paused_since ? Date.parse(data.paused_since) / 1000 : null;
   // A graceful pause reports paused the moment it starts draining; say so
   // rather than claiming the VRAM is already back.
-  const draining = !!data.active_worker || data.jobs_running.length > 0;
+  const draining = !!data.active_modality || data.jobs_running.length > 0;
   // A pause unloads every card, so what it frees is the machine's, not the
   // default card's.
   const cards = data.gpus?.length ? data.gpus : [data];

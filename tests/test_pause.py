@@ -62,7 +62,7 @@ async def test_pause_unloads_residents_and_batch_worker(queue: JobQueue):
     assert state["warnings"] == []
     assert runner.is_paused
     assert not runner._residents
-    assert runner.active_worker is None
+    assert runner.active_modality is None
     batch.stop.assert_awaited()
     for res in residents:
         res.adapter.stop.assert_awaited()
@@ -199,7 +199,7 @@ async def test_paused_runner_refuses_to_load(queue: JobQueue):
 
     with pytest.raises(RuntimeError, match="paused"):
         await runner._ensure_worker("llama-3.2-3b")
-    assert runner.active_worker is None
+    assert runner.active_modality is None
 
     await runner._load_resident(RESIDENTS[0])
     assert not runner._residents

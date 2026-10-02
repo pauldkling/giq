@@ -26,9 +26,9 @@ export function JobsByWorker({ timeline, hours }: { timeline: StatsTimeline | un
   const byT = new Map<number, Map<string, Point>>();
   for (const p of timeline?.points ?? []) {
     if (!byT.has(p.t)) byT.set(p.t, new Map());
-    byT.get(p.t)!.set(p.worker, p);
+    byT.get(p.t)!.set(p.modality, p);
   }
-  const workers = [...new Set((timeline?.points ?? []).map((p) => p.worker))].sort(
+  const workers = [...new Set((timeline?.points ?? []).map((p) => p.modality))].sort(
     (a, b) => workerRank(a) - workerRank(b),
   );
   const buckets: BarBucket[] = Array.from({ length: n }, (_, i) => {

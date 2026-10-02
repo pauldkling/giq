@@ -84,7 +84,7 @@ describe("cancelJob", () => {
 });
 
 const job = (over: Partial<JobRecord>): JobRecord => ({
-  t: 1000, job_id: "j", worker: "llm", model: "m", status: "completed", queue_ms: 1,
+  t: 1000, job_id: "j", modality: "llm", recipe: "m", status: "completed", queue_ms: 1,
   run_ms: 1000, tasks: 1, error: null, tokens_in: 10, tokens_out: 50, ...over,
 });
 
@@ -96,7 +96,7 @@ describe("throughput", () => {
 
   it("ignores old, failed and token-less jobs", () => {
     const r = throughput(
-      [job({ t: 100 }), job({ status: "failed" }), job({ worker: "text2image", tokens_out: null })],
+      [job({ t: 100 }), job({ status: "failed" }), job({ modality: "text2image", tokens_out: null })],
       1100,
     );
     expect(r.rate).toBeNull();
@@ -124,7 +124,7 @@ describe("laneRows", () => {
     } as Catalog;
     const rows = laneRows(
       catalog,
-      status({ active: [{ device: "GPU-B", worker: "text2image", model: "flux", ready: false }] }),
+      status({ active: [{ device: "GPU-B", modality: "text2image", recipe: "flux", ready: false }] }),
     );
     expect(rows.map((r) => [r.key, r.warm, r.state, r.device])).toEqual([
       ["llm/warm", true, "ready", "GPU-A"],
@@ -134,7 +134,7 @@ describe("laneRows", () => {
 
   it("says a missing resident was evicted for the batch job", () => {
     const catalog = { models: [model({ model: "warm", resident: true })] } as Catalog;
-    const [row] = laneRows(catalog, status({ active_worker: "text2image", active_model: "flux" }));
+    const [row] = laneRows(catalog, status({ active_modality: "text2image", active_recipe: "flux" }));
     expect(row).toMatchObject({ state: "evicted", evictedFor: "text2image/flux" });
   });
 });

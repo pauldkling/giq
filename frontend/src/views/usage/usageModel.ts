@@ -10,11 +10,11 @@ import { assignSeriesColors } from "../../lib/series";
    without a DOM: the chart's x-domain, its bucket labels, the stacks, and
    which card era is the current one. */
 
-type Row = { worker: string; model: string };
+type Row = { modality: string; recipe: string };
 
-/* Keyed on worker/model, not model: flux_klein exists under both text2image
-   and image_edit, and they are different entities. */
-export const modelKey = (m: Row): string => `${m.worker}/${m.model}`;
+/* Keyed on modality and recipe, not the recipe alone: flux_klein renders and
+   edits from one recipe, and a render and an edit are different work. */
+export const modelKey = (m: Row): string => `${m.modality}/${m.recipe}`;
 
 const tokens = (r: { tokens_in: number | null; tokens_out: number | null }): number =>
   (r.tokens_in ?? 0) + (r.tokens_out ?? 0);
@@ -100,8 +100,8 @@ export interface UsageChart {
    over every model in the window, alphabetically, so a model keeps its
    colour when a period or GPU switch changes what else is on screen. */
 export function buildUsageChart(d: StatsUsage, period: UsagePeriod, now = new Date()): UsageChart {
-  const colors = assignSeriesColors(d.models.map(modelKey));
-  const models = d.models.filter((m) => tokens(m) > 0);
+  const colors = assignSeriesColors(d.recipes.map(modelKey));
+  const models = d.recipes.filter((m) => tokens(m) > 0);
   const order = models.map(modelKey);
   const perBucket = new Map<string, Map<string, SeriesPoint>>();
   for (const p of d.series) {
@@ -138,8 +138,8 @@ export function buildUsageChart(d: StatsUsage, period: UsagePeriod, now = new Da
    before it counts as a call with no tokens. When such calls fall in the
    window the chart undercounts, and the hint says so. */
 export const predatesTokenAccounting = (d: StatsUsage): boolean =>
-  d.models.some(
-    (m) => m.worker === "llm" && m.jobs > 0 && m.tokens_in == null && m.tokens_out == null,
+  d.recipes.some(
+    (m) => m.modality === "llm" && m.jobs > 0 && m.tokens_in == null && m.tokens_out == null,
   );
 
 /** Eras seen within this long are "current" when the live GPU list is unavailable. */

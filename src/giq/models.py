@@ -259,8 +259,8 @@ class ServiceStatus(BaseModel):
 
     # Active worker info. The scalars report one loaded worker for
     # back-compat; `active` lists every card's slot with its binding.
-    active_worker: Modality | None = None
-    active_model: str | None = None
+    active_modality: Modality | None = None
+    active_recipe: str | None = None
     active: list[dict[str, Any]] = []
 
     # VRAM status. These scalars describe ONE card — the default device,
@@ -382,11 +382,12 @@ class ModelPolicyResponse(BaseModel):
     warnings: list[str] = []
 
 
-class WorkerCapability(BaseModel):
-    """Capabilities of a worker type."""
+class ModalityCapability(BaseModel):
+    """What giq serves for one modality."""
 
-    backend: str
-    models: list[str]
+    # Every engine in play for it, comma-separated (ocr runs on two).
+    engine: str
+    recipes: list[str]
     max_batch: int | None = None
     voices: list[str] | None = None  # TTS only
 
@@ -394,5 +395,5 @@ class WorkerCapability(BaseModel):
 class Capabilities(BaseModel):
     """Full service capabilities."""
 
-    workers: dict[Modality, WorkerCapability]
+    modalities: dict[Modality, ModalityCapability]
     constraints: dict[str, Any]

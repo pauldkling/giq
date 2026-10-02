@@ -39,8 +39,8 @@ def make_job(job_id: str, model: str = "test-model") -> Job:
 
 def test_runner_initial_state(runner: Runner):
     """Test runner starts with no active worker."""
-    assert runner.active_worker is None
-    assert runner.active_model is None
+    assert runner.active_modality is None
+    assert runner.active_recipe is None
 
 
 @pytest.mark.asyncio
@@ -97,7 +97,7 @@ async def test_warm_timeout_keeps_worker_for_matching_model(queue: JobQueue, run
         pass
 
     assert runner._slots  # still loaded
-    assert runner.active_model == "gemma-3-27b-it-qat"
+    assert runner.active_recipe == "gemma-3-27b-it-qat"
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_warm_timeout_keeps_a_recipe_warm_for_its_other_modality(
     except TimeoutError:
         pass  # reached the warm sleep: no eager unload
 
-    assert runner.active_model == "flux_klein"
+    assert runner.active_recipe == "flux_klein"
 
 
 RESIDENTS = [

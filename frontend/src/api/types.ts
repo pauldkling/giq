@@ -50,10 +50,10 @@ export interface AccessPosture {
 }
 
 export interface ActiveSlot {
-  /** GPU UUID the sleepy worker sits on. */
+  /** GPU UUID the on-demand instance sits on. */
   device: string | null;
-  worker: string;
-  model: string;
+  modality: string;
+  recipe: string;
   ready: boolean;
 }
 
@@ -72,8 +72,8 @@ export interface StatusGpu {
 export interface Status {
   state: ServiceState;
   state_message: string | null;
-  active_worker: WorkerType | null;
-  active_model: string | null;
+  active_modality: WorkerType | null;
+  active_recipe: string | null;
   active: ActiveSlot[];
   /** The ONE card the vram_* figures below describe (giq's default card). */
   gpu: { uuid: string; index: number; name: string } | null;
@@ -237,16 +237,16 @@ export interface StorageModel {
 }
 
 /** An operator recipe file that is serving. */
-export interface InstanceFile {
+export interface RecipeFile {
   file: string;
-  worker: WorkerType;
   name: string;
-  /** Replaces the built-in recipe of the same worker and name. */
+  modalities: WorkerType[];
+  /** Replaces the built-in recipe of the same name. */
   replaces_builtin: boolean;
 }
 
 /** An operator recipe file giq left out, and why. */
-export interface InstanceLoadError {
+export interface RecipeLoadError {
   /** Null when the problem is not one file's (two files defining one recipe). */
   file: string | null;
   message: string;
@@ -256,10 +256,10 @@ export interface InstanceLoadError {
 export interface RecipesInfo {
   dir: string | null;
   builtin_dir: string;
-  files: InstanceFile[];
-  /** "worker/name" of each built-in an operator file replaces. */
+  files: RecipeFile[];
+  /** The name of each built-in an operator file replaces. */
   overrides: string[];
-  errors: InstanceLoadError[];
+  errors: RecipeLoadError[];
 }
 
 export interface StorageResponse {
@@ -374,9 +374,9 @@ export interface CancelResponse {
 export interface StatsSummary {
   hours: number;
   evictions: number;
-  models: {
-    worker: WorkerType;
-    model: string;
+  recipes: {
+    modality: WorkerType;
+    recipe: string;
     jobs: number;
     failed: number;
     avg_run_ms: number | null;
@@ -392,7 +392,7 @@ export interface StatsTimeline {
   points: {
     /** Bucket start, epoch seconds. */
     t: number;
-    worker: WorkerType;
+    modality: WorkerType;
     jobs: number;
     failed: number;
     avg_run_ms: number | null;
@@ -453,9 +453,9 @@ export interface StatsUsage {
   since: number;
   until: number | null;
   totals: { jobs: number; failed: number; tokens_in: number; tokens_out: number };
-  models: {
-    worker: WorkerType;
-    model: string;
+  recipes: {
+    modality: WorkerType;
+    recipe: string;
     jobs: number;
     failed: number;
     tasks: number | null;
@@ -466,8 +466,8 @@ export interface StatsUsage {
   /** `b` is a local-time bucket key: "YYYY-MM-DD HH:00" (day), "YYYY-MM-DD" (week/month), "YYYY-MM" (all). */
   series: {
     b: string;
-    worker: WorkerType;
-    model: string;
+    modality: WorkerType;
+    recipe: string;
     jobs: number;
     tokens_in: number | null;
     tokens_out: number | null;
@@ -478,8 +478,8 @@ export interface StatsUsage {
 export interface JobRecord {
   t: number;
   job_id: string;
-  worker: WorkerType;
-  model: string;
+  modality: WorkerType;
+  recipe: string;
   status: JobStatus | string;
   queue_ms: number | null;
   run_ms: number | null;
@@ -499,10 +499,10 @@ export interface StatsEvent {
 // --- GET /capabilities -------------------------------------------------------------
 
 export interface Capabilities {
-  workers: Partial<
+  modalities: Partial<
     Record<
       WorkerType,
-      { backend: string; models: string[]; max_batch: number | null; voices: string[] | null }
+      { engine: string; recipes: string[]; max_batch: number | null; voices: string[] | null }
     >
   >;
   constraints: Record<string, unknown>;

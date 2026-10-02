@@ -83,7 +83,7 @@ curl -X POST http://localhost:8084/control/resume   # residents reload in ~15s
 | `/status` | GET | Active worker, VRAM per card (`gpus`; the `vram_*` scalars are the default card's), queue depth, pause state, access posture |
 | `/gpus` | GET | Per-card telemetry; `selected` marks the default card |
 | `/engines` | GET | Declared inference engines and the build each one reports |
-| `/capabilities` | GET | Available workers and models |
+| `/capabilities` | GET | Per modality: the recipes that serve it, their engines, batch ceilings and voices |
 | `/control/models` | GET | Residency policy and GPU binding of every model |
 | `/control/models/{worker}/{model}` | POST | Set a model's residency policy (`pinned`, `auto`, `off`) |
 | `/control/models/{worker}/{model}/device` | POST | Bind a model to a GPU (or unbind) |

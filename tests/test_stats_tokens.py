@@ -53,8 +53,12 @@ def test_migration_adds_token_columns(tmp_path: Path):
     rec = StatsRecorder(db_path=db)
     rec._record_job_sync((2.0, "j1", "llm", "gemma", "completed", 5, 100, 1, None, 30, 10, None))
     rows = rec.query("SELECT tokens_in, tokens_out FROM jobs ORDER BY ts")
+    # ADR-003: the old worker/model columns are the modality and recipe now,
+    # renamed in place with their history.
+    history = rec.query("SELECT modality, recipe FROM jobs ORDER BY ts")
     rec.close()
     assert rows == [(None, None), (30, 10)]
+    assert history == [("llm", "gemma"), ("llm", "gemma")]
 
 
 async def test_stats_usage_endpoint(tmp_path: Path, monkeypatch):
@@ -80,12 +84,12 @@ async def test_stats_usage_endpoint(tmp_path: Path, monkeypatch):
     rec.close()
 
     assert d["totals"] == {"jobs": 3, "failed": 1, "tokens_in": 200, "tokens_out": 50}
-    by_model = {m["model"]: m for m in d["models"]}
+    by_model = {m["recipe"]: m for m in d["recipes"]}
     assert by_model["gemma-4-12b"]["tokens_in"] == 200
     assert by_model["gemma-4-12b"]["jobs"] == 2
     assert by_model["whisper-large-v3"]["tokens_in"] is None
     # token-ranked ordering puts gemma first
-    assert d["models"][0]["model"] == "gemma-4-12b"
+    assert d["recipes"][0]["recipe"] == "gemma-4-12b"
     assert len(d["series"]) == 2  # one daily bucket per (worker, model)
 
 
@@ -124,14 +128,14 @@ async def test_usage_gpu_filter_and_explicit_range(tmp_path: Path, monkeypatch):
 
     only_a = await stats_usage(period="all", gpu="GPU-a", since=None, until=None)
     assert only_a["totals"]["jobs"] == 1
-    assert only_a["models"][0]["model"] == "old-model"
+    assert only_a["recipes"][0]["recipe"] == "old-model"
     assert only_a["gpu"] == "GPU-a"
 
     windowed = await stats_usage(
         period="all", gpu=None, since=str(base + 100), until=str(base + 200000)
     )
     assert windowed["totals"]["jobs"] == 1
-    assert windowed["models"][0]["model"] == "new-model"
+    assert windowed["recipes"][0]["recipe"] == "new-model"
 
     iso = await stats_usage(period="all", gpu=None, since="2026-01-01", until=None)
     assert iso["totals"]["jobs"] == 2

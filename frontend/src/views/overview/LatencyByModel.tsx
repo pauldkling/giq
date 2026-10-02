@@ -9,28 +9,28 @@ import { HBars } from "../../components/charts";
 import { workerColor } from "../../lib/series";
 import { useFormat } from "../../lib/useFormat";
 
-type ModelStats = StatsSummary["models"][number];
+type ModelStats = StatsSummary["recipes"][number];
 
 /* The six busiest models (the server's order), ranked by their average run
    time. The worker's colour marks the bar; the name says which model. */
 export function LatencyByModel({ summary }: { summary: StatsSummary | undefined }) {
   const { t } = useTranslation("overview");
   const f = useFormat();
-  const models = (summary?.models ?? [])
+  const models = (summary?.recipes ?? [])
     .filter((m): m is ModelStats & { avg_run_ms: number } => m.avg_run_ms != null)
     .slice(0, 6)
     .sort((a, b) => b.avg_run_ms - a.avg_run_ms);
-  const byId = new Map(models.map((m) => [`${m.worker}/${m.model}`, m]));
+  const byId = new Map(models.map((m) => [`${m.modality}/${m.recipe}`, m]));
   const jobs = (n: number) => t("common:units.jobs", { count: n });
   return (
     <Card title={t("usage.latency")}>
       <HBars
         ariaLabel={t("usage.latencyLabel")}
         rows={models.map((m) => ({
-          id: `${m.worker}/${m.model}`,
-          label: m.model,
+          id: `${m.modality}/${m.recipe}`,
+          label: m.recipe,
           value: m.avg_run_ms,
-          color: workerColor(m.worker),
+          color: workerColor(m.modality),
           valueLabel: t("usage.latencyValue", { dur: f.dur(m.avg_run_ms), jobs: jobs(m.jobs) }),
         }))}
         tooltip={(r) => {

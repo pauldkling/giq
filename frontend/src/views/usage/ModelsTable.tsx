@@ -18,7 +18,7 @@ import "./Usage.css";
 export function ModelsTable({ data }: { data: StatsUsage | undefined }) {
   const { t } = useTranslation("usage");
   const f = useFormat();
-  const models = data?.models;
+  const models = data?.recipes;
   const colors = useMemo(() => assignSeriesColors((models ?? []).map(modelKey)), [models]);
   return (
     <Card
@@ -50,7 +50,7 @@ export function ModelsTable({ data }: { data: StatsUsage | undefined }) {
                 return (
                   <tr key={modelKey(m)}>
                     <td className="us-nowrap">
-                      <ModelLabel worker={m.worker} model={m.model} color={colors.get(modelKey(m))} showWorker />
+                      <ModelLabel worker={m.modality} model={m.recipe} color={colors.get(modelKey(m))} showWorker />
                     </td>
                     <td className="num">{f.num(m.jobs)}</td>
                     <td className="num">

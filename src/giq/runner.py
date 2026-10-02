@@ -115,8 +115,8 @@ def _log_inflight(event: str, job: Job, **extra: Any) -> None:
             "ts": datetime.now().isoformat(timespec="milliseconds"),
             "event": event,
             "job_id": job.job_id,
-            "worker": str(job.request.modality),
-            "model": job.request.model,
+            "modality": str(job.request.modality),
+            "recipe": job.request.model,
         }
         # Everything above is giq's own vocabulary. Everything below came from
         # a caller, so it goes through the same check the shape implies: a
@@ -578,8 +578,8 @@ class Runner:
         return None
 
     @property
-    def active_worker(self) -> Modality | None:
-        """A currently loaded sleepy adapter's type.
+    def active_modality(self) -> Modality | None:
+        """A currently loaded on-demand instance's (first) modality.
 
         Scalar for back-compat (/status, the stats sampler). With one slot per
         card there can be more than one; ``active_slots`` has them all.
@@ -588,19 +588,19 @@ class Runner:
         return slot.modality if slot else None
 
     @property
-    def active_model(self) -> str | None:
-        """The model of the adapter ``active_worker`` reports."""
+    def active_recipe(self) -> str | None:
+        """The recipe of the instance ``active_modality`` reports."""
         slot = next(iter(self._slots.values()), None)
         return slot.model if slot else None
 
     @property
     def active_slots(self) -> list[dict[str, Any]]:
-        """Every loaded sleepy adapter, with the card it sits on."""
+        """Every loaded on-demand instance, with the card it sits on."""
         return [
             {
                 "device": slot.device,
-                "worker": str(slot.modality),
-                "model": slot.model,
+                "modality": str(slot.modality),
+                "recipe": slot.model,
                 "ready": bool(getattr(slot.adapter, "is_ready", False)),
             }
             for slot in self._slots.values()

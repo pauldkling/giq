@@ -22,11 +22,11 @@ describe("stateMessage", () => {
   it("follows the server's branches, in its order", () => {
     expect(stateMessage(status({})).key).toBe("idle");
     expect(stateMessage(status({ paused: true, jobs_running: ["a"] })).key).toBe("paused");
-    expect(stateMessage(status({ jobs_running: ["a", "b"], active_worker: "llm" }))).toEqual({
+    expect(stateMessage(status({ jobs_running: ["a", "b"], active_modality: "llm" }))).toEqual({
       key: "running",
       params: { count: 2 },
     });
-    expect(stateMessage(status({ active_worker: "llm", active_model: "m", jobs_pending: ["x"] }))).toEqual({
+    expect(stateMessage(status({ active_modality: "llm", active_recipe: "m", jobs_pending: ["x"] }))).toEqual({
       key: "loaded",
       params: { worker: "llm", model: "m" },
     });

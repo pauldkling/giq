@@ -38,7 +38,7 @@ export function JobQueue() {
     useCallback(async (signal: AbortSignal) => {
       const hours = Math.min(Math.max((uptime.current ?? 0) / 3600, 0.01), MAX_SUMMARY_HOURS);
       const s = await getJSON<StatsSummary>(`/stats/summary?hours=${hours.toFixed(4)}`, { signal });
-      return s.models.reduce((a, m) => a + m.jobs - m.failed, 0);
+      return s.recipes.reduce((a, m) => a + m.jobs - m.failed, 0);
     }, []),
     { intervalMs: SLOW_POLL_MS, enabled: typeof status.data?.uptime_s === "number" },
   );

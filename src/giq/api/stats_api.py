@@ -108,14 +108,14 @@ async def sandbox() -> RedirectResponse:
 
 @router.get("/stats/summary")
 async def stats_summary(hours: float = Query(default=24, gt=0, le=24 * 365)) -> dict:
-    """Per worker/model aggregates over the window."""
+    """Per recipe aggregates over the window, with the modality each ran as."""
     since = time.time() - hours * 3600
     rows = await get_stats().fetch(
         """
-        SELECT worker, model, COUNT(*),
+        SELECT modality, recipe, COUNT(*),
                SUM(CASE WHEN status != 'completed' THEN 1 ELSE 0 END),
                AVG(run_ms), MAX(run_ms), AVG(queue_wait_ms), SUM(tasks)
-        FROM jobs WHERE ts >= ? GROUP BY worker, model ORDER BY COUNT(*) DESC
+        FROM jobs WHERE ts >= ? GROUP BY modality, recipe ORDER BY COUNT(*) DESC
         """,
         (since,),
     )
@@ -125,10 +125,10 @@ async def stats_summary(hours: float = Query(default=24, gt=0, le=24 * 365)) -> 
     return {
         "hours": hours,
         "evictions": evictions[0][0] if evictions else 0,
-        "models": [
+        "recipes": [
             {
-                "worker": w,
-                "model": m,
+                "modality": w,
+                "recipe": m,
                 "jobs": n,
                 "failed": failed,
                 "avg_run_ms": round(avg_run) if avg_run is not None else None,
@@ -256,10 +256,10 @@ async def stats_usage(
 
     models = await get_stats().fetch(
         f"""
-        SELECT worker, model, COUNT(*),
+        SELECT modality, recipe, COUNT(*),
                SUM(CASE WHEN status != 'completed' THEN 1 ELSE 0 END),
                SUM(tasks), SUM(tokens_in), SUM(tokens_out), MAX(ts)
-        FROM jobs WHERE {where} GROUP BY worker, model
+        FROM jobs WHERE {where} GROUP BY modality, recipe
         ORDER BY COALESCE(SUM(tokens_in),0) + COALESCE(SUM(tokens_out),0) DESC, COUNT(*) DESC
         """,
         tuple(params),
@@ -267,8 +267,8 @@ async def stats_usage(
     series = await get_stats().fetch(
         f"""
         SELECT strftime('{bucket_fmt}', ts, 'unixepoch', 'localtime') AS b,
-               worker, model, COUNT(*), SUM(tokens_in), SUM(tokens_out)
-        FROM jobs WHERE {where} GROUP BY b, worker, model ORDER BY b
+               modality, recipe, COUNT(*), SUM(tokens_in), SUM(tokens_out)
+        FROM jobs WHERE {where} GROUP BY b, modality, recipe ORDER BY b
         """,
         tuple(params),
     )
@@ -283,10 +283,10 @@ async def stats_usage(
             "tokens_in": sum(r[5] or 0 for r in models),
             "tokens_out": sum(r[6] or 0 for r in models),
         },
-        "models": [
+        "recipes": [
             {
-                "worker": w,
-                "model": m,
+                "modality": w,
+                "recipe": m,
                 "jobs": n,
                 "failed": failed or 0,
                 "tasks": tasks,
@@ -297,7 +297,7 @@ async def stats_usage(
             for (w, m, n, failed, tasks, tin, tout, last) in models
         ],
         "series": [
-            {"b": b, "worker": w, "model": m, "jobs": n, "tokens_in": tin, "tokens_out": tout}
+            {"b": b, "modality": w, "recipe": m, "jobs": n, "tokens_in": tin, "tokens_out": tout}
             for (b, w, m, n, tin, tout) in series
         ],
     }
@@ -308,13 +308,13 @@ async def stats_timeline(
     hours: float = Query(default=24, gt=0, le=24 * 365),
     bucket_s: int = Query(default=3600, ge=60),
 ) -> dict:
-    """Bucketed job counts per worker (stacked-bar source)."""
+    """Bucketed job counts per modality (stacked-bar source)."""
     since = time.time() - hours * 3600
     rows = await get_stats().fetch(
         """
-        SELECT CAST(ts / ? AS INTEGER) * ? AS bucket, worker, COUNT(*),
+        SELECT CAST(ts / ? AS INTEGER) * ? AS bucket, modality, COUNT(*),
                SUM(CASE WHEN status != 'completed' THEN 1 ELSE 0 END), AVG(run_ms)
-        FROM jobs WHERE ts >= ? GROUP BY bucket, worker ORDER BY bucket
+        FROM jobs WHERE ts >= ? GROUP BY bucket, modality ORDER BY bucket
         """,
         (bucket_s, bucket_s, since),
     )
@@ -323,7 +323,7 @@ async def stats_timeline(
         "points": [
             {
                 "t": b,
-                "worker": w,
+                "modality": w,
                 "jobs": n,
                 "failed": f,
                 "avg_run_ms": round(avg) if avg is not None else None,
@@ -399,7 +399,7 @@ async def stats_jobs(
     where = "WHERE gpu_uuid = ?" if gpu else ""
     params = (gpu, limit) if gpu else (limit,)
     rows = await get_stats().fetch(
-        "SELECT ts, job_id, worker, model, status, queue_wait_ms, run_ms, tasks, error,"
+        "SELECT ts, job_id, modality, recipe, status, queue_wait_ms, run_ms, tasks, error,"
         f" tokens_in, tokens_out FROM jobs {where} ORDER BY ts DESC LIMIT ?",
         params,
     )
@@ -407,8 +407,8 @@ async def stats_jobs(
         {
             "t": t,
             "job_id": j,
-            "worker": w,
-            "model": m,
+            "modality": w,
+            "recipe": m,
             "status": s,
             "queue_ms": q,
             "run_ms": r,
@@ -616,7 +616,7 @@ async def storage() -> dict:
     # last render or edit, whichever came later.
     last_used = dict(
         await get_stats().fetch(
-            "SELECT model, MAX(ts) FROM jobs WHERE status='completed' GROUP BY model"
+            "SELECT recipe, MAX(ts) FROM jobs WHERE status='completed' GROUP BY recipe"
         )
     )
     resident_keys = set(get_policy_store().residents())

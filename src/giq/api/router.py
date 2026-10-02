@@ -24,6 +24,7 @@ from giq.models import (
     JobStatus,
     JobStatusResponse,
     Modality,
+    ModalityCapability,
     ModelDeviceRequest,
     ModelPolicyRequest,
     ModelPolicyResponse,
@@ -32,7 +33,6 @@ from giq.models import (
     PauseResponse,
     ServiceState,
     ServiceStatus,
-    WorkerCapability,
 )
 from giq.queue import get_queue
 from giq.registry import get_recipe, recipes_serving
@@ -535,9 +535,9 @@ async def get_service_status() -> ServiceStatus:
         state = ServiceState.running
         job = running[0]
         state_message = f"Processing {job.request.modality}/{job.request.model}"
-    elif runner.active_worker:
+    elif runner.active_modality:
         state = ServiceState.ready
-        state_message = f"Worker {runner.active_worker}/{runner.active_model} loaded, waiting"
+        state_message = f"{runner.active_recipe} ({runner.active_modality}) loaded, waiting"
     elif pending:
         if vram_ok:
             state = ServiceState.ready
@@ -552,8 +552,8 @@ async def get_service_status() -> ServiceStatus:
     return ServiceStatus(
         state=state,
         state_message=state_message,
-        active_worker=runner.active_worker,
-        active_model=runner.active_model,
+        active_modality=runner.active_modality,
+        active_recipe=runner.active_recipe,
         active=runner.active_slots,
         gpu=({"uuid": device.uuid, "index": device.index, "name": device.name} if device else None),
         vram_used_gb=vram.used_gb,
@@ -600,7 +600,7 @@ async def get_llm_endpoint(model: str = "gemma-4-12b") -> dict:
             detail={"state": "disabled", "model": model},
             headers={"Retry-After": "300"},
         )
-    state = "paused" if runner.is_paused else "evicted" if runner.active_worker else "loading"
+    state = "paused" if runner.is_paused else "evicted" if runner.active_modality else "loading"
     raise HTTPException(
         status_code=503,
         detail={"state": state, "model": model},
@@ -633,31 +633,31 @@ async def get_capabilities() -> Capabilities:
     model name that was absent from the VRAM table and therefore unloadable.
     Generating it means a model is discoverable exactly when it is runnable.
     """
-    workers: dict[Modality, WorkerCapability] = {}
+    modalities: dict[Modality, ModalityCapability] = {}
     for modality in Modality:
         for recipe in recipes_serving(modality):
             batch = recipe.max_batch_for(modality)
-            cap = workers.get(modality)
+            cap = modalities.get(modality)
             if cap is None:
-                workers[modality] = WorkerCapability(
-                    backend=recipe.engine,
-                    models=[recipe.name],
+                modalities[modality] = ModalityCapability(
+                    engine=recipe.engine,
+                    recipes=[recipe.name],
                     max_batch=batch,
                     voices=list(recipe.voices) or None,
                 )
                 continue
-            cap.models.append(recipe.name)
+            cap.recipes.append(recipe.name)
             # One modality can span engines (ocr runs on transformers or its
             # pinned 4.57 venv depending on `engine:`), so report every one in play.
-            if recipe.engine not in cap.backend:
-                cap.backend = f"{cap.backend}, {recipe.engine}"
+            if recipe.engine not in cap.engine:
+                cap.engine = f"{cap.engine}, {recipe.engine}"
             if batch is not None:
                 cap.max_batch = max(cap.max_batch or 0, batch)
             if recipe.voices:
                 cap.voices = sorted({*(cap.voices or []), *recipe.voices})
 
     return Capabilities(
-        workers=workers,
+        modalities=modalities,
         constraints={
             "max_concurrent_heavy": 1,
             "vram_total_gb": round(get_vram_status().total_gb),

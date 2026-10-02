@@ -43,7 +43,7 @@ export function CallsWall({ jobs }: { jobs: JobRecord[] | undefined }) {
                       {f.ago(j.t)}
                     </td>
                     <td className="us-nowrap">
-                      <ModelLabel worker={j.worker} model={j.model} />
+                      <ModelLabel worker={j.modality} model={j.recipe} />
                     </td>
                     <td>
                       <JobStatus status={j.status} error={j.error} />

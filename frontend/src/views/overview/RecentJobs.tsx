@@ -37,7 +37,7 @@ export function RecentJobs({ jobs }: { jobs: JobRecord[] | undefined }) {
                     {f.ago(j.t)}
                   </td>
                   <td>
-                    <ModelLabel worker={j.worker} model={j.model} />
+                    <ModelLabel worker={j.modality} model={j.recipe} />
                   </td>
                   <td>
                     <JobStatus status={j.status} error={j.error} />

@@ -64,22 +64,22 @@ const usage = (over: Partial<StatsUsage> = {}): StatsUsage => ({
   since: 0,
   until: null,
   totals: { jobs: 0, failed: 0, tokens_in: 0, tokens_out: 0 },
-  models: [],
+  recipes: [],
   series: [],
   ...over,
 });
 
 describe("buildUsageChart", () => {
   const d = usage({
-    models: [
-      { worker: "llm", model: "zeta", jobs: 3, failed: 0, tasks: 3, tokens_in: 900, tokens_out: 100, last_ts: 1 },
-      { worker: "llm", model: "alpha", jobs: 1, failed: 0, tasks: 1, tokens_in: 10, tokens_out: 5, last_ts: 1 },
-      { worker: "text2image", model: "flux", jobs: 2, failed: 0, tasks: 2, tokens_in: null, tokens_out: null, last_ts: 1 },
+    recipes: [
+      { modality: "llm", recipe: "zeta", jobs: 3, failed: 0, tasks: 3, tokens_in: 900, tokens_out: 100, last_ts: 1 },
+      { modality: "llm", recipe: "alpha", jobs: 1, failed: 0, tasks: 1, tokens_in: 10, tokens_out: 5, last_ts: 1 },
+      { modality: "text2image", recipe: "flux", jobs: 2, failed: 0, tasks: 2, tokens_in: null, tokens_out: null, last_ts: 1 },
     ],
     series: [
-      { b: "2026-09-27", worker: "llm", model: "zeta", jobs: 3, tokens_in: 900, tokens_out: 100 },
-      { b: "2026-09-27", worker: "llm", model: "alpha", jobs: 1, tokens_in: 10, tokens_out: 5 },
-      { b: "2026-09-27", worker: "text2image", model: "flux", jobs: 2, tokens_in: null, tokens_out: null },
+      { b: "2026-09-27", modality: "llm", recipe: "zeta", jobs: 3, tokens_in: 900, tokens_out: 100 },
+      { b: "2026-09-27", modality: "llm", recipe: "alpha", jobs: 1, tokens_in: 10, tokens_out: 5 },
+      { b: "2026-09-27", modality: "text2image", recipe: "flux", jobs: 2, tokens_in: null, tokens_out: null },
     ],
   });
   const c = buildUsageChart(d, "week", NOW);
@@ -89,7 +89,7 @@ describe("buildUsageChart", () => {
     expect(c.buckets[0]?.segments).toEqual([]);
   });
   it("stacks only models with tokens, in the table's order", () => {
-    expect(c.models.map((m) => m.model)).toEqual(["zeta", "alpha"]);
+    expect(c.models.map((m) => m.recipe)).toEqual(["zeta", "alpha"]);
     expect(c.buckets[5]?.segments.map((s) => [s.id, s.value])).toEqual([
       ["llm/zeta", 1000],
       ["llm/alpha", 15],
@@ -104,9 +104,9 @@ describe("buildUsageChart", () => {
 
 describe("token accounting hint", () => {
   it("fires for LLM calls without any token figures", () => {
-    const m = { worker: "llm" as const, model: "x", jobs: 2, failed: 0, tasks: 2, last_ts: 1 };
-    expect(predatesTokenAccounting(usage({ models: [{ ...m, tokens_in: null, tokens_out: null }] }))).toBe(true);
-    expect(predatesTokenAccounting(usage({ models: [{ ...m, tokens_in: 5, tokens_out: null }] }))).toBe(false);
+    const m = { modality: "llm" as const, recipe: "x", jobs: 2, failed: 0, tasks: 2, last_ts: 1 };
+    expect(predatesTokenAccounting(usage({ recipes: [{ ...m, tokens_in: null, tokens_out: null }] }))).toBe(true);
+    expect(predatesTokenAccounting(usage({ recipes: [{ ...m, tokens_in: 5, tokens_out: null }] }))).toBe(false);
   });
 });
 

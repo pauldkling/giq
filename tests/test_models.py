@@ -19,11 +19,11 @@ from giq.models import (
     LLMResult,
     LLMTask,
     Modality,
+    ModalityCapability,
     ServiceState,
     ServiceStatus,
     Task,
     Text2ImageTask,
-    WorkerCapability,
 )
 
 
@@ -194,8 +194,8 @@ def test_service_status():
     """Test ServiceStatus model."""
     status = ServiceStatus(
         state=ServiceState.idle,
-        active_worker=Modality.llm,
-        active_model="gemma-3-27b",
+        active_modality=Modality.llm,
+        active_recipe="gemma-3-27b",
         vram_used_gb=18.5,
         vram_total_gb=32.0,
         vram_free_gb=13.5,
@@ -203,29 +203,29 @@ def test_service_status():
         queue_depth=3,
         jobs_pending=["job1", "job2", "job3"],
     )
-    assert status.active_worker == Modality.llm
+    assert status.active_modality == Modality.llm
     assert status.vram_used_gb == 18.5
     assert len(status.jobs_pending) == 3
 
 
 def test_worker_capability():
-    """Test WorkerCapability model."""
-    cap = WorkerCapability(
-        backend="llama.cpp",
-        models=["gemma-3-27b", "qwen-7b"],
+    """Test ModalityCapability model."""
+    cap = ModalityCapability(
+        engine="llama.cpp",
+        recipes=["gemma-3-27b", "qwen-7b"],
         max_batch=32,
     )
-    assert cap.backend == "llama.cpp"
-    assert len(cap.models) == 2
+    assert cap.engine == "llama.cpp"
+    assert len(cap.recipes) == 2
     assert cap.max_batch == 32
     assert cap.voices is None
 
 
 def test_worker_capability_tts():
-    """Test WorkerCapability for TTS."""
-    cap = WorkerCapability(
-        backend="kokoro",
-        models=["kokoro-82m"],
+    """Test ModalityCapability for TTS."""
+    cap = ModalityCapability(
+        engine="kokoro",
+        recipes=["kokoro-82m"],
         voices=["af_heart", "am_adam"],
     )
     assert cap.voices == ["af_heart", "am_adam"]
@@ -234,15 +234,15 @@ def test_worker_capability_tts():
 def test_capabilities():
     """Test Capabilities model."""
     caps = Capabilities(
-        workers={
-            Modality.llm: WorkerCapability(
-                backend="llama.cpp",
-                models=["gemma-3-27b"],
+        modalities={
+            Modality.llm: ModalityCapability(
+                engine="llama.cpp",
+                recipes=["gemma-3-27b"],
             ),
         },
         constraints={"max_concurrent_heavy": 1},
     )
-    assert Modality.llm in caps.workers
+    assert Modality.llm in caps.modalities
     assert caps.constraints["max_concurrent_heavy"] == 1
 
 

@@ -42,7 +42,7 @@ async def _vram_sampler_loop(runner):
             await asyncio.sleep(VRAM_SAMPLE_INTERVAL_SECONDS)
             vram = await asyncio.to_thread(get_vram_status)
             ready = sum(1 for ok in runner.resident_models.values() if ok)
-            active = runner.active_worker.value if runner.active_worker else None
+            active = runner.active_modality.value if runner.active_modality else None
             await stats.sample_vram(vram.used_gb, vram.free_gb, active, ready)
             gpus = await asyncio.to_thread(get_gpus)
             await stats.note_gpus(gpus)  # catches a card swapped in mid-run

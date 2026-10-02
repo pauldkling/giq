@@ -14,7 +14,7 @@ life of the request and are not written anywhere.
 
 What is persisted:
 
-- `data/stats.db` — timestamps, worker, model, status, queue wait, duration,
+- `data/stats.db` — timestamps, modality, recipe, status, queue wait, duration,
   task count, token counts in/out, GPU. There is no column a prompt could go
   in, and a test asserts that.
 - The in-flight log (`GIQ_INFLIGHT_LOG`) — one line per job start

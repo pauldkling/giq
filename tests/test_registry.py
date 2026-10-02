@@ -80,8 +80,8 @@ def test_advertised_models_are_all_recipes_serving_that_modality():
     from giq.api.router import get_capabilities
 
     caps = asyncio.run(get_capabilities())
-    for modality, cap in caps.workers.items():
-        for name in cap.models:
+    for modality, cap in caps.modalities.items():
+        for name in cap.recipes:
             recipe = get_recipe(name)
             assert recipe is not None and recipe.serves(modality), f"{modality}/{name}"
 
@@ -91,7 +91,7 @@ def test_capabilities_covers_every_modality_a_recipe_serves():
 
     caps = asyncio.run(get_capabilities())
     served = {m for r in all_recipes() for m in r.modalities}
-    assert {str(m) for m in caps.workers} == served
+    assert {str(m) for m in caps.modalities} == served
 
 
 def test_a_recipe_is_listed_under_every_modality_it_serves():

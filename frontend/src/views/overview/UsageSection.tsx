@@ -31,7 +31,7 @@ export function UsageSection({ jobs }: { jobs: JobRecord[] | undefined }) {
   // A reply for the previous range is not drawn against the new one.
   const tl = timeline.data?.path === timelinePath ? timeline.data.body : undefined;
   const sm = summary.data?.path === summaryPath ? summary.data.body : undefined;
-  const total = sm?.models.reduce((a, m) => a + m.jobs, 0);
+  const total = sm?.recipes.reduce((a, m) => a + m.jobs, 0);
 
   return (
     <section className="ov-usage" aria-labelledby="ov-usage-title">

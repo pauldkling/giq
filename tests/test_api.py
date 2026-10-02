@@ -155,7 +155,7 @@ async def test_capabilities(client: AsyncClient):
     response = await client.get("/capabilities")
     assert response.status_code == 200
     data = response.json()
-    assert "workers" in data
+    assert "modalities" in data
     assert "constraints" in data
     # Every modality giq serves, not just the original four — the
     # hand-written payload used to omit audio, embed and stt.
@@ -171,16 +171,16 @@ async def test_capabilities(client: AsyncClient):
         "depth",
         "multiview",
     ):
-        assert worker in data["workers"], f"{worker} missing from /capabilities"
+        assert worker in data["modalities"], f"{worker} missing from /capabilities"
     # Two LLM engines since vllm joined llama.cpp, reported like the image runtimes.
-    assert "llama.cpp" in data["workers"]["llm"]["backend"]
-    assert "vllm" in data["workers"]["llm"]["backend"]
+    assert "llama.cpp" in data["modalities"]["llm"]["engine"]
+    assert "vllm" in data["modalities"]["llm"]["engine"]
     # flux_klein is the production model and was absent from the old
     # hand-written list.
-    assert data["workers"]["text2image"]["backend"] == "sd.cpp"
-    assert "flux_klein" in data["workers"]["text2image"]["models"]
-    assert "flux_klein" in data["workers"]["image_edit"]["models"]
-    assert "models" in data["workers"]["llm"]
+    assert data["modalities"]["text2image"]["engine"] == "sd.cpp"
+    assert "flux_klein" in data["modalities"]["text2image"]["recipes"]
+    assert "flux_klein" in data["modalities"]["image_edit"]["recipes"]
+    assert "recipes" in data["modalities"]["llm"]
 
 
 def test_the_token_budget_defaults_to_the_models_context():
@@ -473,7 +473,7 @@ async def test_ocr_runs_through_the_generic_job_path(client: AsyncClient):
     )
     assert r.status_code == 200 and r.json()["job_id"]
     caps = (await client.get("/capabilities")).json()
-    assert sorted(caps["workers"]["ocr"]["models"]) == ["glm-ocr", "unlimited-ocr"]
+    assert sorted(caps["modalities"]["ocr"]["recipes"]) == ["glm-ocr", "unlimited-ocr"]
 
 
 def test_parse_pages():

@@ -55,7 +55,7 @@ export function TokensChart({ data, period }: TokensChartProps) {
               {[...pts].reverse().map((p) => (
                 <div key={modelKey(p)}>
                   <span className="tip-swatch" style={{ background: chart.colors.get(modelKey(p)) }} />
-                  {p.model}:{" "}
+                  {p.recipe}:{" "}
                   <span className="tip-muted">
                     {t("chart.segment", {
                       total: f.tok((p.tokens_in ?? 0) + (p.tokens_out ?? 0)),
@@ -76,7 +76,7 @@ export function TokensChart({ data, period }: TokensChartProps) {
           items={chart.models.map((m) => ({
             id: modelKey(m),
             color: chart.colors.get(modelKey(m)) ?? "var(--series-other)",
-            label: <ModelLabel worker={m.worker} model={m.model} />,
+            label: <ModelLabel worker={m.modality} model={m.recipe} />,
           }))}
         />
       )}

@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY,
     ts REAL NOT NULL,              -- completion time (unix epoch)
     job_id TEXT,
-    worker TEXT NOT NULL,
-    model TEXT NOT NULL,
+    modality TEXT NOT NULL,        -- the kind of job (ADR-003; `worker` before)
+    recipe TEXT NOT NULL,          -- the recipe's name (`model` before)
     status TEXT NOT NULL,          -- completed | failed
     queue_wait_ms INTEGER,
     run_ms INTEGER,
@@ -80,7 +80,6 @@ CREATE TABLE IF NOT EXISTS jobs (
 -- is a no-op — so indexing that column here fails with "no such column".
 -- It is created after the migration instead.
 CREATE INDEX IF NOT EXISTS idx_jobs_ts ON jobs(ts);
-CREATE INDEX IF NOT EXISTS idx_jobs_worker_ts ON jobs(worker, ts);
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
@@ -210,6 +209,16 @@ class StatsRecorder:
             policy_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_policy)")}
             if "device" not in policy_cols:
                 conn.execute("ALTER TABLE model_policy ADD COLUMN device TEXT")
+            # ADR-003 renamed the job's worker and model: the kind of job is
+            # its modality, the model its recipe. Renamed in place so history
+            # stays, before any index on the new names is made — executescript
+            # above ran against whatever the file already had.
+            if "worker" in cols:
+                conn.execute("ALTER TABLE jobs RENAME COLUMN worker TO modality")
+            if "model" in cols:
+                conn.execute("ALTER TABLE jobs RENAME COLUMN model TO recipe")
+            conn.execute("DROP INDEX IF EXISTS idx_jobs_worker_ts")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_modality_ts ON jobs(modality, ts)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_gpu_ts ON jobs(gpu_uuid, ts)")
             _migrate_policies(conn)
             conn.commit()
@@ -275,8 +284,8 @@ class StatsRecorder:
                         (
                             ts,
                             rec.get("job_id"),
-                            rec.get("worker", "unknown"),
-                            rec.get("model", "unknown"),
+                            rec.get("modality") or rec.get("worker", "unknown"),
+                            rec.get("recipe") or rec.get("model", "unknown"),
                             status,
                             None,  # queue wait unknown historically
                             rec.get("duration_ms"),
@@ -292,7 +301,7 @@ class StatsRecorder:
         with self._lock:
             conn = self._connect()
             conn.executemany(
-                "INSERT INTO jobs (ts, job_id, worker, model, status, queue_wait_ms,"
+                "INSERT INTO jobs (ts, job_id, modality, recipe, status, queue_wait_ms,"
                 " run_ms, tasks, error) VALUES (?,?,?,?,?,?,?,?,?)",
                 rows,
             )
@@ -305,7 +314,7 @@ class StatsRecorder:
         with self._lock:
             conn = self._connect()
             conn.execute(
-                "INSERT INTO jobs (ts, job_id, worker, model, status, queue_wait_ms,"
+                "INSERT INTO jobs (ts, job_id, modality, recipe, status, queue_wait_ms,"
                 " run_ms, tasks, error, tokens_in, tokens_out, gpu_uuid)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 row,

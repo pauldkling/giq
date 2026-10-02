@@ -507,8 +507,8 @@ async def _status(monkeypatch, *jobs, loaded=()):
     runner = SimpleNamespace(
         owned_pids={},
         pause_state={"paused": False, "since": None, "reason": None},
-        active_worker=None,
-        active_model=None,
+        active_modality=None,
+        active_recipe=None,
         active_slots=[],
         loaded_keys=lambda: set(loaded),
     )
