@@ -23,6 +23,7 @@ from giq.models import (
     JobResponse,
     JobStatus,
     JobStatusResponse,
+    Modality,
     ModelDeviceRequest,
     ModelPolicyRequest,
     ModelPolicyResponse,
@@ -32,7 +33,6 @@ from giq.models import (
     ServiceState,
     ServiceStatus,
     WorkerCapability,
-    WorkerType,
 )
 from giq.queue import get_queue
 from giq.registry import all_specs, get_spec
@@ -77,7 +77,7 @@ async def run_job(
     """
     job_id, position = await orch.submit_job(request)
     logger.info(
-        f"Job {job_id} submitted: {request.worker}/{request.model}, "
+        f"Job {job_id} submitted: {request.modality}/{request.model}, "
         f"{len(request.tasks) if request.tasks else 0} tasks"
     )
     if not wait:
@@ -91,7 +91,7 @@ async def run_job(
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
-        worker=job.request.worker,
+        modality=job.request.modality,
         model=job.request.model,
         results=job.results if job.results else None,
         duration_ms=job.duration_ms,
@@ -112,7 +112,7 @@ async def get_job_status(
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
-        worker=job.request.worker,
+        modality=job.request.modality,
         model=job.request.model,
         results=job.results if job.results else None,
         duration_ms=job.duration_ms,
@@ -449,7 +449,7 @@ async def get_service_status() -> ServiceStatus:
     if not pause["paused"]:
         loaded = runner.loaded_keys()
         for job in pending:
-            worker, model = str(job.request.worker), job.request.model
+            worker, model = str(job.request.modality), job.request.model
             if (worker, model) in loaded:
                 continue
             on = device_for_model(worker, model)
@@ -479,7 +479,7 @@ async def get_service_status() -> ServiceStatus:
     elif running:
         state = ServiceState.running
         job = running[0]
-        state_message = f"Processing {job.request.worker}/{job.request.model}"
+        state_message = f"Processing {job.request.modality}/{job.request.model}"
     elif runner.active_worker:
         state = ServiceState.ready
         state_message = f"Worker {runner.active_worker}/{runner.active_model} loaded, waiting"
@@ -539,7 +539,7 @@ async def get_llm_endpoint(model: str = "gemma-4-12b") -> dict:
         return {"model": model, "base_url": base_url}
     # A switched-off model is not "loading" — say so, or clients keep probing
     # a server that will never come back.
-    if runner.is_disabled(WorkerType.llm, model):
+    if runner.is_disabled(Modality.llm, model):
         raise HTTPException(
             status_code=503,
             detail={"state": "disabled", "model": model},
@@ -578,9 +578,9 @@ async def get_capabilities() -> Capabilities:
     model name that was absent from the VRAM table and therefore unloadable.
     Generating it means a model is discoverable exactly when it is runnable.
     """
-    workers: dict[WorkerType, WorkerCapability] = {}
+    workers: dict[Modality, WorkerCapability] = {}
     for spec in all_specs():
-        worker = WorkerType(spec.worker)
+        worker = Modality(spec.worker)
         cap = workers.get(worker)
         if cap is None:
             workers[worker] = WorkerCapability(
@@ -740,7 +740,7 @@ async def ocr_document(
     document, not a job id to poll. Page images go through ``/run`` with
     ``images_b64``. ``response_format=html`` returns the fragment itself.
     """
-    if get_spec(WorkerType.ocr, model) is None:
+    if get_spec(Modality.ocr, model) is None:
         known = sorted(s.model for s in all_specs() if s.worker == "ocr")
         raise HTTPException(status_code=400, detail=f"unknown OCR model {model!r}; one of {known}")
     limit = upload_limit()
@@ -757,7 +757,7 @@ async def ocr_document(
     }
     if page_list := parse_pages(pages):
         task["pages"] = page_list
-    job_id, _ = await orch.submit_job(JobRequest(worker=WorkerType.ocr, model=model, tasks=[task]))
+    job_id, _ = await orch.submit_job(JobRequest(modality=Modality.ocr, model=model, tasks=[task]))
     logger.info(f"ocr job {job_id}: {model}, {len(data)} bytes, dpi={dpi}")
     try:
         job = await orch.wait_for_job(job_id, timeout=OCR_WAIT_TIMEOUT_SECONDS)
@@ -835,7 +835,7 @@ async def depth_map(
     same queue, same stats row — for a consumer that has an image and wants
     a map, not a job id to poll.
     """
-    if get_spec(WorkerType.depth, model) is None:
+    if get_spec(Modality.depth, model) is None:
         known = sorted(s.model for s in all_specs() if s.worker == "depth")
         raise HTTPException(
             status_code=400, detail=f"unknown depth model {model!r}; one of {known}"
@@ -846,7 +846,7 @@ async def depth_map(
     want_vis = visualize or response_format == "visualization"
     task = {"id": "depth-0", "image_b64": base64.b64encode(data).decode(), "visualize": want_vis}
     job_id, _ = await orch.submit_job(
-        JobRequest(worker=WorkerType.depth, model=model, tasks=[task])
+        JobRequest(modality=Modality.depth, model=model, tasks=[task])
     )
     logger.info(f"depth job {job_id}: {model}, {len(data)} bytes")
     try:
@@ -939,7 +939,7 @@ async def multiview_scene(
     A convenience over ``POST /run`` with ``worker: "multiview"`` — same job,
     same queue, same stats row — which also takes known poses.
     """
-    if get_spec(WorkerType.multiview, model) is None:
+    if get_spec(Modality.multiview, model) is None:
         known = sorted(s.model for s in all_specs() if s.worker == "multiview")
         raise HTTPException(
             status_code=400, detail=f"unknown multiview model {model!r}; one of {known}"
@@ -957,7 +957,7 @@ async def multiview_scene(
         "glb": want_glb,
     }
     job_id, _ = await orch.submit_job(
-        JobRequest(worker=WorkerType.multiview, model=model, tasks=[task])
+        JobRequest(modality=Modality.multiview, model=model, tasks=[task])
     )
     logger.info(f"multiview job {job_id}: {model}, {len(images)} views, res={process_res}")
     try:

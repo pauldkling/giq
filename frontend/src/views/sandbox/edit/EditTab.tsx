@@ -36,7 +36,7 @@ export function EditTab({ options, model, onModel }: EditTabProps) {
     void runner.run(async (signal) =>
       runImageJob(
         {
-          worker: "image_edit",
+          modality: "image_edit",
           model,
           tasks: [{ id: "sbx-edit", reference_image_b64: await fileB64(file), instruction }],
         },

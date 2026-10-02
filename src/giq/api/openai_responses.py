@@ -47,7 +47,7 @@ from giq.api.openai_compat import (
     format_messages,
     is_multimodal,
 )
-from giq.models import JobRequest, WorkerType
+from giq.models import JobRequest, Modality
 from giq.registry import get_spec
 from giq.services.orchestration import Orchestrator
 
@@ -607,7 +607,7 @@ async def create_response(
 
     if request.stream:
         job_id, _, stream = await orch.submit_streaming_job(
-            JobRequest(worker=WorkerType.llm, model=model, chat_request=chat)
+            JobRequest(modality=Modality.llm, model=model, chat_request=chat)
         )
         return StreamingResponse(
             _relay_responses_stream(orch, job_id, stream, meta),
@@ -620,7 +620,7 @@ async def create_response(
         )
 
     job_id, _ = await orch.submit_job(
-        JobRequest(worker=WorkerType.llm, model=model, chat_request=chat)
+        JobRequest(modality=Modality.llm, model=model, chat_request=chat)
     )
     try:
         completed_job = await orch.wait_for_job(job_id)

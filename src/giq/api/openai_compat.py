@@ -322,7 +322,7 @@ async def create_chat_completion(
             stream_request["giq_loop_guard"] = body["giq_loop_guard"]
 
         job_id, _, stream = await orch.submit_streaming_job(
-            JobRequest(worker="llm", model=model, chat_request=stream_request)
+            JobRequest(modality="llm", model=model, chat_request=stream_request)
         )
         return StreamingResponse(
             _relay_stream(orch, job_id, stream, model),
@@ -367,7 +367,7 @@ async def create_chat_completion(
         # unknown key would reach llama-server instead of being consumed.
 
         job_id, _ = await orch.submit_job(
-            JobRequest(worker="llm", model=model, chat_request=llm_request)
+            JobRequest(modality="llm", model=model, chat_request=llm_request)
         )
         completed_job = await orch.wait_for_job(job_id)
 
@@ -406,7 +406,7 @@ async def create_chat_completion(
 
     job_id, _ = await orch.submit_job(
         JobRequest(
-            worker="llm",
+            modality="llm",
             model=model,
             tasks=[{"id": "chat-0", "system": system_msg, "user": user_msg}],
             params=params,
@@ -498,7 +498,7 @@ async def _run_tts_job(orch: Orchestrator, request: "TTSRequest", timeout: float
     tts_model = "kokoro"  # the one TTS model; qwen-tts was tried, judged poor, and removed
     job_id, _ = await orch.submit_job(
         JobRequest(
-            worker="tts",
+            modality="tts",
             model=tts_model,
             tasks=[
                 {
@@ -650,7 +650,7 @@ async def create_transcription(
     audio_b64 = base64.b64encode(audio_bytes).decode()
     job_id, _ = await orch.submit_job(
         JobRequest(
-            worker="audio",
+            modality="audio",
             model="whisper-large-v3",
             tasks=[
                 {
@@ -723,7 +723,7 @@ async def create_audio_embedding(
     audio_b64 = base64.b64encode(audio_bytes).decode()
     job_id, _ = await orch.submit_job(
         JobRequest(
-            worker="embed",
+            modality="embed",
             model="ecapa-tdnn",
             tasks=[{"id": "emb-0", "audio_b64": audio_b64}],
         )

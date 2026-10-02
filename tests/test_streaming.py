@@ -21,7 +21,7 @@ import json
 import httpx
 import pytest
 
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import STREAM_BUFFER_CHUNKS, Job, JobStream
 from giq.registry import get_spec
 from giq.runner import FLOOR_TOKENS_PER_SECOND, JOB_TIMEOUT_SECONDS, _job_timeout
@@ -186,21 +186,19 @@ def _job(max_tokens: int | None) -> Job:
         chat["max_tokens"] = max_tokens
     return Job(
         job_id="j1",
-        request=JobRequest(worker=WorkerType.llm, model="qwen3.8-27b", chat_request=chat),
+        request=JobRequest(modality=Modality.llm, model="qwen3.8-27b", chat_request=chat),
     )
 
 
 def test_a_big_token_budget_gets_the_time_to_spend_it():
     """Measured on an RTX 5090: real reasoning prompts ran 343s and 356s, past the
     flat 300s ceiling, while generating perfectly good output."""
-    assert _job_timeout(WorkerType.llm, _job(32768)) == pytest.approx(
-        32768 / FLOOR_TOKENS_PER_SECOND
-    )
+    assert _job_timeout(Modality.llm, _job(32768)) == pytest.approx(32768 / FLOOR_TOKENS_PER_SECOND)
 
 
 def test_a_small_budget_still_gets_the_old_floor():
     """Scaling down would make short jobs *more* fragile than before."""
-    assert _job_timeout(WorkerType.llm, _job(512)) == JOB_TIMEOUT_SECONDS
+    assert _job_timeout(Modality.llm, _job(512)) == JOB_TIMEOUT_SECONDS
 
 
 def test_no_budget_gets_the_models_whole_context():
@@ -210,23 +208,23 @@ def test_no_budget_gets_the_models_whole_context():
     from giq.workers.llm import MODEL_CTX_SIZE
 
     ctx = MODEL_CTX_SIZE["qwen3.8-27b"]
-    assert _job_timeout(WorkerType.llm, _job(None)) == pytest.approx(ctx / FLOOR_TOKENS_PER_SECOND)
+    assert _job_timeout(Modality.llm, _job(None)) == pytest.approx(ctx / FLOOR_TOKENS_PER_SECOND)
 
 
 def test_an_explicit_budget_still_wins_over_the_context():
     """A caller asking for less gets less time, not the full-context ceiling."""
-    assert _job_timeout(WorkerType.llm, _job(4096)) == pytest.approx(
+    assert _job_timeout(Modality.llm, _job(4096)) == pytest.approx(
         max(JOB_TIMEOUT_SECONDS, 4096 / FLOOR_TOKENS_PER_SECOND)
     )
 
 
 def test_timeout_without_a_job_is_unchanged():
-    assert _job_timeout(WorkerType.llm) == JOB_TIMEOUT_SECONDS
+    assert _job_timeout(Modality.llm) == JOB_TIMEOUT_SECONDS
 
 
 def test_audio_keeps_its_own_override():
-    job = Job(job_id="j2", request=JobRequest(worker=WorkerType.audio, model="whisperx"))
-    assert _job_timeout(WorkerType.audio, job) == 870.0
+    job = Job(job_id="j2", request=JobRequest(modality=Modality.audio, model="whisperx"))
+    assert _job_timeout(Modality.audio, job) == 870.0
 
 
 # --- the endpoint relay ------------------------------------------------------
@@ -665,12 +663,12 @@ def test_the_job_timeout_still_fires_before_the_http_one():
     """Ordering is the point. runner._job_timeout cancels *with cleanup* -- it
     unloads a worker that may be wedged -- while an httpx read timeout would
     pre-empt that with a bare exception and leave the model holding VRAM."""
-    from giq.models import JobRequest, WorkerType
+    from giq.models import JobRequest, Modality
     from giq.queue import Job
 
     model = "qwen3.6-27b"
-    job = Job(job_id="j", request=JobRequest(worker="llm", model=model, chat_request={}))
-    job_limit = _job_timeout(WorkerType.llm, job)
+    job = Job(job_id="j", request=JobRequest(modality="llm", model=model, chat_request={}))
+    job_limit = _job_timeout(Modality.llm, job)
     http_limit = LLMWorker(LLMWorkerConfig(model=model)).http_timeout().read
 
     assert job_limit < http_limit, "the runner must give up first, with cleanup"

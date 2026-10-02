@@ -418,7 +418,7 @@ class StatsRecorder:
             row = (
                 (job.completed_at or datetime.now()).timestamp(),
                 job.job_id,
-                str(job.request.worker),
+                str(job.request.modality),
                 job.request.model,
                 str(job.status).split(".")[-1],
                 queue_wait_ms,

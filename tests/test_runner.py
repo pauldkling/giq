@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import Job, JobQueue
 from giq.runner import Runner
 
@@ -30,7 +30,7 @@ def make_job(job_id: str, model: str = "test-model") -> Job:
     return Job(
         job_id=job_id,
         request=JobRequest(
-            worker=WorkerType.llm,
+            modality=Modality.llm,
             model=model,
             tasks=[{"id": "t1", "user": "Hello"}],
         ),
@@ -68,20 +68,20 @@ async def test_runner_processes_job(queue: JobQueue, runner: Runner):
     assert len(pending) == 1
 
 
-async def _prime_warm_worker(runner: Runner, worker_type: WorkerType, model: str):
-    """Set runner state as if a job for (worker_type, model) just finished."""
+async def _prime_warm_worker(runner: Runner, modality: Modality, model: str):
+    """Set runner state as if a job for (modality, model) just finished."""
     from giq.runner import _Slot
 
-    device = runner._device_for(worker_type, model)
+    device = runner._device_for(modality, model)
     worker = AsyncMock()  # _unload_worker calls .stop()
-    runner._slots[device] = _Slot(worker, worker_type, model, device)
+    runner._slots[device] = _Slot(worker, modality, model, device)
     runner._processing_job = False
 
 
 @pytest.mark.asyncio
 async def test_warm_timeout_keeps_worker_for_matching_model(queue: JobQueue, runner: Runner):
-    """Same (worker_type, model) pending: stay warm (don't eager-unload)."""
-    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    """Same (modality, model) pending: stay warm (don't eager-unload)."""
+    await _prime_warm_worker(runner, Modality.llm, "gemma-3-27b-it-qat")
     await queue.add(make_job("j1", model="gemma-3-27b-it-qat"))
 
     # Drop into the eager-check branch only (skip the 120s sleep by cancelling
@@ -102,8 +102,8 @@ async def test_warm_timeout_keeps_worker_for_matching_model(queue: JobQueue, run
 
 @pytest.mark.asyncio
 async def test_warm_timeout_evicts_for_different_model(queue: JobQueue, runner: Runner):
-    """Same worker_type, different model pending: eager-unload."""
-    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    """Same modality, different model pending: eager-unload."""
+    await _prime_warm_worker(runner, Modality.llm, "gemma-3-27b-it-qat")
     await queue.add(make_job("j1", model="qwen-coder-30b"))
 
     await runner._warm_timeout_check()
@@ -113,12 +113,12 @@ async def test_warm_timeout_evicts_for_different_model(queue: JobQueue, runner: 
 
 @pytest.mark.asyncio
 async def test_warm_timeout_evicts_for_different_worker_type(queue: JobQueue, runner: Runner):
-    """Different worker_type pending: eager-unload."""
-    await _prime_warm_worker(runner, WorkerType.llm, "gemma-3-27b-it-qat")
+    """Different modality pending: eager-unload."""
+    await _prime_warm_worker(runner, Modality.llm, "gemma-3-27b-it-qat")
     job = Job(
         job_id="img1",
         request=JobRequest(
-            worker=WorkerType.text2image,
+            modality=Modality.text2image,
             model="zimage",
             tasks=[{"id": "t1", "prompt": "a cat"}],
         ),
@@ -131,9 +131,9 @@ async def test_warm_timeout_evicts_for_different_worker_type(queue: JobQueue, ru
 
 
 RESIDENTS = [
-    (WorkerType.llm, "gemma-4-12b"),
-    (WorkerType.audio, "whisper-large-v3"),
-    (WorkerType.embed, "ecapa-tdnn"),
+    (Modality.llm, "gemma-4-12b"),
+    (Modality.audio, "whisper-large-v3"),
+    (Modality.embed, "ecapa-tdnn"),
 ]
 
 
@@ -154,9 +154,9 @@ def _prime_resident(runner: Runner, key, vram_gb: float, width: int = 1):
 
 def test_resident_key_detection(queue: JobQueue):
     runner = Runner(queue, residents=RESIDENTS)
-    assert runner.is_resident_key(WorkerType.llm, "gemma-4-12b")
-    assert not runner.is_resident_key(WorkerType.text2image, "flux_klein")
-    assert not runner.is_resident_key(WorkerType.llm, "qwen3.6-27b")
+    assert runner.is_resident_key(Modality.llm, "gemma-4-12b")
+    assert not runner.is_resident_key(Modality.text2image, "flux_klein")
+    assert not runner.is_resident_key(Modality.llm, "qwen3.6-27b")
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_eviction_picks_minimal_single_victim(
     # covers it (smallest single ≥ deficit); embed and gemma keep serving.
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.4)
 
-    await runner._evict_residents_for(WorkerType.llm, "llama-3.2-3b")
+    await runner._evict_residents_for(Modality.llm, "llama-3.2-3b")
 
     assert RESIDENTS[0] in runner._residents  # gemma survives
     assert RESIDENTS[1] not in runner._residents  # audio evicted
@@ -196,7 +196,7 @@ async def test_eviction_flux_takes_gemma_only(queue: JobQueue, monkeypatch: pyte
     # 2.5GB free; flux_klein needs 9+2=11 → deficit 8.5 → gemma (9.5) alone.
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 2.5)
 
-    await runner._evict_residents_for(WorkerType.text2image, "flux_klein")
+    await runner._evict_residents_for(Modality.text2image, "flux_klein")
 
     assert RESIDENTS[0] not in runner._residents  # gemma evicted
     assert RESIDENTS[1] in runner._residents  # audio survives
@@ -217,7 +217,7 @@ async def test_eviction_cumulative_fallback_takes_everything(
         _prime_resident(runner, key, vram_gb=gb)
     monkeypatch.setattr(runner_mod, "get_free_vram", lambda *a: 0.5)
 
-    await runner._evict_residents_for(WorkerType.text2image, "zimage")
+    await runner._evict_residents_for(Modality.text2image, "zimage")
 
     assert not runner._residents
 
@@ -269,7 +269,7 @@ async def test_eviction_waits_for_in_flight_lane(queue: JobQueue, monkeypatch: p
     await embed.lane.acquire()
     embed.active_count = 1
 
-    evict = asyncio.create_task(runner._evict_residents_for(WorkerType.embed, "other-embed"))
+    evict = asyncio.create_task(runner._evict_residents_for(Modality.embed, "other-embed"))
     await asyncio.sleep(0.1)
     assert RESIDENTS[2] in runner._residents  # not evicted while in flight
 

@@ -683,7 +683,7 @@ async def quick_test(
 
     if kind == "llm":
         request = JobRequest(
-            worker="llm",
+            modality="llm",
             model="gemma-4-12b",
             tasks=[
                 {
@@ -696,7 +696,7 @@ async def quick_test(
         timeout = 120.0
     elif kind == "audio":
         request = JobRequest(
-            worker="audio",
+            modality="audio",
             model="whisper-large-v3",
             tasks=[
                 {
@@ -710,7 +710,7 @@ async def quick_test(
         timeout = 180.0
     elif kind == "embed":
         request = JobRequest(
-            worker="embed",
+            modality="embed",
             model="ecapa-tdnn",
             tasks=[{"id": "dash-embed", "audio_b64": base64.b64encode(_beep_wav()).decode()}],
         )
@@ -722,7 +722,7 @@ async def quick_test(
                 detail="Image test evicts all residents for minutes — pass ?confirm=true",
             )
         request = JobRequest(
-            worker="text2image",
+            modality="text2image",
             model="flux_klein",
             tasks=[
                 {"id": "dash-image", "prompt": "a tiny test pattern, colorful geometric shapes"}

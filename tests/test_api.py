@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from giq.main import app
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import JobQueue
 from giq.runner import Runner
 
@@ -93,7 +93,7 @@ async def test_get_job_status(client: AsyncClient):
     data = response.json()
     assert data["job_id"] == job_id
     assert data["status"] == JobStatus.pending
-    assert data["worker"] == WorkerType.llm
+    assert data["modality"] == Modality.llm
     assert data["model"] == "test-model"
 
 
@@ -322,7 +322,7 @@ def _completed_ocr_job(job_id: str, result: dict):
 
     job = Job(
         job_id=job_id,
-        request=JobRequest(worker=WorkerType.ocr, model="unlimited-ocr", tasks=[]),
+        request=JobRequest(modality=Modality.ocr, model="unlimited-ocr", tasks=[]),
     )
     job.status = JobStatus.completed
     job.results = [result]
@@ -514,14 +514,14 @@ def depth_completes(monkeypatch):
     async def submit(self, request):
         seen["task"] = request.tasks[0]
         seen["model"] = request.model
-        seen["worker"] = request.worker
+        seen["worker"] = request.modality
         return await real_submit(self, request)
 
     async def wait(self, job_id, timeout=None):
         seen["timeout"] = timeout
         job = Job(
             job_id=job_id,
-            request=JobRequest(worker=WorkerType.depth, model="depth-anything-v2-small", tasks=[]),
+            request=JobRequest(modality=Modality.depth, model="depth-anything-v2-small", tasks=[]),
         )
         job.status = JobStatus.completed
         job.results = [_DEPTH_RESULT]
@@ -543,7 +543,7 @@ async def test_depth_takes_the_image_as_the_body(client: AsyncClient, depth_comp
     assert body["depth_b64"] == "iVBORw0=" and (body["width"], body["height"]) == (2, 2)
     assert body["depth_min"] == 0.5 and body["metric"] is False and body["job_id"]
     assert "visualization_b64" not in body  # only on request
-    assert depth_completes["worker"] == WorkerType.depth
+    assert depth_completes["worker"] == Modality.depth
     assert depth_completes["model"] == "depth-anything-v2-small"
     task = depth_completes["task"]
     assert task["image_b64"] and task["visualize"] is False
@@ -651,13 +651,13 @@ def multiview_completes(monkeypatch):
     async def submit(self, request):
         seen["task"] = request.tasks[0]
         seen["model"] = request.model
-        seen["worker"] = request.worker
+        seen["worker"] = request.modality
         return await real_submit(self, request)
 
     async def wait(self, job_id, timeout=None):
         job = Job(
             job_id=job_id,
-            request=JobRequest(worker=WorkerType.multiview, model="da3-base", tasks=[]),
+            request=JobRequest(modality=Modality.multiview, model="da3-base", tasks=[]),
         )
         job.status = JobStatus.completed
         job.results = [_MV_RESULT]
@@ -679,7 +679,7 @@ async def test_multiview_takes_repeated_files_parts(client: AsyncClient, multivi
     assert len(body["views"]) == 2 and body["views"][1]["index"] == 1
     assert body["views"][0]["extrinsics"][0] == [1, 0, 0, 0] and body["process_res"] == 504
     assert body["metric"] is False and body["job_id"] and "glb_b64" not in body
-    assert multiview_completes["worker"] == WorkerType.multiview
+    assert multiview_completes["worker"] == Modality.multiview
     task = multiview_completes["task"]
     assert len(task["images_b64"]) == 2 and task["glb"] is False and task["process_res"] == 504
     assert task["use_ray_pose"] is False
@@ -795,7 +795,7 @@ def chat_completes(monkeypatch):
     async def wait(self, job_id, timeout=None):
         job = Job(
             job_id=job_id,
-            request=JobRequest(worker=WorkerType.llm, model="m", tasks=[]),
+            request=JobRequest(modality=Modality.llm, model="m", tasks=[]),
         )
         job.status = JobStatus.completed
         job.results = [{"id": "chat-0", "output": "ok", "tokens_in": 1, "tokens_out": 1}]

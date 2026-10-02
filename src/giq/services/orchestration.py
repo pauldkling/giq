@@ -54,7 +54,7 @@ class Orchestrator:
         """
         from giq.policy import get_policy_store
 
-        worker, model = str(request.worker), request.model
+        worker, model = str(request.modality), request.model
         if not get_policy_store().is_off(worker, model):
             return
         record = get_policy_store().record_for(worker, model)

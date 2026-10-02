@@ -45,7 +45,7 @@ class DepthWorker(SubprocessWorker):
     """Depth Anything V2 in a child process."""
 
     child_module: ClassVar[str] = "giq.workers._depth_child"
-    worker_type: ClassVar[str] = "depth"
+    modality: ClassVar[str] = "depth"
 
     def __init__(self, config: DepthWorkerConfig, device: str | None = None):
         super().__init__(config, device)

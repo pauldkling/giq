@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from giq import gpus
-from giq.models import JobRequest, WorkerType
+from giq.models import JobRequest, Modality
 from giq.policy import reset_policy_store
 from giq.queue import JobQueue
 from giq.runner import Runner, _Resident
@@ -198,17 +198,17 @@ async def test_eviction_only_considers_residents_on_the_target_card(two_cards, s
         return res
 
     with two_cards(bind={"text2image/zimage": "1"}):
-        gemma = resident((WorkerType.llm, "gemma-4-12b"), 9.5, BIG)
-        kokoro = resident((WorkerType.tts, "kokoro"), 1.0, SMALL)
+        gemma = resident((Modality.llm, "gemma-4-12b"), 9.5, BIG)
+        kokoro = resident((Modality.tts, "kokoro"), 1.0, SMALL)
         # zimage wants 13 + 2 = 15 on the small card, which has 15.1 free —
         # but only 0.5 once we pretend the desktop grew.
         with patch("giq.runner.get_free_vram", lambda *a: 0.5):
             with patch("giq.gpus.compute_app_memory", lambda *a: {}):
-                await runner._evict_residents_for(WorkerType.text2image, "zimage")
+                await runner._evict_residents_for(Modality.text2image, "zimage")
 
-    assert (WorkerType.llm, "gemma-4-12b") in runner._residents  # untouched
+    assert (Modality.llm, "gemma-4-12b") in runner._residents  # untouched
     gemma.worker.stop.assert_not_awaited()
-    assert (WorkerType.tts, "kokoro") not in runner._residents  # its card, its cost
+    assert (Modality.tts, "kokoro") not in runner._residents  # its card, its cost
     kokoro.worker.stop.assert_awaited()
 
 
@@ -256,14 +256,14 @@ async def test_a_slot_per_card_survives_the_other_cards_load(two_cards, store):
     runner = Runner(JobQueue())
     with two_cards(bind={"text2image/flux_klein": "1"}):
         other = AsyncMock()
-        runner._slots[BIG] = _Slot(other, WorkerType.llm, "llama-3.2-3b", BIG)
+        runner._slots[BIG] = _Slot(other, Modality.llm, "llama-3.2-3b", BIG)
 
         built = AsyncMock()
         built.is_ready = True
         built.is_running = True
         with patch.object(runner, "_build_worker", return_value=built):
             with patch("giq.runner.wait_for_vram", AsyncMock(return_value=True)):
-                worker = await runner._ensure_worker(WorkerType.text2image, "flux_klein")
+                worker = await runner._ensure_worker(Modality.text2image, "flux_klein")
 
     assert worker is built
     assert runner._slots[SMALL].model == "flux_klein"
@@ -302,15 +302,15 @@ async def test_rebinding_a_loaded_resident_moves_it(two_cards, store):
         store.set("tts", "kokoro", PINNED)
         worker = AsyncMock()
         worker.is_ready = True
-        runner._residents[(WorkerType.tts, "kokoro")] = _Resident(worker, 1, BIG)
+        runner._residents[(Modality.tts, "kokoro")] = _Resident(worker, 1, BIG)
 
         await runner._release_demoted_residents()
-        assert (WorkerType.tts, "kokoro") in runner._residents  # still where it belongs
+        assert (Modality.tts, "kokoro") in runner._residents  # still where it belongs
 
         store.set_device("tts", "kokoro", "1")
         await runner._release_demoted_residents()
 
-    assert (WorkerType.tts, "kokoro") not in runner._residents
+    assert (Modality.tts, "kokoro") not in runner._residents
     worker.stop.assert_awaited()  # the residents loop reloads it on card 1
 
 
@@ -496,7 +496,7 @@ async def _status(monkeypatch, *jobs, loaded=()):
     from giq.queue import Job
 
     queued = [
-        Job(job_id=f"j{i}", request=JobRequest(worker=w, model=m, chat_request={}))
+        Job(job_id=f"j{i}", request=JobRequest(modality=w, model=m, chat_request={}))
         for i, (w, m) in enumerate(jobs)
     ]
     queue = SimpleNamespace(get_all=AsyncMock(return_value=queued))

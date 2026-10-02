@@ -15,15 +15,15 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.policy import AUTO, OFF, PINNED, reset_policy_store
 from giq.queue import Job, JobQueue
 from giq.runner import ResidentDemoted, Runner, _Resident
 
 RESIDENTS = [
-    (WorkerType.llm, "gemma-4-12b"),
-    (WorkerType.audio, "whisper-large-v3"),
-    (WorkerType.embed, "ecapa-tdnn"),
+    (Modality.llm, "gemma-4-12b"),
+    (Modality.audio, "whisper-large-v3"),
+    (Modality.embed, "ecapa-tdnn"),
 ]
 
 
@@ -208,7 +208,7 @@ async def test_submit_is_refused_for_a_disabled_model(store, monkeypatch):
 
     store.set("llm", "gemma-4-12b", OFF, reason="freeing the card")
     orch = Orchestrator()
-    request = JobRequest(worker=WorkerType.llm, model="gemma-4-12b", tasks=[{"id": "t1"}])
+    request = JobRequest(modality=Modality.llm, model="gemma-4-12b", tasks=[{"id": "t1"}])
     with pytest.raises(HTTPException) as excinfo:
         await orch.submit_job(request)
     assert excinfo.value.status_code == 503
@@ -225,7 +225,7 @@ async def test_submit_is_allowed_once_re_enabled(store):
     store.set("text2image", "flux_klein", AUTO)
     orch = Orchestrator()
     job_id, _pos = await orch.submit_job(
-        JobRequest(worker=WorkerType.text2image, model="flux_klein", tasks=[{"id": "t1"}])
+        JobRequest(modality=Modality.text2image, model="flux_klein", tasks=[{"id": "t1"}])
     )
     assert job_id
     await orch.queue.remove(job_id)
@@ -240,23 +240,23 @@ async def test_disabled_model_cannot_load_via_the_batch_path(store, queue):
     runner = Runner(queue, use_policy=True)
     store.set("text2image", "flux_klein", OFF)
     with pytest.raises(RuntimeError, match="disabled"):
-        await runner._ensure_worker(WorkerType.text2image, "flux_klein")
+        await runner._ensure_worker(Modality.text2image, "flux_klein")
 
 
 @pytest.mark.asyncio
 async def test_disabled_resident_is_not_reloaded(store, queue):
     runner = Runner(queue, use_policy=True)
     store.set("llm", "gemma-4-12b", OFF)
-    await runner._load_resident((WorkerType.llm, "gemma-4-12b"))
-    assert (WorkerType.llm, "gemma-4-12b") not in runner._residents
+    await runner._load_resident((Modality.llm, "gemma-4-12b"))
+    assert (Modality.llm, "gemma-4-12b") not in runner._residents
 
 
 @pytest.mark.asyncio
 async def test_runner_resident_set_follows_policy_live(store, queue):
     runner = Runner(queue, use_policy=True)
-    assert (WorkerType.audio, "whisper-large-v3") in runner._resident_keys
+    assert (Modality.audio, "whisper-large-v3") in runner._resident_keys
     store.set("audio", "whisper-large-v3", AUTO)
-    assert (WorkerType.audio, "whisper-large-v3") not in runner._resident_keys
+    assert (Modality.audio, "whisper-large-v3") not in runner._resident_keys
 
 
 @pytest.mark.asyncio
@@ -271,11 +271,11 @@ async def test_static_residents_ignore_pinning_but_not_off(store, queue):
     runner = Runner(queue, residents=RESIDENTS)
     store.set("audio", "whisper-large-v3", OFF)
     # the static list still drives residency...
-    assert (WorkerType.audio, "whisper-large-v3") in runner._resident_keys
+    assert (Modality.audio, "whisper-large-v3") in runner._resident_keys
     # ...but off is honoured everywhere
-    assert runner.is_disabled(WorkerType.audio, "whisper-large-v3")
+    assert runner.is_disabled(Modality.audio, "whisper-large-v3")
     with pytest.raises(RuntimeError, match="disabled"):
-        await runner._ensure_worker(WorkerType.audio, "whisper-large-v3")
+        await runner._ensure_worker(Modality.audio, "whisper-large-v3")
 
 
 # --- unpinning actually unloads ---------------------------------------------
@@ -285,7 +285,7 @@ async def test_static_residents_ignore_pinning_but_not_off(store, queue):
 async def test_unpinning_unloads_the_resident(store, queue):
     """The point of the whole design: the loop must not reload it right back."""
     runner = Runner(queue, use_policy=True)
-    key = (WorkerType.audio, "whisper-large-v3")
+    key = (Modality.audio, "whisper-large-v3")
     res = _prime_resident(runner, key)
 
     store.set("audio", "whisper-large-v3", AUTO)
@@ -298,7 +298,7 @@ async def test_unpinning_unloads_the_resident(store, queue):
 @pytest.mark.asyncio
 async def test_pinned_residents_are_left_alone(store, queue):
     runner = Runner(queue, use_policy=True)
-    key = (WorkerType.audio, "whisper-large-v3")
+    key = (Modality.audio, "whisper-large-v3")
     res = _prime_resident(runner, key)
 
     await runner._release_demoted_residents()
@@ -311,7 +311,7 @@ async def test_pinned_residents_are_left_alone(store, queue):
 async def test_unload_waits_for_in_flight_lane_jobs(store, queue):
     """Teardown drains the lane, so nothing dies mid-generation."""
     runner = Runner(queue, use_policy=True)
-    key = (WorkerType.audio, "whisper-large-v3")
+    key = (Modality.audio, "whisper-large-v3")
     res = _prime_resident(runner, key)
     await res.lane.acquire()  # simulate a job in flight
     res.active_count = 1
@@ -337,16 +337,16 @@ async def test_lane_job_fails_fast_when_unpinned(store, queue):
     runner = Runner(queue, use_policy=True)
     store.set("audio", "whisper-large-v3", AUTO)
     with pytest.raises(ResidentDemoted):
-        await runner._wait_resident_ready((WorkerType.audio, "whisper-large-v3"))
+        await runner._wait_resident_ready((Modality.audio, "whisper-large-v3"))
 
 
 @pytest.mark.asyncio
 async def test_demoted_lane_job_is_requeued_not_failed(store, queue):
     runner = Runner(queue, use_policy=True)
-    key = (WorkerType.audio, "whisper-large-v3")
+    key = (Modality.audio, "whisper-large-v3")
     job = Job(
         job_id="j1",
-        request=JobRequest(worker=WorkerType.audio, model="whisper-large-v3", tasks=[{"id": "t"}]),
+        request=JobRequest(modality=Modality.audio, model="whisper-large-v3", tasks=[{"id": "t"}]),
     )
     job.status = JobStatus.running
     await queue.add(job)
@@ -518,7 +518,7 @@ async def test_residents_loop_runs_when_nothing_is_pinned_at_boot(store, queue, 
     runner = Runner(queue, use_policy=True)
     assert runner._resident_keys == []
 
-    loaded: list[tuple[WorkerType, str]] = []
+    loaded: list[tuple[Modality, str]] = []
     monkeypatch.setattr(giq.runner, "RESIDENT_TICK_SECONDS", 0.01)
     monkeypatch.setattr(giq.runner, "RESIDENT_RELOAD_GRACE_SECONDS", 0.0)
     monkeypatch.setattr(runner, "_load_resident", AsyncMock(side_effect=loaded.append))
@@ -531,6 +531,6 @@ async def test_residents_loop_runs_when_nothing_is_pinned_at_boot(store, queue, 
             await asyncio.sleep(0.02)
             if loaded:
                 break
-        assert (WorkerType.audio, "whisper-large-v3") in loaded
+        assert (Modality.audio, "whisper-large-v3") in loaded
     finally:
         await runner.stop()

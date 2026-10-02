@@ -7,11 +7,15 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
-class WorkerType(StrEnum):
-    """Types of GPU workers."""
+class Modality(StrEnum):
+    """The kind of job: it picks the endpoint and the task shape (ADR-003).
+
+    Not the engine adapter that runs it, and not the recipe: a recipe serves
+    one or more modalities.
+    """
 
     llm = "llm"
     text2image = "text2image"
@@ -87,7 +91,7 @@ class ImageEditTask(BaseModel):
 class JobRequest(BaseModel):
     """Request to submit a new job.
 
-    Task format depends on worker type:
+    Task format depends on the modality:
     - llm: tasks are LLMTask dicts
     - text2image: tasks are Text2ImageTask dicts
     - image_edit: tasks are ImageEditTask dicts
@@ -97,13 +101,13 @@ class JobRequest(BaseModel):
       ref_view_strategy?, glb?, conf_percentile?, max_points?}
     """
 
-    worker: WorkerType
+    # `worker` is the name before ADR-003, still accepted on input so existing
+    # clients keep working; responses and logs say `modality`.
+    modality: Modality = Field(validation_alias=AliasChoices("modality", "worker"))
     model: str
     model_path: str | None = None  # Override default model path
     params: dict[str, Any] | None = None  # Worker-level params
-    tasks: list[dict[str, Any]] = Field(
-        default_factory=list
-    )  # Task dicts (validated per worker type)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)  # Task dicts (validated per modality)
     chat_request: dict[str, Any] | None = (
         None  # Raw OpenAI chat completion body (bypasses run_batch)
     )
@@ -229,7 +233,7 @@ class JobStatusResponse(BaseModel):
 
     job_id: str
     status: JobStatus
-    worker: WorkerType
+    modality: Modality
     model: str
     results: list[dict[str, Any]] | None = None  # Polymorphic results
     duration_ms: int | None = None
@@ -255,7 +259,7 @@ class ServiceStatus(BaseModel):
 
     # Active worker info. The scalars report one loaded worker for
     # back-compat; `active` lists every card's slot with its binding.
-    active_worker: WorkerType | None = None
+    active_worker: Modality | None = None
     active_model: str | None = None
     active: list[dict[str, Any]] = []
 
@@ -390,5 +394,5 @@ class WorkerCapability(BaseModel):
 class Capabilities(BaseModel):
     """Full service capabilities."""
 
-    workers: dict[WorkerType, WorkerCapability]
+    workers: dict[Modality, WorkerCapability]
     constraints: dict[str, Any]

@@ -147,7 +147,7 @@ class SubprocessWorker:
 
     child_module: ClassVar[str] = ""
     # Registry worker type, for resolving which card this model is bound to.
-    worker_type: ClassVar[str] = ""
+    modality: ClassVar[str] = ""
     # Per-class override for run_batch's IPC wait (diarization of a long
     # recording can exceed the 600s default).
     run_batch_timeout: ClassVar[float] = RUN_BATCH_TIMEOUT_SECONDS
@@ -179,7 +179,7 @@ class SubprocessWorker:
         if device is None:
             from giq.vram import device_for_model
 
-            worker = getattr(self, "worker_type", "") or ""
+            worker = getattr(self, "modality", "") or ""
             device = device_for_model(worker, getattr(self.config, "model", ""))
         return device_env(device)
 

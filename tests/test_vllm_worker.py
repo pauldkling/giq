@@ -12,7 +12,7 @@ import signal
 import httpx
 import pytest
 
-from giq.models import WorkerType
+from giq.models import Modality
 from giq.queue import JobQueue, JobStream
 from giq.recipes.schema import Recipe
 from giq.workers import vllm
@@ -315,17 +315,17 @@ def test_runner_builds_a_vllm_worker_for_engine_vllm(operator_dir, tmp_path, mon
     )
     reload_registry()
     runner = Runner(JobQueue())
-    monkeypatch.setattr(runner, "_device_for", lambda worker_type, model: "GPU-test")
+    monkeypatch.setattr(runner, "_device_for", lambda modality, model: "GPU-test")
 
-    worker = runner._build_worker(WorkerType.llm, "served")
+    worker = runner._build_worker(Modality.llm, "served")
     assert isinstance(worker, VLLMWorker) and isinstance(worker, ServedLLM)
     assert worker.config.device == "GPU-test"
-    assert _lane_width(WorkerType.llm, "served", worker) == 32
+    assert _lane_width(Modality.llm, "served", worker) == 32
     assert engine_for("served") == "vllm" and context_size("served") == 65536
 
-    llama = runner._build_worker(WorkerType.llm, "qwen3.8-27b")
+    llama = runner._build_worker(Modality.llm, "qwen3.8-27b")
     assert isinstance(llama, LLMWorker) and isinstance(llama, ServedLLM)
-    assert _lane_width(WorkerType.llm, "qwen3.8-27b", llama) == 4, "llama.cpp lanes unchanged"
+    assert _lane_width(Modality.llm, "qwen3.8-27b", llama) == 4, "llama.cpp lanes unchanged"
     assert engine_for("qwen3.8-27b") == "llama.cpp"
 
 
@@ -333,7 +333,7 @@ def test_lanes_follow_max_num_seqs(tmp_path):
     from giq.runner import _lane_width
 
     worker = worker_for(make_recipe(make_checkpoint(tmp_path), "interactive"))
-    assert _lane_width(WorkerType.llm, NAME, worker) == 4
+    assert _lane_width(Modality.llm, NAME, worker) == 4
     c = worker.concurrency()
     assert (c.max_parallel, c.per_request_context, c.shared_kv) == (4, 131072, True)
 
@@ -344,8 +344,8 @@ def test_http_timeout_lets_the_job_timeout_fire_first(tmp_path):
     from giq.runner import _job_timeout
 
     worker = worker_for(make_recipe(make_checkpoint(tmp_path)))
-    job = Job(job_id="j", request=JobRequest(worker="llm", model=NAME, chat_request={}))
-    assert _job_timeout(WorkerType.llm, job) < worker.http_timeout().read
+    job = Job(job_id="j", request=JobRequest(modality="llm", model=NAME, chat_request={}))
+    assert _job_timeout(Modality.llm, job) < worker.http_timeout().read
 
 
 # --- serving: recorded vllm chunks ------------------------------------------------------

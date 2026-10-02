@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from giq.models import JobRequest, WorkerType
+from giq.models import JobRequest, Modality
 from giq.queue import Job
 from giq.runner import _log_inflight, _request_shape
 
@@ -34,7 +34,7 @@ def chat_job(**chat) -> Job:
     body.update(chat)
     return Job(
         job_id="j1",
-        request=JobRequest(worker=WorkerType.llm, model="qwen3.8-27b", chat_request=body),
+        request=JobRequest(modality=Modality.llm, model="qwen3.8-27b", chat_request=body),
     )
 
 
@@ -42,7 +42,7 @@ def task_job() -> Job:
     return Job(
         job_id="j2",
         request=JobRequest(
-            worker=WorkerType.llm,
+            modality=Modality.llm,
             model="qwen3.8-27b",
             tasks=[{"id": "t0", "system": f"system {CANARY}", "user": f"user {CANARY}"}],
             params={"max_tokens": 512, "temperature": 0.7},
@@ -268,7 +268,7 @@ def test_an_ocr_document_is_counted_not_stored(written):
     job = Job(
         job_id="j-ocr",
         request=JobRequest(
-            worker=WorkerType.ocr,
+            modality=Modality.ocr,
             model="unlimited-ocr",
             tasks=[
                 {"id": "t0", "pdf_b64": CANARY, "dpi": 200},

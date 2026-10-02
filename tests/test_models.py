@@ -18,24 +18,24 @@ from giq.models import (
     JobStatusResponse,
     LLMResult,
     LLMTask,
+    Modality,
     ServiceState,
     ServiceStatus,
     Task,
     Text2ImageTask,
     WorkerCapability,
-    WorkerType,
 )
 
 
 def test_worker_type_values():
-    """Test WorkerType enum values."""
-    assert WorkerType.llm == "llm"
-    assert WorkerType.text2image == "text2image"
-    assert WorkerType.image_edit == "image_edit"
-    assert WorkerType.tts == "tts"
-    assert WorkerType.stt == "stt"
-    assert WorkerType.depth == "depth"
-    assert WorkerType.multiview == "multiview"
+    """Test Modality enum values."""
+    assert Modality.llm == "llm"
+    assert Modality.text2image == "text2image"
+    assert Modality.image_edit == "image_edit"
+    assert Modality.tts == "tts"
+    assert Modality.stt == "stt"
+    assert Modality.depth == "depth"
+    assert Modality.multiview == "multiview"
 
 
 def test_job_status_values():
@@ -99,11 +99,11 @@ def test_image_edit_task():
 def test_job_request():
     """Test JobRequest model with dict tasks."""
     request = JobRequest(
-        worker=WorkerType.llm,
+        modality=Modality.llm,
         model="gemma-3-27b",
         tasks=[{"id": "t1", "user": "Hello"}],
     )
-    assert request.worker == WorkerType.llm
+    assert request.modality == Modality.llm
     assert request.model == "gemma-3-27b"
     assert len(request.tasks) == 1
 
@@ -111,7 +111,7 @@ def test_job_request():
 def test_job_request_with_params():
     """Test JobRequest with params."""
     request = JobRequest(
-        worker=WorkerType.text2image,
+        modality=Modality.text2image,
         model="zimage",
         model_path="/path/to/model",
         params={"width": 512, "height": 512},
@@ -125,7 +125,7 @@ def test_job_request_invalid_worker():
     """Test JobRequest with invalid worker type."""
     with pytest.raises(ValidationError):
         JobRequest(
-            worker="invalid",
+            modality="invalid",
             model="test",
             tasks=[{"id": "t1", "user": "Hello"}],
         )
@@ -180,7 +180,7 @@ def test_job_status_response():
     response = JobStatusResponse(
         job_id="abc123",
         status=JobStatus.completed,
-        worker=WorkerType.llm,
+        modality=Modality.llm,
         model="gemma-3-27b",
         results=[{"id": "t1", "output": "Hello", "tokens": 5, "error": None}],
         duration_ms=1500,
@@ -194,7 +194,7 @@ def test_service_status():
     """Test ServiceStatus model."""
     status = ServiceStatus(
         state=ServiceState.idle,
-        active_worker=WorkerType.llm,
+        active_worker=Modality.llm,
         active_model="gemma-3-27b",
         vram_used_gb=18.5,
         vram_total_gb=32.0,
@@ -203,7 +203,7 @@ def test_service_status():
         queue_depth=3,
         jobs_pending=["job1", "job2", "job3"],
     )
-    assert status.active_worker == WorkerType.llm
+    assert status.active_worker == Modality.llm
     assert status.vram_used_gb == 18.5
     assert len(status.jobs_pending) == 3
 
@@ -235,12 +235,22 @@ def test_capabilities():
     """Test Capabilities model."""
     caps = Capabilities(
         workers={
-            WorkerType.llm: WorkerCapability(
+            Modality.llm: WorkerCapability(
                 backend="llama.cpp",
                 models=["gemma-3-27b"],
             ),
         },
         constraints={"max_concurrent_heavy": 1},
     )
-    assert WorkerType.llm in caps.workers
+    assert Modality.llm in caps.workers
     assert caps.constraints["max_concurrent_heavy"] == 1
+
+
+def test_job_request_takes_the_old_worker_field():
+    """ADR-003 renamed `worker` to `modality`; clients that still send the old
+    field keep working for a release, and everything giq says back is in the
+    new term."""
+    old = JobRequest(**{"worker": "llm", "model": "m", "chat_request": {}})
+    new = JobRequest(**{"modality": "llm", "model": "m", "chat_request": {}})
+    assert old.modality == new.modality == Modality.llm
+    assert "worker" not in old.model_dump()

@@ -337,7 +337,7 @@ export interface ModelPolicyResponse {
 // --- jobs ------------------------------------------------------------------------
 
 export interface JobRequest {
-  worker: WorkerType;
+  modality: WorkerType;
   model: string;
   params?: Record<string, unknown>;
   tasks: Record<string, unknown>[];
@@ -353,7 +353,7 @@ export interface JobSubmitted {
 export interface JobStatusResponse {
   job_id: string;
   status: JobStatus;
-  worker: WorkerType;
+  modality: WorkerType;
   model: string;
   results: Record<string, unknown>[] | null;
   duration_ms: number | null;

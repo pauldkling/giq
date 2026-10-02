@@ -48,7 +48,7 @@ class AudioWorker(SubprocessWorker):
     """Transcription + diarization (faster-whisper + pyannote)."""
 
     child_module: ClassVar[str] = "giq.workers._audio_child"
-    worker_type: ClassVar[str] = "audio"
+    modality: ClassVar[str] = "audio"
     # Diarizing an hours-long recording takes minutes; allow close to a 900s
     # client batch budget rather than the 600s subprocess default.
     run_batch_timeout: ClassVar[float] = 860.0
@@ -87,7 +87,7 @@ class EmbedWorker(SubprocessWorker):
     """Speaker voiceprints (speechbrain ECAPA-TDNN), stateless clip → vector."""
 
     child_module: ClassVar[str] = "giq.workers._embed_child"
-    worker_type: ClassVar[str] = "embed"
+    modality: ClassVar[str] = "embed"
 
     def __init__(self, config: EmbedWorkerConfig, device: str | None = None):
         super().__init__(config, device)

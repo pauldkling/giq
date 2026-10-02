@@ -34,7 +34,7 @@ from pydantic import (
 )
 
 from giq.engines import ENGINE_ALIASES, ENGINE_OF_BACKEND, canonical_engine
-from giq.models import WorkerType
+from giq.models import Modality
 
 # Names are what clients send and what log lines, file names and the
 # /control routes carry, so they stay path- and flag-safe: no slash, no
@@ -405,10 +405,10 @@ class Recipe(_Strict):
     @classmethod
     def _known_worker(cls, v: str) -> str:
         try:
-            return WorkerType(v).value
+            return Modality(v).value
         except ValueError:
             raise ValueError(
-                f"unknown worker {v!r} (known: {', '.join(w.value for w in WorkerType)})"
+                f"unknown worker {v!r} (known: {', '.join(w.value for w in Modality)})"
             ) from None
 
     @field_validator("engine")

@@ -115,7 +115,7 @@ curl http://localhost:8084/v1/chat/completions \
 # The job API: any worker, a batch of tasks; ?wait=true returns the result
 curl -X POST 'http://localhost:8084/run?wait=true' \
   -H 'content-type: application/json' \
-  -d '{"worker": "text2image", "model": "flux_klein",
+  -d '{"modality": "text2image", "model": "flux_klein",
        "tasks": [{"id": "1", "prompt": "A sunset over mountains"}]}'
 ```
 

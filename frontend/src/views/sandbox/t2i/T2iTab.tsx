@@ -33,7 +33,7 @@ export function T2iTab({ options, model, onModel }: T2iTabProps) {
     const task: Record<string, unknown> = { id: "sbx-t2i", prompt };
     if (negative) task.negative_prompt = negative;
     if (seed !== "") task.seed = Number(seed);
-    void runner.run((signal) => runImageJob({ worker: "text2image", model, tasks: [task] }, signal));
+    void runner.run((signal) => runImageJob({ modality: "text2image", model, tasks: [task] }, signal));
   };
 
   const res = runner.result;

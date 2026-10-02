@@ -34,7 +34,7 @@ export function useJobDetails(ids: readonly string[]): JobLookup {
       if (asked.current.has(id)) continue;
       asked.current.add(id);
       getJSON<JobStatusResponse>(`/jobs/${encodeURIComponent(id)}`)
-        .then((j) => setKnown((k) => ({ ...k, [id]: { worker: j.worker, model: j.model } })))
+        .then((j) => setKnown((k) => ({ ...k, [id]: { worker: j.modality, model: j.model } })))
         .catch((err: unknown) => {
           if (err instanceof ApiError && err.status === 404) setKnown((k) => ({ ...k, [id]: null }));
           else asked.current.delete(id); // a network blip: ask again when the queue next changes

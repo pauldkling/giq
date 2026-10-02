@@ -66,7 +66,7 @@ class TTSWorker(SubprocessWorker):
     """TTS worker — Kokoro runs in a child process for CUDA isolation."""
 
     child_module: ClassVar[str] = "giq.workers._tts_child"
-    worker_type: ClassVar[str] = "tts"
+    modality: ClassVar[str] = "tts"
 
     def __init__(self, config: TTSWorkerConfig, device: str | None = None):
         super().__init__(config, device)

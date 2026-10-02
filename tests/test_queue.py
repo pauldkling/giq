@@ -6,7 +6,7 @@
 
 import pytest
 
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import Job, JobQueue
 
 
@@ -16,12 +16,12 @@ def queue():
     return JobQueue()
 
 
-def make_job(job_id: str, worker: WorkerType = WorkerType.llm) -> Job:
+def make_job(job_id: str, worker: Modality = Modality.llm) -> Job:
     """Helper to create a test job."""
     return Job(
         job_id=job_id,
         request=JobRequest(
-            worker=worker,
+            modality=worker,
             model="test-model",
             tasks=[{"id": "t1", "user": "test"}],
         ),

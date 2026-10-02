@@ -14,12 +14,15 @@ it. Access rules (Host/Origin checks, the optional token) are described in
 
 ## Submit a job
 
+`modality` names the kind of job (ADR-003); `worker`, its name before, is
+still accepted for one release.
+
 ```bash
 # LLM inference
 curl -X POST http://localhost:8084/run \
   -H "Content-Type: application/json" \
   -d '{
-    "worker": "llm",
+    "modality": "llm",
     "model": "gemma-3-27b-it-qat",
     "tasks": [{"id": "1", "messages": [{"role": "user", "content": "Hello!"}]}]
   }'
@@ -28,7 +31,7 @@ curl -X POST http://localhost:8084/run \
 curl -X POST http://localhost:8084/run \
   -H "Content-Type: application/json" \
   -d '{
-    "worker": "text2image",
+    "modality": "text2image",
     "model": "zimage",
     "tasks": [{"id": "1", "prompt": "A sunset over mountains"}]
   }'
@@ -218,7 +221,7 @@ curl -s -F file=@statement.pdf 'http://localhost:8084/ocr?response_format=html'
 
 # the generic form, for a consumer that already speaks /run
 curl -X POST http://localhost:8084/run -H 'content-type: application/json' \
-  -d '{"worker":"ocr","model":"unlimited-ocr",
+  -d '{"modality":"ocr","model":"unlimited-ocr",
        "tasks":[{"id":"1","pdf_b64":"...","dpi":200}]}'
 ```
 
@@ -261,7 +264,7 @@ curl -s -F file=@photo.jpg 'http://localhost:8084/depth?response_format=png' > d
 curl -s -F file=@photo.jpg 'http://localhost:8084/depth?response_format=visualization' > depth.png
 # or through the job API, several images per job:
 curl -s -X POST localhost:8084/run?wait=true -H 'Content-Type: application/json' \
-  -d '{"worker":"depth","model":"depth-anything-v2-small",
+  -d '{"modality":"depth","model":"depth-anything-v2-small",
        "tasks":[{"id":"1","image_b64":"...","visualize":true}]}'
 ```
 
@@ -306,7 +309,7 @@ curl -s -F files=@v1.jpg -F files=@v2.jpg -F files=@v3.jpg \
 curl -s -F files=@v1.jpg -F files=@v2.jpg 'http://localhost:8084/multiview?response_format=glb' > scene.glb
 # or through the job API, which also takes known poses:
 curl -s -X POST localhost:8084/run?wait=true -H 'Content-Type: application/json' \
-  -d '{"worker":"multiview","model":"da3-base",
+  -d '{"modality":"multiview","model":"da3-base",
        "tasks":[{"id":"1","images_b64":["..."],"glb":true}]}'
 ```
 

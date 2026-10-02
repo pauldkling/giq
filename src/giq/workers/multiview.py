@@ -55,7 +55,7 @@ class MultiviewWorker(SubprocessWorker):
     """Depth Anything 3 in a child process on the ``da3`` interpreter."""
 
     child_module: ClassVar[str] = "giq.workers._multiview_child"
-    worker_type: ClassVar[str] = "multiview"
+    modality: ClassVar[str] = "multiview"
 
     def __init__(self, config: MultiviewWorkerConfig, device: str | None = None):
         super().__init__(config, device)

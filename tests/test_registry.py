@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from giq.models import WorkerType
+from giq.models import Modality
 from giq.registry import (
     DEFAULT_LANE_WIDTH,
     ModelSpec,
@@ -42,7 +42,7 @@ def test_every_spec_is_uniquely_keyed():
 def test_worker_names_are_real_worker_types():
     """A typo'd worker name would silently create an unreachable entry."""
     for spec in all_specs():
-        WorkerType(spec.worker)  # raises on an unknown worker
+        Modality(spec.worker)  # raises on an unknown worker
 
 
 def test_vram_lookup_goes_through_the_registry():

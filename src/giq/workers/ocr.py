@@ -69,7 +69,7 @@ class OCRWorker(SubprocessWorker):
     """An OCR model in a child process; documents assembled in the parent."""
 
     child_module: ClassVar[str] = "giq.workers._ocr_child"  # per engine; see CHILD_OF_ENGINE
-    worker_type: ClassVar[str] = "ocr"
+    modality: ClassVar[str] = "ocr"
     # A long document is several passes of a few minutes each.
     run_batch_timeout: ClassVar[float] = 3600.0
 

@@ -19,7 +19,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from giq.main import app
-from giq.models import JobRequest, JobStatus, WorkerType
+from giq.models import JobRequest, JobStatus, Modality
 from giq.queue import Job, JobQueue, JobStream
 from giq.runner import Runner
 
@@ -52,7 +52,7 @@ class FakeOrch:
 def _job() -> Job:
     return Job(
         job_id="j1",
-        request=JobRequest(worker=WorkerType.llm, model="qwen3.8-27b", chat_request={}),
+        request=JobRequest(modality=Modality.llm, model="qwen3.8-27b", chat_request={}),
     )
 
 
@@ -377,7 +377,7 @@ def responds(monkeypatch):
     async def wait(self, job_id, timeout=None):
         job = Job(
             job_id=job_id,
-            request=JobRequest(worker=WorkerType.llm, model="m", chat_request={}),
+            request=JobRequest(modality=Modality.llm, model="m", chat_request={}),
         )
         job.status = JobStatus.completed
         job.results = [
