@@ -270,6 +270,35 @@ class Speculative(_Strict):
     tokens: int = Field(ge=1, le=8)
 
 
+class StructuredOutputs(_Strict):
+    """How constrained decoding builds the grammar for a json_schema request.
+
+    The default matters: vllm's own default (`backend: auto`,
+    `disable_any_whitespace: false`) lets the grammar emit arbitrary whitespace
+    between every JSON token, and on a large or deep schema the model walks into
+    an unbounded run of newlines and spaces that never closes the object — the
+    reply fills to `max_tokens` as 90%-whitespace invalid JSON. Pinning an
+    explicit grammar backend and forbidding the free whitespace makes the same
+    schema converge. giq therefore defaults a vllm instance to the convergent
+    setting rather than vllm's; a recipe can still ask for the permissive one.
+    """
+
+    # auto lets vllm choose; disable_any_whitespace below is only honoured by
+    # the two grammar backends, so the default names one.
+    backend: Literal["auto", "xgrammar", "guidance"] = "xgrammar"
+    disable_any_whitespace: bool = True
+
+    @model_validator(mode="after")
+    def _whitespace_needs_a_grammar_backend(self) -> StructuredOutputs:
+        # vllm itself rejects the pair, minutes into a start; catch it when the
+        # recipe loads instead.
+        if self.disable_any_whitespace and self.backend == "auto":
+            raise ValueError(
+                "disable_any_whitespace needs backend 'xgrammar' or 'guidance', not 'auto'"
+            )
+        return self
+
+
 class VllmParams(EngineParams):
     """`vllm serve` launch parameters. See docs/engines.md for each."""
 
@@ -289,6 +318,10 @@ class VllmParams(EngineParams):
     enforce_eager: bool = False
     reasoning_parser: Ident | None = None
     tool_call_parser: Ident | None = None
+    # Constrained decoding for json_schema / structured_outputs requests. The
+    # default (xgrammar, no free whitespace) keeps a large schema from
+    # diverging into a whitespace run; see StructuredOutputs.
+    structured_outputs: StructuredOutputs = Field(default_factory=StructuredOutputs)
     # RAM ceiling on the engine process (systemd MemoryMax); null = none.
     # FlashInfer's first-use kernel builds run two jobs at up to ~15 GB each
     # (workers/vllm.py DEFAULT_MEMORY_MAX).

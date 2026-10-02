@@ -11,6 +11,7 @@ import signal
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from giq.adapters import vllm
 from giq.adapters.engine import ServedLLM, StartError
@@ -154,9 +155,50 @@ def test_command_from_the_throughput_profile(tmp_path):
     assert argv_value(cmd, "--reasoning-parser") == "qwen3"
     assert argv_value(cmd, "--tool-call-parser") == "qwen3_coder"
     assert "--enable-auto-tool-choice" in cmd
+    assert json.loads(argv_value(cmd, "--structured-outputs-config")) == {
+        "backend": "xgrammar",
+        "disable_any_whitespace": True,
+    }, "a vllm instance forbids free whitespace by default so a large schema converges"
     for absent in ("--speculative-config", "--enforce-eager", "--max-num-batched-tokens"):
         assert absent not in cmd
     assert "--language-model-only" not in cmd, "vision stays on by default"
+
+
+def test_a_recipe_can_restore_vllm_default_structured_output(tmp_path):
+    """The convergent setting is giq's default, not a lock-in: a recipe that
+    wants vllm's own permissive grammar (any backend, free whitespace) says so,
+    and the adapter spells exactly that onto the command line."""
+    recipe = Recipe.model_validate(
+        doc(
+            make_checkpoint(tmp_path),
+            "throughput",
+            vram={"gb": 29.5},
+            kv_cache_memory=None,
+            gpu_memory_utilization=0.93,
+            structured_outputs={"backend": "auto", "disable_any_whitespace": False},
+        )
+    )
+    cmd = worker_for(recipe).build_command(card_total_gb=31.84)
+    assert json.loads(argv_value(cmd, "--structured-outputs-config")) == {
+        "backend": "auto",
+        "disable_any_whitespace": False,
+    }
+
+
+def test_disable_any_whitespace_needs_a_grammar_backend(tmp_path):
+    """vllm rejects disable_any_whitespace with the auto backend minutes into a
+    start; the recipe refuses to load the pair instead."""
+    with pytest.raises(ValidationError):
+        Recipe.model_validate(
+            doc(
+                make_checkpoint(tmp_path),
+                "throughput",
+                vram={"gb": 29.5},
+                kv_cache_memory=None,
+                gpu_memory_utilization=0.93,
+                structured_outputs={"backend": "auto", "disable_any_whitespace": True},
+            )
+        )
 
 
 def test_a_kv_budget_sizes_the_start_check_to_the_model(tmp_path):
