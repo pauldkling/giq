@@ -3,20 +3,32 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Qwen3.8-27B as NVIDIA quantised it (ModelOpt NVFP4 weights, some layers
-# FP8), served by vllm for many users at once. The same model as
-# llm/qwen3.8-27b under llama.cpp; this one is the throughput recipe.
-# Measured on an RTX 5090 at 256 generated tokens per request: 72 tok/s for
-# one request, 937 tok/s in total at 16 parallel, where one llama-server
-# slot gives 56 tok/s at any load.
+# FP8), served by vllm for many requests at once: the batch recipe. The same
+# model as qwen3.8-27b under llama.cpp.
 #
-# Not resident by default: vllm takes minutes to start (192 s cold, 82 s
-# warm), so an operator who wants it pins it rather than paying a cold start
-# on some user's first request.
+# Measured on an RTX 5090 on batch extraction — a ~3.1k-token document in,
+# ~490 tokens of schema-constrained JSON out, thinking off: 71 documents a
+# minute, ~3,650 input and ~580 output tokens/s. 16 requests at once already
+# saturate the card; 32 and 64 measured the same 65-71 a minute and only
+# lengthened the queue (slowest 5%: 27 s at 16, ~140 s at 64). A larger
+# max_num_batched_tokens bought nothing, and at 16k the step's activations
+# ran the card out of memory under load: with a KV size in bytes vllm skips
+# its memory profiling, so overhead_gb has to cover the step's peak.
+# Speculation costs throughput here (MTP-1 -30%, MTP-2 -7% at 16 parallel);
+# the interactive sibling has it.
+#
+# The cards' power limit barely matters to it: 72 documents a minute at
+# 575 W, 67 at 400 W — 13% more documents per kWh for 7% fewer per minute.
+#
+# Not resident by default: vllm takes minutes to start, so an operator who
+# wants it pins it rather than paying a cold start on some user's first
+# request. A first start after a vllm upgrade compiles FlashInfer kernels
+# for ~14 minutes, past ready_timeout: run `giq prepare vllm --recipe` first.
 name: qwen3.8-27b-nvfp4
 modalities: [llm]
 engine: vllm
 label: Qwen3.8 27B NVFP4
-detail: "chat + vision · vllm · up to 32 in parallel · 128k ctx"
+detail: "chat + vision · vllm · batch · 16 in parallel · 128k ctx"
 weights:
   path: nvidia-Qwen3.8-27B-NVFP4
   source: hf:nvidia/Qwen3.8-27B-NVFP4
@@ -24,13 +36,15 @@ weights:
   format: modelopt
   licence: apache-2.0
 capabilities: [chat, vision]
-# No speculation, up to 32 requests over one paged KV pool, fp8 KV.
+# No speculation, fp8 KV; 16 requests rather than the profile's 32, the
+# measured saturation point on a 5090.
 profile: throughput
 params:
+  max_num_seqs: 16
   # The budget is a KV size, not a fraction of the card, so it means the same
   # on a 32 GB RTX 5090 and a 96 GB RTX PRO 6000. 6 GiB of fp8 KV holds
   # about 180k tokens (36 KiB per token): one full 128k request and change,
-  # or 32 requests averaging 5.6k — and keeps the whole recipe loadable on
+  # or 16 requests averaging 11k — and keeps the whole recipe loadable on
   # a 32 GB card through giq's gate with its 2 GB margin. On a bigger card,
   # replace this file in the recipes directory with a larger budget (and a
   # vram figure to match) rather than a fraction.

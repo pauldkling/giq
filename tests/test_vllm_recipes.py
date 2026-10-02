@@ -170,8 +170,9 @@ def test_the_builtin_instances():
     builtin = {recipe.name: recipe for recipe, _ in recipes.builtin().values()}
     throughput, chat = builtin[NAME], builtin[f"{NAME}-chat"]
     assert throughput.engine == chat.engine == "vllm"
-    assert throughput.params.speculative is None and throughput.params.max_num_seqs == 32
-    assert chat.params.speculative is not None and chat.params.max_num_seqs == 4
+    assert throughput.params.speculative is None and throughput.params.max_num_seqs == 16
+    assert chat.params.speculative is not None and chat.params.speculative.tokens == 3
+    assert chat.params.max_num_seqs == 4
     for recipe in (throughput, chat):
         assert recipe.residency.priority is None, "vllm starts take minutes: the operator pins"
         assert recipe.params.kv_cache_memory_bytes is not None, "a KV size, not a card fraction"
@@ -184,7 +185,7 @@ def test_the_catalog_lists_them_with_derived_lanes():
 
     recipe = get_recipe(NAME)
     assert recipe is not None and recipe.engine == "vllm"
-    assert recipe.lanes == 32, "max_num_seqs, not the llm default of 4"
+    assert recipe.lanes == 16, "max_num_seqs, not the llm default of 4"
     assert get_recipe(f"{NAME}-chat").lanes == 4
     assert engine_for(NAME) == "vllm" and engine_for("qwen3.8-27b") == "llama.cpp"
     assert context_size(NAME) == 131072

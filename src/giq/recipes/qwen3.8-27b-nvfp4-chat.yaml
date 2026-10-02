@@ -2,22 +2,29 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# The same NVFP4 checkpoint as llm/qwen3.8-27b-nvfp4, tuned for one person
-# waiting on an answer rather than for many at once. Speculative decoding
-# drafts with the checkpoint's own multi-token-prediction head: measured on
-# an RTX 5090, three draft tokens took one request from 72 to 117 tok/s but
-# the total at 16 parallel requests from 937 down to 750, accepting 0.66,
-# 0.37 and 0.17 by draft position. The interactive profile drafts two and
-# schedules at most four requests.
+# The same NVFP4 checkpoint as qwen3.8-27b-nvfp4, tuned for one request
+# finishing as fast as possible rather than for many at once. Speculative
+# decoding drafts with the checkpoint's own multi-token-prediction head.
 #
-# Two recipes over one checkpoint share the card: asking for one evicts
-# the other through the ordinary swap. Not resident by default, like its
-# sibling.
+# Measured on an RTX 5090 on single-session extraction — a ~3.1k-token
+# document in, ~500 tokens of schema-constrained JSON out: 69 tok/s without
+# speculation, 108 with one draft token, 138 with two, 162 with three
+# (3.1 s a document). llama.cpp over the Q6_K GGUF of the same model, a file
+# of the same size, measured 52 / 72 / 82 / 89 under the same load; the gap
+# is the engine. JSON drafts well; free-form chat accepted 0.66, 0.37 and
+# 0.17 by draft position on the same card, so for chat the third draft
+# buys little, and the interactive profile keeps two. The power limit made
+# no difference: one request drew ~410 W at any limit from 400 to 575 W.
+#
+# Under load speculation costs throughput (MTP-2 -7% at 16 parallel), which
+# is why batch work goes to the sibling. Two recipes over one checkpoint
+# share the card: asking for one evicts the other through the ordinary
+# swap. Not resident by default, like its sibling.
 name: qwen3.8-27b-nvfp4-chat
 modalities: [llm]
 engine: vllm
 label: Qwen3.8 27B NVFP4 (interactive)
-detail: "chat + vision · vllm · MTP · up to 4 in parallel · 128k ctx"
+detail: "chat + vision · vllm · MTP · fastest single request · 128k ctx"
 weights:
   path: nvidia-Qwen3.8-27B-NVFP4
   source: hf:nvidia/Qwen3.8-27B-NVFP4
@@ -25,13 +32,15 @@ weights:
   format: modelopt
   licence: apache-2.0
 capabilities: [chat, vision]
-# MTP with 2 draft tokens, up to 4 requests, an 8192-token scheduling budget.
+# Up to 4 requests and an 8192-token scheduling budget from the interactive
+# profile; three draft tokens rather than its two (see above).
 profile: interactive
 params:
-  # A gigabyte less KV than the throughput recipe: the MTP head's weights
-  # and its own KV come out of the same card. 5 GiB is ~150k tokens, more
-  # than four requests at a time need.
-  kv_cache_memory: 5G
+  speculative: {method: mtp, tokens: 3}
+  # Half a gigabyte less KV than the batch recipe: the MTP head's weights
+  # come out of the same card. Three drafts need 5.03 GiB to hold one full
+  # 128k request, so 5 GiB refuses to start; 5.5 is ~160k tokens.
+  kv_cache_memory: 5632M
   max_model_len: 131072
   kv_cache_dtype: fp8
   reasoning_parser: qwen3

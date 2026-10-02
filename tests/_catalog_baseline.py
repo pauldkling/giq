@@ -238,10 +238,10 @@ BUILTIN_SPECS = [
     {
         "aliases": (),
         "backend": "vllm",
-        "detail": "chat + vision · vllm · up to 32 in parallel · 128k ctx",
+        "detail": "chat + vision · vllm · batch · 16 in parallel · 128k ctx",
         "engine": None,
         "label": "Qwen3.8 27B NVFP4",
-        "lane_width": 32,
+        "lane_width": 16,
         "max_batch": 32,
         "measured": False,
         "mmproj": None,
@@ -255,7 +255,7 @@ BUILTIN_SPECS = [
     {
         "aliases": (),
         "backend": "vllm",
-        "detail": "chat + vision · vllm · MTP · up to 4 in parallel · 128k ctx",
+        "detail": "chat + vision · vllm · MTP · fastest single request · 128k ctx",
         "engine": None,
         "label": "Qwen3.8 27B NVFP4 (interactive)",
         "lane_width": 4,
@@ -266,7 +266,7 @@ BUILTIN_SPECS = [
         "resident_priority": None,
         "vision": True,
         "voices": (),
-        "vram_gb": 29.23,
+        "vram_gb": 29.73,
         "worker": "llm",
     },
     {

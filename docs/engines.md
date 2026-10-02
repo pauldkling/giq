@@ -71,6 +71,37 @@ NVIDIA's NVFP4 checkpoint of Qwen3.8-27B, 256 generated tokens per request:
 | 4 | 242 tok/s in total | 56 tok/s in total, first token 9.5 s (median) |
 | 16 | 937 tok/s in total, first token 0.2 s | 56 tok/s in total, first token 37 s (median) |
 
+On batch extraction — a ~3.1k-token document in, ~490 tokens of
+schema-constrained JSON out, thinking off — the work is mostly reading, and
+the card saturates early. Same card, same checkpoint:
+
+| `qwen3.8-27b-nvfp4` | Documents/min | Input tok/s | Output tok/s | Slowest 5% |
+|---|---|---|---|---|
+| 16 parallel, no speculation | 71 | 3,640 | 580 | 27 s |
+| 64 parallel, no speculation | 65–71 | 3,350–3,670 | 530–580 | ~140 s |
+| 16 parallel, MTP 1 draft token | 47 | 2,400 | 380 | 112 s |
+| 16 parallel, MTP 2 draft tokens | 66 | 3,400 | 540 | 70 s |
+
+More than 16 parallel only lengthens the queue, and a larger
+`max_num_batched_tokens` bought nothing (at 16k it ran out of memory under
+load). One request at a time is a different matter — speculation is nearly
+free there, and JSON drafts well:
+
+| Single request, tok/s | none | MTP 1 | MTP 2 | MTP 3 |
+|---|---|---|---|---|
+| vllm, NVFP4 | 69 | 108 | 138 | 162 |
+| llama.cpp, Q6_K (`--spec-type draft-mtp`) | 52 | 72 | 82 | 89 |
+
+The two files are the same size (20.4 GiB), so a single request reads the
+same bytes per token on both; the gap is the engine. Hence two recipes over
+one checkpoint: `qwen3.8-27b-nvfp4` for batch, `qwen3.8-27b-nvfp4-chat`
+(MTP, 3 draft tokens) for the fastest single answer.
+
+The power limit matters to batch only: 72 documents a minute at 575 W
+(481 W drawn), 67 at 400 W (396 W) — 13% more documents per kWh for 7%
+fewer per minute. A single request drew ~410 W and ran at 162 tok/s at
+every limit from 400 to 575 W.
+
 What it costs: a start of minutes rather than seconds (192 s the first time,
 64 s of it CUDA graph capture; 82 s once its compile cache is warm), and
 memory claimed up front. A vllm recipe is meant to be pinned resident, not
@@ -117,7 +148,8 @@ again.
 The GEMMs are the big part, not all of it: a first start still compiles
 FlashInfer's attention and sampling modules for the model's shapes, runs
 torch.compile and captures CUDA graphs — tens of minutes from an empty
-cache, longer than a start may take. `--recipe` does one full start of an
+cache (vllm 0.30 on an RTX 5090: 819 s in its warm-up run alone), longer
+than a start may take. `--recipe` does one full start of an
 instance with an hour to spare and stops it again, so every later start
 finds the caches warm (82 s on an RTX 5090). It uses the card while it runs;
 pause giq first if it is serving:
