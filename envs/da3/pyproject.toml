@@ -21,7 +21,7 @@ dependencies = [
     # same CUDA 13 driver and comparable VRAM figures.
     "torch>=2.11.0,<2.12.0",
     "torchvision>=0.26.0,<0.27.0",
-    # What importing giq.workers.multiview / giq.workers._subprocess pulls in.
+    # What importing giq.adapters.multiview / giq.adapters._subprocess pulls in.
     "pydantic>=2.12",
     "pyyaml>=6.0",
     "httpx>=0.28",
